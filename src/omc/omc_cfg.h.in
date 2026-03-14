@@ -1,0 +1,8 @@
+#ifndef OMC_CFG_H
+#define OMC_CFG_H
+
+#cmakedefine01 OMC_HAVE_U64_ULONG
+#cmakedefine01 OMC_HAVE_U64_ULL
+#cmakedefine01 OMC_HAVE_U64_MSVC_INT64
+
+#endif
