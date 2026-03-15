@@ -76,3 +76,15 @@ omc_key_make_icc_tag(omc_key* key, omc_u32 signature)
     key->kind = OMC_KEY_ICC_TAG;
     key->u.icc_tag.signature = signature;
 }
+
+void
+omc_key_make_photoshop_irb(omc_key* key, omc_u16 resource_id)
+{
+    omc_key_init(key);
+    if (key == NULL) {
+        return;
+    }
+
+    key->kind = OMC_KEY_PHOTOSHOP_IRB;
+    key->u.photoshop_irb.resource_id = resource_id;
+}

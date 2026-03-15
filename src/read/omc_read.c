@@ -20,6 +20,12 @@ omc_read_init_res(omc_read_res* res)
     res->exif.limit_tag = 0U;
     res->icc.status = OMC_ICC_OK;
     res->icc.entries_decoded = 0U;
+    res->iptc.status = OMC_IPTC_OK;
+    res->iptc.entries_decoded = 0U;
+    res->irb.status = OMC_IRB_OK;
+    res->irb.resources_decoded = 0U;
+    res->irb.entries_decoded = 0U;
+    res->irb.iptc_entries_decoded = 0U;
     res->xmp.status = OMC_XMP_OK;
     res->xmp.entries_decoded = 0U;
     res->entries_added = 0U;
@@ -134,6 +140,60 @@ omc_read_merge_icc(omc_icc_res* dst, omc_icc_res src)
 }
 
 static void
+omc_read_merge_iptc(omc_iptc_res* dst, omc_iptc_res src)
+{
+    dst->entries_decoded += src.entries_decoded;
+    if (dst->status == OMC_IPTC_NOMEM || dst->status == OMC_IPTC_LIMIT) {
+        return;
+    }
+    if (src.status == OMC_IPTC_NOMEM || src.status == OMC_IPTC_LIMIT) {
+        dst->status = src.status;
+        return;
+    }
+    if (dst->status == OMC_IPTC_MALFORMED) {
+        return;
+    }
+    if (src.status == OMC_IPTC_MALFORMED) {
+        dst->status = src.status;
+        return;
+    }
+    if (dst->status == OMC_IPTC_UNSUPPORTED) {
+        return;
+    }
+    if (src.status == OMC_IPTC_UNSUPPORTED) {
+        dst->status = src.status;
+    }
+}
+
+static void
+omc_read_merge_irb(omc_irb_res* dst, omc_irb_res src)
+{
+    dst->resources_decoded += src.resources_decoded;
+    dst->entries_decoded += src.entries_decoded;
+    dst->iptc_entries_decoded += src.iptc_entries_decoded;
+    if (dst->status == OMC_IRB_NOMEM || dst->status == OMC_IRB_LIMIT) {
+        return;
+    }
+    if (src.status == OMC_IRB_NOMEM || src.status == OMC_IRB_LIMIT) {
+        dst->status = src.status;
+        return;
+    }
+    if (dst->status == OMC_IRB_MALFORMED) {
+        return;
+    }
+    if (src.status == OMC_IRB_MALFORMED) {
+        dst->status = src.status;
+        return;
+    }
+    if (dst->status == OMC_IRB_UNSUPPORTED) {
+        return;
+    }
+    if (src.status == OMC_IRB_UNSUPPORTED) {
+        dst->status = src.status;
+    }
+}
+
+static void
 omc_read_merge_xmp(omc_xmp_res* dst, omc_xmp_res src)
 {
     dst->entries_decoded += src.entries_decoded;
@@ -179,6 +239,18 @@ omc_read_store_block(omc_store* store, const omc_blk_ref* block,
 }
 
 static int
+omc_read_should_decode_block(const omc_blk_ref* block)
+{
+    if (block == (const omc_blk_ref*)0) {
+        return 0;
+    }
+    if (block->part_count == 0U || block->part_count == 1U) {
+        return 1;
+    }
+    return block->part_index == 0U;
+}
+
+static int
 omc_read_value_bytes(const omc_store* store, const omc_entry* entry,
                      omc_const_bytes* out_view)
 {
@@ -198,6 +270,58 @@ omc_read_value_bytes(const omc_store* store, const omc_entry* entry,
         return out_view->data != (const omc_u8*)0;
     }
     return 0;
+}
+
+static int
+omc_read_block_view(const omc_u8* file_bytes, omc_size file_size,
+                    const omc_blk_ref* blocks, omc_u32 block_count,
+                    omc_u32 block_index, omc_u8* payload, omc_size payload_cap,
+                    omc_u32* payload_scratch_indices,
+                    omc_u32 payload_scratch_cap, const omc_pay_opts* opts,
+                    omc_const_bytes* out_view, omc_pay_res* out_pay)
+{
+    const omc_blk_ref* block;
+
+    if (out_view == (omc_const_bytes*)0 || out_pay == (omc_pay_res*)0) {
+        return 0;
+    }
+
+    out_view->data = (const omc_u8*)0;
+    out_view->size = 0U;
+    out_pay->status = OMC_PAY_OK;
+    out_pay->written = 0U;
+    out_pay->needed = 0U;
+
+    if (file_bytes == (const omc_u8*)0 || blocks == (const omc_blk_ref*)0
+        || block_index >= block_count) {
+        out_pay->status = OMC_PAY_MALFORMED;
+        return 0;
+    }
+
+    block = &blocks[block_index];
+    if (block->compression == OMC_BLK_COMP_NONE
+        && (block->part_count == 0U || block->part_count == 1U)
+        && block->chunking != OMC_BLK_CHUNK_JPEG_APP2_SEQ) {
+        if (block->data_offset > (omc_u64)file_size
+            || block->data_size > ((omc_u64)file_size - block->data_offset)) {
+            out_pay->status = OMC_PAY_MALFORMED;
+            return 0;
+        }
+        out_view->data = file_bytes + (omc_size)block->data_offset;
+        out_view->size = (omc_size)block->data_size;
+        return 1;
+    }
+
+    *out_pay = omc_pay_ext(file_bytes, file_size, blocks, block_count,
+                           block_index, payload, payload_cap,
+                           payload_scratch_indices, payload_scratch_cap, opts);
+    if (out_pay->status != OMC_PAY_OK) {
+        return 0;
+    }
+
+    out_view->data = payload;
+    out_view->size = (omc_size)out_pay->written;
+    return 1;
 }
 
 static int
@@ -251,7 +375,9 @@ omc_read_decode_tiff_embedded(const omc_read_opts* opts, omc_store* store,
             continue;
         }
         if (entry->key.u.exif_tag.tag != 700U
-            && entry->key.u.exif_tag.tag != 34675U) {
+            && entry->key.u.exif_tag.tag != 34675U
+            && entry->key.u.exif_tag.tag != 33723U
+            && entry->key.u.exif_tag.tag != 34377U) {
             continue;
         }
         if (!omc_read_value_bytes(store, entry, &value_bytes)) {
@@ -264,12 +390,26 @@ omc_read_decode_tiff_embedded(const omc_read_opts* opts, omc_store* store,
             xmp_res = omc_xmp_dec(value_bytes.data, value_bytes.size, store,
                                   block_id, OMC_ENTRY_FLAG_NONE, &opts->xmp);
             omc_read_merge_xmp(&res->xmp, xmp_res);
-        } else {
+        } else if (entry->key.u.exif_tag.tag == 34675U) {
             omc_icc_res icc_res;
 
             icc_res = omc_icc_dec(value_bytes.data, value_bytes.size, store,
                                   block_id, &opts->icc);
             omc_read_merge_icc(&res->icc, icc_res);
+        } else if (entry->key.u.exif_tag.tag == 33723U) {
+            omc_iptc_res iptc_res;
+
+            iptc_res = omc_iptc_dec(value_bytes.data, value_bytes.size, store,
+                                    block_id, OMC_ENTRY_FLAG_NONE,
+                                    &opts->iptc);
+            omc_read_merge_iptc(&res->iptc, iptc_res);
+        } else {
+            omc_irb_res irb_res;
+
+            irb_res = omc_irb_dec(value_bytes.data, value_bytes.size, store,
+                                  block_id, &opts->irb);
+            omc_read_merge_irb(&res->irb, irb_res);
+            res->iptc.entries_decoded += irb_res.iptc_entries_decoded;
         }
     }
 }
@@ -283,6 +423,8 @@ omc_read_opts_init(omc_read_opts* opts)
 
     omc_exif_opts_init(&opts->exif);
     omc_icc_opts_init(&opts->icc);
+    omc_iptc_opts_init(&opts->iptc);
+    omc_irb_opts_init(&opts->irb);
     omc_pay_opts_init(&opts->pay);
     omc_xmp_opts_init(&opts->xmp);
 }
@@ -315,6 +457,8 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
         res.scan.status = OMC_SCAN_MALFORMED;
         res.exif.status = OMC_EXIF_MALFORMED;
         res.icc.status = OMC_ICC_MALFORMED;
+        res.iptc.status = OMC_IPTC_MALFORMED;
+        res.irb.status = OMC_IRB_MALFORMED;
         res.xmp.status = OMC_XMP_MALFORMED;
         return res;
     }
@@ -330,12 +474,20 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
         if (!omc_read_store_block(store, block, &block_id)) {
             res.exif.status = OMC_EXIF_NOMEM;
             res.icc.status = OMC_ICC_NOMEM;
+            res.iptc.status = OMC_IPTC_NOMEM;
+            res.irb.status = OMC_IRB_NOMEM;
             res.xmp.status = OMC_XMP_NOMEM;
             break;
         }
 
+        if (!omc_read_should_decode_block(block)) {
+            continue;
+        }
+
         if (block->kind == OMC_BLK_EXIF) {
             omc_exif_res exif_res;
+            omc_const_bytes block_view;
+            omc_pay_res pay_res;
             omc_size entry_start;
 
             entry_start = store->entry_count;
@@ -350,62 +502,96 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                                   entry_start, &res);
                 }
             } else {
-                omc_pay_res pay_res;
-
-                pay_res = omc_pay_ext(file_bytes, file_size, out_blocks,
-                                      res.scan.written, i, payload, payload_cap,
-                                      payload_scratch_indices,
-                                      payload_scratch_cap, &use_opts->pay);
-                omc_read_merge_pay(&res.pay, pay_res);
-                if (pay_res.status != OMC_PAY_OK) {
+                if (!omc_read_block_view(file_bytes, file_size, out_blocks,
+                                         res.scan.written, i, payload,
+                                         payload_cap, payload_scratch_indices,
+                                         payload_scratch_cap, &use_opts->pay,
+                                         &block_view, &pay_res)) {
+                    omc_read_merge_pay(&res.pay, pay_res);
                     continue;
                 }
 
-                exif_res = omc_exif_dec(payload, (omc_size)pay_res.written,
+                omc_read_merge_pay(&res.pay, pay_res);
+                exif_res = omc_exif_dec(block_view.data, block_view.size,
                                         store, block_id, out_ifds, ifd_cap,
                                         &use_opts->exif);
                 omc_read_merge_exif(&res.exif, exif_res);
             }
         } else if (block->kind == OMC_BLK_XMP) {
+            omc_const_bytes block_view;
+            omc_pay_res pay_res;
             omc_xmp_res xmp_res;
 
-            if (block->data_offset > (omc_u64)file_size
-                || block->data_size > ((omc_u64)file_size - block->data_offset)) {
-                res.xmp.status = OMC_XMP_MALFORMED;
+            if (!omc_read_block_view(file_bytes, file_size, out_blocks,
+                                     res.scan.written, i, payload, payload_cap,
+                                     payload_scratch_indices,
+                                     payload_scratch_cap, &use_opts->pay,
+                                     &block_view, &pay_res)) {
+                omc_read_merge_pay(&res.pay, pay_res);
                 continue;
             }
-            xmp_res = omc_xmp_dec(file_bytes + (omc_size)block->data_offset,
-                                  (omc_size)block->data_size, store, block_id,
-                                  OMC_ENTRY_FLAG_NONE, &use_opts->xmp);
+
+            omc_read_merge_pay(&res.pay, pay_res);
+            xmp_res = omc_xmp_dec(block_view.data, block_view.size, store,
+                                  block_id, OMC_ENTRY_FLAG_NONE,
+                                  &use_opts->xmp);
             omc_read_merge_xmp(&res.xmp, xmp_res);
         } else if (block->kind == OMC_BLK_ICC) {
+            omc_const_bytes block_view;
+            omc_pay_res pay_res;
             omc_icc_res icc_res;
 
-            if (block->chunking == OMC_BLK_CHUNK_JPEG_APP2_SEQ) {
-                omc_pay_res pay_res2;
-
-                pay_res2 = omc_pay_ext(file_bytes, file_size, out_blocks,
-                                       res.scan.written, i, payload,
-                                       payload_cap, payload_scratch_indices,
-                                       payload_scratch_cap, &use_opts->pay);
-                omc_read_merge_pay(&res.pay, pay_res2);
-                if (pay_res2.status != OMC_PAY_OK) {
-                    continue;
-                }
-                icc_res = omc_icc_dec(payload, (omc_size)pay_res2.written,
-                                      store, block_id, &use_opts->icc);
-            } else {
-                if (block->data_offset > (omc_u64)file_size
-                    || block->data_size
-                           > ((omc_u64)file_size - block->data_offset)) {
-                    res.icc.status = OMC_ICC_MALFORMED;
-                    continue;
-                }
-                icc_res = omc_icc_dec(file_bytes + (omc_size)block->data_offset,
-                                      (omc_size)block->data_size, store,
-                                      block_id, &use_opts->icc);
+            if (!omc_read_block_view(file_bytes, file_size, out_blocks,
+                                     res.scan.written, i, payload, payload_cap,
+                                     payload_scratch_indices,
+                                     payload_scratch_cap, &use_opts->pay,
+                                     &block_view, &pay_res)) {
+                omc_read_merge_pay(&res.pay, pay_res);
+                continue;
             }
+
+            omc_read_merge_pay(&res.pay, pay_res);
+            icc_res = omc_icc_dec(block_view.data, block_view.size, store,
+                                  block_id, &use_opts->icc);
             omc_read_merge_icc(&res.icc, icc_res);
+        } else if (block->kind == OMC_BLK_PS_IRB) {
+            omc_const_bytes block_view;
+            omc_pay_res pay_res;
+            omc_irb_res irb_res;
+
+            if (!omc_read_block_view(file_bytes, file_size, out_blocks,
+                                     res.scan.written, i, payload, payload_cap,
+                                     payload_scratch_indices,
+                                     payload_scratch_cap, &use_opts->pay,
+                                     &block_view, &pay_res)) {
+                omc_read_merge_pay(&res.pay, pay_res);
+                continue;
+            }
+
+            omc_read_merge_pay(&res.pay, pay_res);
+            irb_res = omc_irb_dec(block_view.data, block_view.size, store,
+                                  block_id, &use_opts->irb);
+            omc_read_merge_irb(&res.irb, irb_res);
+            res.iptc.entries_decoded += irb_res.iptc_entries_decoded;
+        } else if (block->kind == OMC_BLK_IPTC_IIM) {
+            omc_const_bytes block_view;
+            omc_pay_res pay_res;
+            omc_iptc_res iptc_res;
+
+            if (!omc_read_block_view(file_bytes, file_size, out_blocks,
+                                     res.scan.written, i, payload, payload_cap,
+                                     payload_scratch_indices,
+                                     payload_scratch_cap, &use_opts->pay,
+                                     &block_view, &pay_res)) {
+                omc_read_merge_pay(&res.pay, pay_res);
+                continue;
+            }
+
+            omc_read_merge_pay(&res.pay, pay_res);
+            iptc_res = omc_iptc_dec(block_view.data, block_view.size, store,
+                                    block_id, OMC_ENTRY_FLAG_NONE,
+                                    &use_opts->iptc);
+            omc_read_merge_iptc(&res.iptc, iptc_res);
         }
     }
 

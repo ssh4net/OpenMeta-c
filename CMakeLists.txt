@@ -10,6 +10,7 @@ option(OMC_BUILD_STATIC "Build static library" ON)
 option(OMC_BUILD_SHARED "Build shared library" OFF)
 option(OMC_BUILD_TESTS "Build tests" ON)
 option(OMC_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
+option(OMC_USE_ZLIB "Enable zlib-backed deflate payload extraction" ON)
 
 if(NOT OMC_BUILD_STATIC AND NOT OMC_BUILD_SHARED)
   message(FATAL_ERROR "Enable at least one of OMC_BUILD_STATIC or OMC_BUILD_SHARED.")
@@ -38,6 +39,14 @@ if(NOT OMC_HAVE_U64_ULONG
    AND NOT OMC_HAVE_U64_MSVC_INT64)
   message(FATAL_ERROR
     "OpenMeta-c requires one usable 64-bit integer type for offsets and sizes.")
+endif()
+
+set(OMC_HAVE_ZLIB 0)
+if(OMC_USE_ZLIB)
+  find_package(ZLIB QUIET)
+  if(ZLIB_FOUND)
+    set(OMC_HAVE_ZLIB 1)
+  endif()
 endif()
 
 add_subdirectory(src)

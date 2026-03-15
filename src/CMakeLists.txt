@@ -44,6 +44,8 @@ set(OMC_SOURCES
   core/omc_store.c
   read/omc_exif.c
   read/omc_icc.c
+  read/omc_iptc.c
+  read/omc_irb.c
   read/omc_pay.c
   read/omc_read.c
   read/omc_scan.c
@@ -57,6 +59,14 @@ function(omc_add_target target_name target_kind)
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
   )
+  if(OMC_HAVE_ZLIB)
+    if(TARGET ZLIB::ZLIB)
+      target_link_libraries(${target_name} PRIVATE ZLIB::ZLIB)
+    else()
+      target_include_directories(${target_name} PRIVATE ${ZLIB_INCLUDE_DIRS})
+      target_link_libraries(${target_name} PRIVATE ${ZLIB_LIBRARIES})
+    endif()
+  endif()
   omc_apply_warnings(${target_name})
   set_target_properties(${target_name} PROPERTIES OUTPUT_NAME omc)
 endfunction()

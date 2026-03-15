@@ -87,6 +87,9 @@ omc_key_make_icc_header_field(omc_key* key, omc_u32 offset);
 OMC_API void
 omc_key_make_icc_tag(omc_key* key, omc_u32 signature);
 
+OMC_API void
+omc_key_make_photoshop_irb(omc_key* key, omc_u16 resource_id);
+
 OMC_EXTERN_C_END
 
 #endif

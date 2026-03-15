@@ -2,6 +2,10 @@
 
 #include <string.h>
 
+#if OMC_HAVE_ZLIB
+#include <zlib.h>
+#endif
+
 static void
 omc_pay_res_init(omc_pay_res* res)
 {
@@ -24,6 +28,12 @@ omc_pay_same_stream(const omc_blk_ref* seed, const omc_blk_ref* cand)
         return seed->part_count == cand->part_count;
     }
     return 1;
+}
+
+static omc_u64
+omc_pay_min_u64(omc_u64 a, omc_u64 b)
+{
+    return (a < b) ? a : b;
 }
 
 static int
@@ -72,6 +82,128 @@ omc_pay_copy_range(const omc_u8* file_bytes, omc_size file_size,
     return 1;
 }
 
+#if OMC_HAVE_ZLIB
+static int
+omc_pay_inflate_zlib_range(const omc_u8* file_bytes, omc_size file_size,
+                           omc_u64 data_offset, omc_u64 data_size,
+                           omc_u8* out_payload, omc_size out_cap,
+                           omc_u64 max_output_bytes, omc_pay_res* res)
+{
+    z_stream strm;
+    omc_u64 in_off;
+    omc_u64 total_out;
+    int zr;
+    omc_u8 scratch[256];
+    uInt max_chunk;
+
+    if (data_offset > (omc_u64)file_size
+        || data_size > ((omc_u64)file_size - data_offset)) {
+        res->status = OMC_PAY_MALFORMED;
+        return 0;
+    }
+
+    memset(&strm, 0, sizeof(strm));
+    in_off = 0U;
+    total_out = 0U;
+    max_chunk = (uInt)~(uInt)0;
+
+    zr = inflateInit(&strm);
+    if (zr != Z_OK) {
+        res->status = (zr == Z_MEM_ERROR) ? OMC_PAY_NOMEM : OMC_PAY_UNSUPPORTED;
+        return 0;
+    }
+
+    for (;;) {
+        omc_u64 remain_limit;
+        omc_u64 out_room;
+        uInt out_avail;
+        int use_scratch;
+        omc_u64 produced;
+
+        if (strm.avail_in == 0U && in_off < data_size) {
+            omc_u64 feed_size;
+
+            feed_size = data_size - in_off;
+            feed_size = omc_pay_min_u64(feed_size, (omc_u64)max_chunk);
+            strm.next_in =
+                (Bytef*)(file_bytes + (omc_size)data_offset + (omc_size)in_off);
+            strm.avail_in = (uInt)feed_size;
+            in_off += feed_size;
+        }
+
+        if (total_out >= max_output_bytes) {
+            res->status = OMC_PAY_LIMIT;
+            (void)inflateEnd(&strm);
+            res->needed = total_out;
+            return 0;
+        }
+        remain_limit = max_output_bytes - total_out;
+
+        use_scratch = 0;
+        if (out_payload != (omc_u8*)0 && res->written < (omc_u64)out_cap) {
+            out_room = (omc_u64)out_cap - res->written;
+            out_room = omc_pay_min_u64(out_room, remain_limit);
+            out_room = omc_pay_min_u64(out_room, (omc_u64)max_chunk);
+            strm.next_out = (Bytef*)(out_payload + (omc_size)res->written);
+            strm.avail_out = (uInt)out_room;
+        } else {
+            use_scratch = 1;
+            out_room = omc_pay_min_u64((omc_u64)sizeof(scratch), remain_limit);
+            out_room = omc_pay_min_u64(out_room, (omc_u64)max_chunk);
+            strm.next_out = scratch;
+            strm.avail_out = (uInt)out_room;
+        }
+
+        out_avail = strm.avail_out;
+        zr = inflate(&strm, Z_NO_FLUSH);
+        produced = (omc_u64)(out_avail - strm.avail_out);
+
+        if (produced != 0U) {
+            total_out += produced;
+            if (use_scratch) {
+                if (res->status == OMC_PAY_OK) {
+                    res->status = OMC_PAY_TRUNCATED;
+                }
+            } else {
+                res->written += produced;
+            }
+        }
+
+        if (zr == Z_STREAM_END) {
+            break;
+        }
+        if (zr == Z_OK) {
+            if (produced == 0U && strm.avail_in == 0U && in_off >= data_size) {
+                res->status = OMC_PAY_MALFORMED;
+                (void)inflateEnd(&strm);
+                res->needed = total_out;
+                return 0;
+            }
+            continue;
+        }
+        if (zr == Z_MEM_ERROR) {
+            res->status = OMC_PAY_NOMEM;
+        } else if (zr == Z_BUF_ERROR && total_out >= max_output_bytes) {
+            res->status = OMC_PAY_LIMIT;
+        } else {
+            res->status = OMC_PAY_MALFORMED;
+        }
+        (void)inflateEnd(&strm);
+        res->needed = total_out;
+        return 0;
+    }
+
+    if (inflateEnd(&strm) != Z_OK) {
+        res->status = OMC_PAY_MALFORMED;
+        res->needed = total_out;
+        return 0;
+    }
+
+    res->needed = total_out;
+    return 1;
+}
+#endif
+
 void
 omc_pay_opts_init(omc_pay_opts* opts)
 {
@@ -116,8 +248,25 @@ omc_pay_ext(const omc_u8* file_bytes, omc_size file_size,
 
     seed = &blocks[seed_index];
     if (seed->compression != OMC_BLK_COMP_NONE) {
+#if OMC_HAVE_ZLIB
+        if (!use_opts->decompress || seed->compression != OMC_BLK_COMP_DEFLATE
+            || seed->chunking != OMC_BLK_CHUNK_NONE
+            || (seed->part_count != 0U && seed->part_count != 1U)) {
+            res.status = OMC_PAY_UNSUPPORTED;
+            return res;
+        }
+        if (!omc_pay_inflate_zlib_range(file_bytes, file_size, seed->data_offset,
+                                        seed->data_size, out_payload, out_cap,
+                                        use_opts->limits.max_output_bytes,
+                                        &res)) {
+            return res;
+        }
+        return res;
+#else
+        (void)use_opts;
         res.status = OMC_PAY_UNSUPPORTED;
         return res;
+#endif
     }
 
     if (seed->chunking == OMC_BLK_CHUNK_NONE
