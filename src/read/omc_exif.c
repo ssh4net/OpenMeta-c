@@ -24,6 +24,7 @@ typedef struct omc_exif_ctx {
     const omc_u8* bytes;
     omc_size size;
     omc_store* store;
+    omc_block_id source_block;
     int measure_only;
     omc_exif_opts opts;
     omc_exif_cfg cfg;
@@ -521,7 +522,7 @@ omc_exif_add_entry(omc_exif_ctx* ctx, const omc_byte_ref* token_ref,
     entry.key.kind = OMC_KEY_EXIF_TAG;
     entry.key.u.exif_tag.ifd = *token_ref;
     entry.key.u.exif_tag.tag = tag;
-    entry.origin.block = OMC_INVALID_BLOCK_ID;
+    entry.origin.block = ctx->source_block;
     entry.origin.order_in_block = order_in_block;
     entry.origin.wire_type.family = OMC_WIRE_TIFF;
     entry.origin.wire_type.code = type;
@@ -1001,7 +1002,8 @@ omc_exif_process_ifd(omc_exif_ctx* ctx, omc_exif_task task)
 
 static omc_exif_res
 omc_exif_run(const omc_u8* tiff_bytes, omc_size tiff_size, omc_store* store,
-             omc_exif_ifd_ref* out_ifds, omc_u32 ifd_cap,
+             omc_block_id source_block, omc_exif_ifd_ref* out_ifds,
+             omc_u32 ifd_cap,
              const omc_exif_opts* opts, int measure_only)
 {
     omc_exif_ctx ctx;
@@ -1011,6 +1013,7 @@ omc_exif_run(const omc_u8* tiff_bytes, omc_size tiff_size, omc_store* store,
     ctx.bytes = tiff_bytes;
     ctx.size = tiff_size;
     ctx.store = store;
+    ctx.source_block = source_block;
     ctx.measure_only = measure_only;
     ctx.out_ifds = out_ifds;
     ctx.ifd_cap = ifd_cap;
@@ -1085,10 +1088,12 @@ omc_exif_opts_init(omc_exif_opts* opts)
 
 omc_exif_res
 omc_exif_dec(const omc_u8* tiff_bytes, omc_size tiff_size,
-             omc_store* store, omc_exif_ifd_ref* out_ifds, omc_u32 ifd_cap,
+             omc_store* store, omc_block_id source_block,
+             omc_exif_ifd_ref* out_ifds, omc_u32 ifd_cap,
              const omc_exif_opts* opts)
 {
-    return omc_exif_run(tiff_bytes, tiff_size, store, out_ifds, ifd_cap, opts,
+    return omc_exif_run(tiff_bytes, tiff_size, store, source_block, out_ifds,
+                        ifd_cap, opts,
                         0);
 }
 
@@ -1097,5 +1102,6 @@ omc_exif_meas(const omc_u8* tiff_bytes, omc_size tiff_size,
               const omc_exif_opts* opts)
 {
     return omc_exif_run(tiff_bytes, tiff_size, (omc_store*)0,
+                        OMC_INVALID_BLOCK_ID,
                         (omc_exif_ifd_ref*)0, 0U, opts, 1);
 }

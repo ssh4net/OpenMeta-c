@@ -240,7 +240,8 @@ test_decode_le_and_measure(void)
     opts.include_pointer_tags = 1;
 
     meas = omc_exif_meas(tiff, tiff_size, &opts);
-    res = omc_exif_dec(tiff, tiff_size, &store, ifds, 8U, &opts);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
 
     assert(meas.status == OMC_EXIF_OK);
     assert(meas.ifds_needed == 2U);
@@ -290,7 +291,8 @@ test_decode_be(void)
     omc_exif_opts_init(&opts);
     opts.include_pointer_tags = 1;
 
-    res = omc_exif_dec(tiff, tiff_size, &store, ifds, 8U, &opts);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
     assert(res.status == OMC_EXIF_OK);
     assert(res.entries_decoded == 3U);
 
@@ -324,8 +326,8 @@ test_utf8_and_ascii_bytes(void)
     omc_exif_opts_init(&opts);
 
     tiff_size = make_utf8_inline_tiff(tiff);
-    res = omc_exif_dec(tiff, tiff_size, &store, (omc_exif_ifd_ref*)0, 0U,
-                       &opts);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
     assert(res.status == OMC_EXIF_OK);
     e = find_exif_entry(&store, "ifd0", 0x010EU);
     assert(e != (const omc_entry*)0);
@@ -338,8 +340,8 @@ test_utf8_and_ascii_bytes(void)
 
     omc_store_init(&store);
     tiff_size = make_ascii_nul_tiff(tiff);
-    res = omc_exif_dec(tiff, tiff_size, &store, (omc_exif_ifd_ref*)0, 0U,
-                       &opts);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
     assert(res.status == OMC_EXIF_OK);
     e = find_exif_entry(&store, "ifd0", 0x010EU);
     assert(e != (const omc_entry*)0);
@@ -365,8 +367,8 @@ test_bad_offset_and_limit(void)
     tiff_size = make_bad_offset_tiff(tiff);
     omc_store_init(&store);
     omc_exif_opts_init(&opts);
-    res = omc_exif_dec(tiff, tiff_size, &store, (omc_exif_ifd_ref*)0, 0U,
-                       &opts);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
     assert(res.status == OMC_EXIF_MALFORMED);
     assert(store.entry_count == 0U);
     omc_store_fini(&store);
@@ -376,8 +378,8 @@ test_bad_offset_and_limit(void)
     omc_exif_opts_init(&opts);
     opts.include_pointer_tags = 1;
     opts.limits.max_total_entries = 2U;
-    res = omc_exif_dec(tiff, tiff_size, &store, (omc_exif_ifd_ref*)0, 0U,
-                       &opts);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
     assert(res.status == OMC_EXIF_LIMIT);
     assert(res.limit_reason == OMC_EXIF_LIM_MAX_ENTRIES_TOTAL);
     omc_store_fini(&store);

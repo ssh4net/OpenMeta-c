@@ -4,6 +4,7 @@
 #include "omc/omc_arena.h"
 #include "omc/omc_base.h"
 #include "omc/omc_key.h"
+#include "omc/omc_scan.h"
 #include "omc/omc_status.h"
 #include "omc/omc_val.h"
 
@@ -50,11 +51,7 @@ typedef struct omc_entry {
     omc_entry_flags flags;
 } omc_entry;
 
-typedef struct omc_block_info {
-    omc_u32 format;
-    omc_u32 container;
-    omc_u32 id;
-} omc_block_info;
+typedef omc_blk_ref omc_block_info;
 
 typedef struct omc_store {
     omc_arena arena;

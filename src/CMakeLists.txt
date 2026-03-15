@@ -43,9 +43,11 @@ set(OMC_SOURCES
   core/omc_val.c
   core/omc_store.c
   read/omc_exif.c
+  read/omc_icc.c
   read/omc_pay.c
   read/omc_read.c
   read/omc_scan.c
+  read/omc_xmp.c
 )
 
 function(omc_add_target target_name target_kind)

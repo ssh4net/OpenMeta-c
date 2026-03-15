@@ -22,8 +22,9 @@ main(void)
 
     omc_store_init(&store);
 
-    block.format = 1U;
-    block.container = 2U;
+    memset(&block, 0, sizeof(block));
+    block.format = OMC_SCAN_FMT_JPEG;
+    block.kind = OMC_BLK_EXIF;
     block.id = 3U;
 
     status = omc_store_add_block(&store, &block, &block_id);

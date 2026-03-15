@@ -2,21 +2,27 @@
 #define OMC_READ_H
 
 #include "omc/omc_exif.h"
+#include "omc/omc_icc.h"
 #include "omc/omc_pay.h"
 #include "omc/omc_scan.h"
 #include "omc/omc_store.h"
+#include "omc/omc_xmp.h"
 
 OMC_EXTERN_C_BEGIN
 
 typedef struct omc_read_opts {
     omc_exif_opts exif;
+    omc_icc_opts icc;
     omc_pay_opts pay;
+    omc_xmp_opts xmp;
 } omc_read_opts;
 
 typedef struct omc_read_res {
     omc_scan_res scan;
     omc_pay_res pay;
     omc_exif_res exif;
+    omc_icc_res icc;
+    omc_xmp_res xmp;
     omc_u32 entries_added;
 } omc_read_res;
 

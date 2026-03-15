@@ -79,7 +79,8 @@ omc_exif_opts_init(omc_exif_opts* opts);
 
 OMC_API omc_exif_res
 omc_exif_dec(const omc_u8* tiff_bytes, omc_size tiff_size,
-             omc_store* store, omc_exif_ifd_ref* out_ifds, omc_u32 ifd_cap,
+             omc_store* store, omc_block_id source_block,
+             omc_exif_ifd_ref* out_ifds, omc_u32 ifd_cap,
              const omc_exif_opts* opts);
 
 OMC_API omc_exif_res

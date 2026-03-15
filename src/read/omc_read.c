@@ -1,5 +1,7 @@
 #include "omc/omc_read.h"
 
+#include <string.h>
+
 static void
 omc_read_init_res(omc_read_res* res)
 {
@@ -16,6 +18,10 @@ omc_read_init_res(omc_read_res* res)
     res->exif.limit_reason = OMC_EXIF_LIM_NONE;
     res->exif.limit_ifd_offset = 0U;
     res->exif.limit_tag = 0U;
+    res->icc.status = OMC_ICC_OK;
+    res->icc.entries_decoded = 0U;
+    res->xmp.status = OMC_XMP_OK;
+    res->xmp.entries_decoded = 0U;
     res->entries_added = 0U;
 }
 
@@ -101,6 +107,173 @@ omc_read_merge_exif(omc_exif_res* dst, omc_exif_res src)
     }
 }
 
+static void
+omc_read_merge_icc(omc_icc_res* dst, omc_icc_res src)
+{
+    dst->entries_decoded += src.entries_decoded;
+    if (dst->status == OMC_ICC_NOMEM || dst->status == OMC_ICC_LIMIT) {
+        return;
+    }
+    if (src.status == OMC_ICC_NOMEM || src.status == OMC_ICC_LIMIT) {
+        dst->status = src.status;
+        return;
+    }
+    if (dst->status == OMC_ICC_MALFORMED) {
+        return;
+    }
+    if (src.status == OMC_ICC_MALFORMED) {
+        dst->status = src.status;
+        return;
+    }
+    if (dst->status == OMC_ICC_UNSUPPORTED) {
+        return;
+    }
+    if (src.status == OMC_ICC_UNSUPPORTED) {
+        dst->status = src.status;
+    }
+}
+
+static void
+omc_read_merge_xmp(omc_xmp_res* dst, omc_xmp_res src)
+{
+    dst->entries_decoded += src.entries_decoded;
+    if (dst->status == OMC_XMP_NOMEM || dst->status == OMC_XMP_LIMIT) {
+        return;
+    }
+    if (src.status == OMC_XMP_NOMEM || src.status == OMC_XMP_LIMIT) {
+        dst->status = src.status;
+        return;
+    }
+    if (dst->status == OMC_XMP_MALFORMED) {
+        return;
+    }
+    if (src.status == OMC_XMP_MALFORMED) {
+        dst->status = src.status;
+        return;
+    }
+    if (dst->status == OMC_XMP_UNSUPPORTED) {
+        return;
+    }
+    if (src.status == OMC_XMP_UNSUPPORTED) {
+        dst->status = src.status;
+        return;
+    }
+    if (dst->status == OMC_XMP_TRUNCATED) {
+        return;
+    }
+    if (src.status == OMC_XMP_TRUNCATED) {
+        dst->status = src.status;
+    }
+}
+
+static int
+omc_read_store_block(omc_store* store, const omc_blk_ref* block,
+                     omc_block_id* out_id)
+{
+    omc_status st;
+    omc_block_info info;
+
+    info = *block;
+    st = omc_store_add_block(store, &info, out_id);
+    return st == OMC_STATUS_OK;
+}
+
+static int
+omc_read_value_bytes(const omc_store* store, const omc_entry* entry,
+                     omc_const_bytes* out_view)
+{
+    if (store == (const omc_store*)0 || entry == (const omc_entry*)0
+        || out_view == (omc_const_bytes*)0) {
+        return 0;
+    }
+
+    out_view->data = (const omc_u8*)0;
+    out_view->size = 0U;
+
+    if (entry->value.kind == OMC_VAL_BYTES || entry->value.kind == OMC_VAL_TEXT
+        || (entry->value.kind == OMC_VAL_ARRAY
+            && (entry->value.elem_type == OMC_ELEM_U8
+                || entry->value.elem_type == OMC_ELEM_I8))) {
+        *out_view = omc_arena_view(&store->arena, entry->value.u.ref);
+        return out_view->data != (const omc_u8*)0;
+    }
+    return 0;
+}
+
+static int
+omc_read_find_literal(const omc_u8* bytes, omc_size size, const char* lit)
+{
+    omc_size lit_len;
+    omc_size i;
+
+    if (bytes == (const omc_u8*)0 || lit == (const char*)0) {
+        return 0;
+    }
+
+    lit_len = strlen(lit);
+    if (lit_len == 0U || lit_len > size) {
+        return 0;
+    }
+
+    for (i = 0U; i + lit_len <= size; ++i) {
+        if (memcmp(bytes + i, lit, lit_len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
+omc_read_looks_like_xmp(const omc_u8* bytes, omc_size size)
+{
+    if (omc_read_find_literal(bytes, size, "<x:xmpmeta")
+        || omc_read_find_literal(bytes, size, "<rdf:RDF")
+        || omc_read_find_literal(bytes, size, "<rdf:Description")) {
+        return 1;
+    }
+    return 0;
+}
+
+static void
+omc_read_decode_tiff_embedded(const omc_read_opts* opts, omc_store* store,
+                              omc_block_id block_id, omc_size entry_start,
+                              omc_read_res* res)
+{
+    omc_size i;
+
+    for (i = entry_start; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes value_bytes;
+
+        entry = &store->entries[i];
+        if (entry->origin.block != block_id
+            || entry->key.kind != OMC_KEY_EXIF_TAG) {
+            continue;
+        }
+        if (entry->key.u.exif_tag.tag != 700U
+            && entry->key.u.exif_tag.tag != 34675U) {
+            continue;
+        }
+        if (!omc_read_value_bytes(store, entry, &value_bytes)) {
+            continue;
+        }
+
+        if (entry->key.u.exif_tag.tag == 700U) {
+            omc_xmp_res xmp_res;
+
+            xmp_res = omc_xmp_dec(value_bytes.data, value_bytes.size, store,
+                                  block_id, OMC_ENTRY_FLAG_NONE, &opts->xmp);
+            omc_read_merge_xmp(&res->xmp, xmp_res);
+        } else {
+            omc_icc_res icc_res;
+
+            icc_res = omc_icc_dec(value_bytes.data, value_bytes.size, store,
+                                  block_id, &opts->icc);
+            omc_read_merge_icc(&res->icc, icc_res);
+        }
+    }
+}
+
 void
 omc_read_opts_init(omc_read_opts* opts)
 {
@@ -109,7 +282,9 @@ omc_read_opts_init(omc_read_opts* opts)
     }
 
     omc_exif_opts_init(&opts->exif);
+    omc_icc_opts_init(&opts->icc);
     omc_pay_opts_init(&opts->pay);
+    omc_xmp_opts_init(&opts->xmp);
 }
 
 omc_read_res
@@ -123,7 +298,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
     omc_read_res res;
     omc_read_opts local_opts;
     const omc_read_opts* use_opts;
-    omc_u32 entries_before;
+    omc_size entries_before;
     omc_u32 i;
 
     omc_read_init_res(&res);
@@ -137,45 +312,119 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
     }
 
     if (file_bytes == (const omc_u8*)0 || store == (omc_store*)0) {
-        res.exif.status = OMC_EXIF_NOMEM;
+        res.scan.status = OMC_SCAN_MALFORMED;
+        res.exif.status = OMC_EXIF_MALFORMED;
+        res.icc.status = OMC_ICC_MALFORMED;
+        res.xmp.status = OMC_XMP_MALFORMED;
         return res;
     }
 
-    entries_before = (omc_u32)store->entry_count;
+    entries_before = store->entry_count;
     res.scan = omc_scan_auto(file_bytes, file_size, out_blocks, block_cap);
 
     for (i = 0U; i < res.scan.written; ++i) {
         const omc_blk_ref* block;
-        omc_exif_res exif_res;
+        omc_block_id block_id;
 
         block = &out_blocks[i];
-        if (block->kind != OMC_BLK_EXIF) {
-            continue;
+        if (!omc_read_store_block(store, block, &block_id)) {
+            res.exif.status = OMC_EXIF_NOMEM;
+            res.icc.status = OMC_ICC_NOMEM;
+            res.xmp.status = OMC_XMP_NOMEM;
+            break;
         }
 
-        if (block->format == OMC_SCAN_FMT_TIFF && block->data_offset == 0U
-            && block->data_size == (omc_u64)file_size) {
-            exif_res = omc_exif_dec(file_bytes, file_size, store, out_ifds,
-                                    ifd_cap, &use_opts->exif);
-            omc_read_merge_exif(&res.exif, exif_res);
-            continue;
-        }
+        if (block->kind == OMC_BLK_EXIF) {
+            omc_exif_res exif_res;
+            omc_size entry_start;
 
-        {
-            omc_pay_res pay_res;
+            entry_start = store->entry_count;
+            if (block->format == OMC_SCAN_FMT_TIFF && block->data_offset == 0U
+                && block->data_size == (omc_u64)file_size) {
+                exif_res = omc_exif_dec(file_bytes, file_size, store, block_id,
+                                        out_ifds, ifd_cap, &use_opts->exif);
+                omc_read_merge_exif(&res.exif, exif_res);
+                if (exif_res.status == OMC_EXIF_OK
+                    || exif_res.status == OMC_EXIF_TRUNCATED) {
+                    omc_read_decode_tiff_embedded(use_opts, store, block_id,
+                                                  entry_start, &res);
+                }
+            } else {
+                omc_pay_res pay_res;
 
-            pay_res = omc_pay_ext(file_bytes, file_size, out_blocks,
-                                  res.scan.written, i, payload, payload_cap,
-                                  payload_scratch_indices, payload_scratch_cap,
-                                  &use_opts->pay);
-            omc_read_merge_pay(&res.pay, pay_res);
-            if (pay_res.status != OMC_PAY_OK) {
+                pay_res = omc_pay_ext(file_bytes, file_size, out_blocks,
+                                      res.scan.written, i, payload, payload_cap,
+                                      payload_scratch_indices,
+                                      payload_scratch_cap, &use_opts->pay);
+                omc_read_merge_pay(&res.pay, pay_res);
+                if (pay_res.status != OMC_PAY_OK) {
+                    continue;
+                }
+
+                exif_res = omc_exif_dec(payload, (omc_size)pay_res.written,
+                                        store, block_id, out_ifds, ifd_cap,
+                                        &use_opts->exif);
+                omc_read_merge_exif(&res.exif, exif_res);
+            }
+        } else if (block->kind == OMC_BLK_XMP) {
+            omc_xmp_res xmp_res;
+
+            if (block->data_offset > (omc_u64)file_size
+                || block->data_size > ((omc_u64)file_size - block->data_offset)) {
+                res.xmp.status = OMC_XMP_MALFORMED;
                 continue;
             }
+            xmp_res = omc_xmp_dec(file_bytes + (omc_size)block->data_offset,
+                                  (omc_size)block->data_size, store, block_id,
+                                  OMC_ENTRY_FLAG_NONE, &use_opts->xmp);
+            omc_read_merge_xmp(&res.xmp, xmp_res);
+        } else if (block->kind == OMC_BLK_ICC) {
+            omc_icc_res icc_res;
 
-            exif_res = omc_exif_dec(payload, (omc_size)pay_res.written, store,
-                                    out_ifds, ifd_cap, &use_opts->exif);
-            omc_read_merge_exif(&res.exif, exif_res);
+            if (block->chunking == OMC_BLK_CHUNK_JPEG_APP2_SEQ) {
+                omc_pay_res pay_res2;
+
+                pay_res2 = omc_pay_ext(file_bytes, file_size, out_blocks,
+                                       res.scan.written, i, payload,
+                                       payload_cap, payload_scratch_indices,
+                                       payload_scratch_cap, &use_opts->pay);
+                omc_read_merge_pay(&res.pay, pay_res2);
+                if (pay_res2.status != OMC_PAY_OK) {
+                    continue;
+                }
+                icc_res = omc_icc_dec(payload, (omc_size)pay_res2.written,
+                                      store, block_id, &use_opts->icc);
+            } else {
+                if (block->data_offset > (omc_u64)file_size
+                    || block->data_size
+                           > ((omc_u64)file_size - block->data_offset)) {
+                    res.icc.status = OMC_ICC_MALFORMED;
+                    continue;
+                }
+                icc_res = omc_icc_dec(file_bytes + (omc_size)block->data_offset,
+                                      (omc_size)block->data_size, store,
+                                      block_id, &use_opts->icc);
+            }
+            omc_read_merge_icc(&res.icc, icc_res);
+        }
+    }
+
+    if (res.scan.written == 0U && omc_read_looks_like_xmp(file_bytes, file_size)) {
+        omc_block_info xmp_block;
+        omc_block_id xmp_block_id;
+        omc_xmp_res xmp_res2;
+
+        memset(&xmp_block, 0, sizeof(xmp_block));
+        xmp_block.kind = OMC_BLK_XMP;
+        xmp_block.data_size = (omc_u64)file_size;
+        xmp_block.outer_size = (omc_u64)file_size;
+        if (omc_store_add_block(store, &xmp_block, &xmp_block_id)
+            == OMC_STATUS_OK) {
+            xmp_res2 = omc_xmp_dec(file_bytes, file_size, store, xmp_block_id,
+                                   OMC_ENTRY_FLAG_NONE, &use_opts->xmp);
+            omc_read_merge_xmp(&res.xmp, xmp_res2);
+        } else {
+            res.xmp.status = OMC_XMP_NOMEM;
         }
     }
 
