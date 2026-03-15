@@ -113,6 +113,20 @@ OMC_API omc_scan_res
 omc_scan_meas_tiff(const omc_u8* bytes, omc_size size);
 
 OMC_API omc_scan_res
+omc_scan_jp2(const omc_u8* bytes, omc_size size,
+             omc_blk_ref* out_blocks, omc_u32 out_cap);
+
+OMC_API omc_scan_res
+omc_scan_meas_jp2(const omc_u8* bytes, omc_size size);
+
+OMC_API omc_scan_res
+omc_scan_jxl(const omc_u8* bytes, omc_size size,
+             omc_blk_ref* out_blocks, omc_u32 out_cap);
+
+OMC_API omc_scan_res
+omc_scan_meas_jxl(const omc_u8* bytes, omc_size size);
+
+OMC_API omc_scan_res
 omc_scan_png(const omc_u8* bytes, omc_size size,
              omc_blk_ref* out_blocks, omc_u32 out_cap);
 

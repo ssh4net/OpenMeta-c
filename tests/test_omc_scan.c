@@ -435,6 +435,126 @@ make_test_cr3_scan(omc_u8* out)
 }
 
 static omc_size
+make_test_jp2_scan(omc_u8* out)
+{
+    static const omc_u8 xmp_uuid[16] = {
+        0xBEU, 0x7AU, 0xCFU, 0xCBU, 0x97U, 0xA9U, 0x42U, 0xE8U,
+        0x9CU, 0x71U, 0x99U, 0x94U, 0x91U, 0xE3U, 0xAFU, 0xACU
+    };
+    static const omc_u8 geo_uuid[16] = {
+        0xB1U, 0x4BU, 0xF8U, 0xBDU, 0x08U, 0x3DU, 0x4BU, 0x43U,
+        0xA5U, 0xAEU, 0x8CU, 0xD7U, 0xD5U, 0xA6U, 0xCEU, 0x03U
+    };
+    omc_u8 colr_payload[16];
+    omc_u8 colr_box[24];
+    omc_u8 uuid_payload[64];
+    omc_u8 tiff[32];
+    omc_size colr_payload_size;
+    omc_size colr_box_size;
+    omc_size uuid_size;
+    omc_size tiff_size;
+    omc_size size;
+
+    colr_payload_size = 0U;
+    append_u8(colr_payload, &colr_payload_size, 2U);
+    append_u8(colr_payload, &colr_payload_size, 0U);
+    append_u8(colr_payload, &colr_payload_size, 0U);
+    append_text(colr_payload, &colr_payload_size, "ICC");
+
+    colr_box_size = 0U;
+    append_bmff_box(colr_box, &colr_box_size, fourcc('c', 'o', 'l', 'r'),
+                    colr_payload, colr_payload_size);
+
+    tiff_size = make_test_tiff_le(tiff);
+
+    size = 0U;
+    append_u32be(out, &size, 12U);
+    append_u32be(out, &size, fourcc('j', 'P', ' ', ' '));
+    append_u32be(out, &size, 0x0D0A870AU);
+    append_bmff_box(out, &size, fourcc('j', 'p', '2', 'h'),
+                    colr_box, colr_box_size);
+
+    uuid_size = 0U;
+    append_bytes(uuid_payload, &uuid_size, xmp_uuid, 16U);
+    append_text(uuid_payload, &uuid_size, "<xmp/>");
+    append_bmff_box(out, &size, fourcc('u', 'u', 'i', 'd'),
+                    uuid_payload, uuid_size);
+
+    uuid_size = 0U;
+    append_bytes(uuid_payload, &uuid_size, geo_uuid, 16U);
+    append_bytes(uuid_payload, &uuid_size, tiff, tiff_size);
+    append_bmff_box(out, &size, fourcc('u', 'u', 'i', 'd'),
+                    uuid_payload, uuid_size);
+    return size;
+}
+
+static omc_size
+make_test_jxl_scan(omc_u8* out)
+{
+    omc_u8 tiff[16];
+    omc_u8 exif_payload[32];
+    omc_u8 brob_payload[16];
+    omc_size tiff_size;
+    omc_size exif_size;
+    omc_size brob_size;
+    omc_size size;
+
+    tiff_size = make_test_tiff_le(tiff);
+    exif_size = 0U;
+    append_u32be(exif_payload, &exif_size, 0U);
+    append_bytes(exif_payload, &exif_size, tiff, tiff_size);
+
+    brob_size = 0U;
+    append_u32be(brob_payload, &brob_size, fourcc('x', 'm', 'l', ' '));
+    append_text(brob_payload, &brob_size, "zzz");
+
+    size = 0U;
+    append_u32be(out, &size, 12U);
+    append_u32be(out, &size, fourcc('J', 'X', 'L', ' '));
+    append_u32be(out, &size, 0x0D0A870AU);
+    append_bmff_box(out, &size, fourcc('E', 'x', 'i', 'f'),
+                    exif_payload, exif_size);
+    append_bmff_box(out, &size, fourcc('x', 'm', 'l', ' '),
+                    (const omc_u8*)"<xmp/>", 6U);
+    append_bmff_box(out, &size, fourcc('b', 'r', 'o', 'b'),
+                    brob_payload, brob_size);
+    return size;
+}
+
+static omc_size
+make_test_bmff_jp2_brand_scan(omc_u8* out)
+{
+    static const omc_u8 geo_uuid[16] = {
+        0xB1U, 0x4BU, 0xF8U, 0xBDU, 0x08U, 0x3DU, 0x4BU, 0x43U,
+        0xA5U, 0xAEU, 0x8CU, 0xD7U, 0xD5U, 0xA6U, 0xCEU, 0x03U
+    };
+    omc_u8 ftyp_payload[16];
+    omc_u8 uuid_payload[64];
+    omc_u8 tiff[32];
+    omc_size ftyp_size;
+    omc_size uuid_size;
+    omc_size tiff_size;
+    omc_size size;
+
+    tiff_size = make_test_tiff_le(tiff);
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload, &ftyp_size, fourcc('j', 'p', '2', ' '));
+    append_u32be(ftyp_payload, &ftyp_size, 0U);
+    append_u32be(ftyp_payload, &ftyp_size, fourcc('j', 'p', '2', ' '));
+
+    uuid_size = 0U;
+    append_bytes(uuid_payload, &uuid_size, geo_uuid, 16U);
+    append_bytes(uuid_payload, &uuid_size, tiff, tiff_size);
+
+    size = 0U;
+    append_bmff_box(out, &size, fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload, ftyp_size);
+    append_bmff_box(out, &size, fourcc('u', 'u', 'i', 'd'),
+                    uuid_payload, uuid_size);
+    return size;
+}
+
+static omc_size
 make_test_bmff_iref_scan(omc_u8* out, omc_u32 major_brand,
                          omc_u8 iref_version, int split_parts)
 {
@@ -825,6 +945,65 @@ test_scan_bmff_iref_reference_order(void)
 }
 
 static void
+test_scan_jp2_and_jxl(void)
+{
+    omc_u8 file_bytes[512];
+    omc_size file_size;
+    omc_blk_ref blocks[8];
+    omc_scan_res res;
+
+    file_size = make_test_jp2_scan(file_bytes);
+    memset(blocks, 0, sizeof(blocks));
+    res = omc_scan_auto(file_bytes, file_size, blocks, 8U);
+
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 3U);
+    assert(blocks[0].format == OMC_SCAN_FMT_JP2);
+    assert(blocks[0].kind == OMC_BLK_ICC);
+    assert(blocks[1].format == OMC_SCAN_FMT_JP2);
+    assert(blocks[1].kind == OMC_BLK_XMP);
+    assert(blocks[1].chunking == OMC_BLK_CHUNK_JP2_UUID);
+    assert(blocks[2].format == OMC_SCAN_FMT_JP2);
+    assert(blocks[2].kind == OMC_BLK_EXIF);
+    assert(blocks[2].chunking == OMC_BLK_CHUNK_JP2_UUID);
+
+    file_size = make_test_jxl_scan(file_bytes);
+    memset(blocks, 0, sizeof(blocks));
+    res = omc_scan_auto(file_bytes, file_size, blocks, 8U);
+
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 3U);
+    assert(blocks[0].format == OMC_SCAN_FMT_JXL);
+    assert(blocks[0].kind == OMC_BLK_EXIF);
+    assert(blocks[1].format == OMC_SCAN_FMT_JXL);
+    assert(blocks[1].kind == OMC_BLK_XMP);
+    assert(blocks[2].format == OMC_SCAN_FMT_JXL);
+    assert(blocks[2].kind == OMC_BLK_COMP_METADATA);
+    assert(blocks[2].compression == OMC_BLK_COMP_BROTLI);
+    assert(blocks[2].chunking == OMC_BLK_CHUNK_BROB_REALTYPE);
+    assert(blocks[2].aux_u32 == fourcc('x', 'm', 'l', ' '));
+}
+
+static void
+test_scan_bmff_jp2_brand(void)
+{
+    omc_u8 file_bytes[256];
+    omc_size file_size;
+    omc_blk_ref blocks[4];
+    omc_scan_res res;
+
+    file_size = make_test_bmff_jp2_brand_scan(file_bytes);
+    memset(blocks, 0, sizeof(blocks));
+    res = omc_scan_auto(file_bytes, file_size, blocks, 4U);
+
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 1U);
+    assert(blocks[0].format == OMC_SCAN_FMT_JP2);
+    assert(blocks[0].kind == OMC_BLK_EXIF);
+    assert(blocks[0].chunking == OMC_BLK_CHUNK_JP2_UUID);
+}
+
+static void
 test_scan_measure_and_truncation(void)
 {
     static const omc_u8 tiff_bytes[] = {
@@ -857,6 +1036,8 @@ main(void)
     test_scan_bmff_cr3();
     test_scan_bmff_iref_v1_and_v0();
     test_scan_bmff_iref_reference_order();
+    test_scan_jp2_and_jxl();
+    test_scan_bmff_jp2_brand();
     test_scan_measure_and_truncation();
     return 0;
 }

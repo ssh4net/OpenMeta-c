@@ -1027,6 +1027,353 @@ omc_scan_parse_bmff_box(const omc_u8* bytes, omc_size size,
     return 1;
 }
 
+static void
+omc_scan_skip_bmff_exif_offset(omc_blk_ref* block, const omc_u8* bytes,
+                               omc_size size);
+
+static int
+omc_scan_jp2_emit_uuid_payload(const omc_u8* bytes, omc_size size,
+                               const omc_bmff_box* box, omc_scan_sink* sink)
+{
+    static const omc_u8 k_uuid_exif[16] = {
+        0x4AU, 0x70U, 0x67U, 0x54U, 0x69U, 0x66U, 0x66U, 0x45U,
+        0x78U, 0x69U, 0x66U, 0x2DU, 0x3EU, 0x4AU, 0x50U, 0x32U
+    };
+    static const omc_u8 k_uuid_xmp[16] = {
+        0xBEU, 0x7AU, 0xCFU, 0xCBU, 0x97U, 0xA9U, 0x42U, 0xE8U,
+        0x9CU, 0x71U, 0x99U, 0x94U, 0x91U, 0xE3U, 0xAFU, 0xACU
+    };
+    static const omc_u8 k_uuid_iptc[16] = {
+        0x33U, 0xC7U, 0xA4U, 0xD2U, 0xB8U, 0x1DU, 0x47U, 0x23U,
+        0xA0U, 0xBAU, 0xF1U, 0xA3U, 0xE0U, 0x97U, 0xADU, 0x38U
+    };
+    static const omc_u8 k_uuid_geotiff[16] = {
+        0xB1U, 0x4BU, 0xF8U, 0xBDU, 0x08U, 0x3DU, 0x4BU, 0x43U,
+        0xA5U, 0xAEU, 0x8CU, 0xD7U, 0xD5U, 0xA6U, 0xCEU, 0x03U
+    };
+    omc_blk_ref block;
+
+    if (box == (const omc_bmff_box*)0 || !box->has_uuid) {
+        return 0;
+    }
+
+    omc_scan_init_block(&block);
+    block.format = OMC_SCAN_FMT_JP2;
+    block.outer_offset = box->offset;
+    block.outer_size = box->size;
+    block.data_offset = box->offset + box->header_size;
+    block.data_size = box->size - box->header_size;
+    block.id = box->type;
+    block.chunking = OMC_BLK_CHUNK_JP2_UUID;
+
+    if (omc_scan_bytes_eq(box->uuid, k_uuid_exif, 16U)) {
+        block.kind = OMC_BLK_EXIF;
+        omc_scan_skip_exif_preamble(&block, bytes, size);
+        omc_scan_sink_emit(sink, &block);
+        return 1;
+    }
+    if (omc_scan_bytes_eq(box->uuid, k_uuid_xmp, 16U)) {
+        block.kind = OMC_BLK_XMP;
+        omc_scan_sink_emit(sink, &block);
+        return 1;
+    }
+    if (omc_scan_bytes_eq(box->uuid, k_uuid_iptc, 16U)) {
+        block.kind = OMC_BLK_IPTC_IIM;
+        omc_scan_sink_emit(sink, &block);
+        return 1;
+    }
+    if (omc_scan_bytes_eq(box->uuid, k_uuid_geotiff, 16U)) {
+        block.kind = OMC_BLK_EXIF;
+        omc_scan_sink_emit(sink, &block);
+        return 1;
+    }
+    return 0;
+}
+
+static int
+omc_scan_jp2_emit_direct_metadata_box(const omc_u8* bytes, omc_size size,
+                                      const omc_bmff_box* box,
+                                      omc_scan_sink* sink)
+{
+    omc_u64 payload_off;
+    omc_u64 payload_size;
+
+    if (box == (const omc_bmff_box*)0) {
+        return 0;
+    }
+
+    payload_off = box->offset + box->header_size;
+    payload_size = box->size - box->header_size;
+
+    if (box->type == OMC_FOURCC('x', 'm', 'l', ' ')) {
+        omc_blk_ref block;
+
+        omc_scan_init_block(&block);
+        block.format = OMC_SCAN_FMT_JP2;
+        block.kind = OMC_BLK_XMP;
+        block.outer_offset = box->offset;
+        block.outer_size = box->size;
+        block.data_offset = payload_off;
+        block.data_size = payload_size;
+        block.id = box->type;
+        omc_scan_sink_emit(sink, &block);
+        return 1;
+    }
+
+    if (box->type == OMC_FOURCC('E', 'x', 'i', 'f')) {
+        omc_blk_ref block;
+
+        omc_scan_init_block(&block);
+        block.format = OMC_SCAN_FMT_JP2;
+        block.kind = OMC_BLK_EXIF;
+        block.outer_offset = box->offset;
+        block.outer_size = box->size;
+        block.data_offset = payload_off;
+        block.data_size = payload_size;
+        block.id = box->type;
+        omc_scan_skip_bmff_exif_offset(&block, bytes, size);
+        omc_scan_skip_exif_preamble(&block, bytes, size);
+        omc_scan_sink_emit(sink, &block);
+        return 1;
+    }
+
+    if (box->type == OMC_FOURCC('c', 'o', 'l', 'r') && payload_size >= 3U) {
+        omc_u8 method;
+
+        method = bytes[(omc_size)payload_off];
+        if (method == 2U || method == 3U) {
+            omc_blk_ref block;
+
+            omc_scan_init_block(&block);
+            block.format = OMC_SCAN_FMT_JP2;
+            block.kind = OMC_BLK_ICC;
+            block.outer_offset = box->offset;
+            block.outer_size = box->size;
+            block.data_offset = payload_off + 3U;
+            block.data_size = payload_size - 3U;
+            block.id = box->type;
+            block.aux_u32 = method;
+            omc_scan_sink_emit(sink, &block);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+omc_scan_res
+omc_scan_jp2(const omc_u8* bytes, omc_size size,
+             omc_blk_ref* out_blocks, omc_u32 out_cap)
+{
+    omc_scan_sink sink;
+    omc_u32 first_size;
+    omc_u32 first_type;
+    omc_u64 off;
+    omc_u64 end;
+
+    omc_scan_sink_init(&sink, out_blocks, out_cap);
+
+    if (bytes == (const omc_u8*)0) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (size < 12U) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (!omc_scan_read_u32be(bytes, size, 0U, &first_size)
+        || !omc_scan_read_u32be(bytes, size, 4U, &first_type)) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (first_size != 12U || first_type != OMC_FOURCC('j', 'P', ' ', ' ')) {
+        sink.result.status = OMC_SCAN_UNSUPPORTED;
+        return sink.result;
+    }
+    if (!omc_scan_read_u32be(bytes, size, 8U, &first_size)
+        || first_size != 0x0D0A870AU) {
+        sink.result.status = OMC_SCAN_UNSUPPORTED;
+        return sink.result;
+    }
+
+    off = 0U;
+    end = (omc_u64)size;
+    while (off < end) {
+        omc_bmff_box box;
+
+        if (!omc_scan_parse_bmff_box(bytes, size, off, end, &box)) {
+            sink.result.status = OMC_SCAN_MALFORMED;
+            return sink.result;
+        }
+
+        (void)omc_scan_jp2_emit_direct_metadata_box(bytes, size, &box, &sink);
+        if (box.type == OMC_FOURCC('u', 'u', 'i', 'd')) {
+            (void)omc_scan_jp2_emit_uuid_payload(bytes, size, &box, &sink);
+        }
+        if (box.type == OMC_FOURCC('j', 'p', '2', 'h')) {
+            omc_u64 child_off;
+            omc_u64 child_end;
+
+            child_off = box.offset + box.header_size;
+            child_end = box.offset + box.size;
+            while (child_off < child_end) {
+                omc_bmff_box child;
+
+                if (!omc_scan_parse_bmff_box(bytes, size, child_off, child_end,
+                                             &child)) {
+                    break;
+                }
+                (void)omc_scan_jp2_emit_direct_metadata_box(bytes, size,
+                                                            &child, &sink);
+                child_off += child.size;
+                if (child.size == 0U) {
+                    break;
+                }
+            }
+        }
+
+        off += box.size;
+        if (box.size == 0U) {
+            break;
+        }
+    }
+
+    return sink.result;
+}
+
+omc_scan_res
+omc_scan_meas_jp2(const omc_u8* bytes, omc_size size)
+{
+    return omc_scan_normalize_measure(
+        omc_scan_jp2(bytes, size, (omc_blk_ref*)0, 0U));
+}
+
+omc_scan_res
+omc_scan_jxl(const omc_u8* bytes, omc_size size,
+             omc_blk_ref* out_blocks, omc_u32 out_cap)
+{
+    omc_scan_sink sink;
+    omc_u32 first_size;
+    omc_u32 first_type;
+    omc_u64 off;
+    omc_u64 end;
+
+    omc_scan_sink_init(&sink, out_blocks, out_cap);
+
+    if (bytes == (const omc_u8*)0) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (size < 12U) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (!omc_scan_read_u32be(bytes, size, 0U, &first_size)
+        || !omc_scan_read_u32be(bytes, size, 4U, &first_type)) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (first_size != 12U || first_type != OMC_FOURCC('J', 'X', 'L', ' ')) {
+        sink.result.status = OMC_SCAN_UNSUPPORTED;
+        return sink.result;
+    }
+    if (!omc_scan_read_u32be(bytes, size, 8U, &first_size)
+        || first_size != 0x0D0A870AU) {
+        sink.result.status = OMC_SCAN_UNSUPPORTED;
+        return sink.result;
+    }
+
+    off = 0U;
+    end = (omc_u64)size;
+    while (off < end) {
+        omc_bmff_box box;
+        omc_u64 payload_off;
+        omc_u64 payload_size;
+
+        if (!omc_scan_parse_bmff_box(bytes, size, off, end, &box)) {
+            sink.result.status = OMC_SCAN_MALFORMED;
+            return sink.result;
+        }
+
+        payload_off = box.offset + box.header_size;
+        payload_size = box.size - box.header_size;
+
+        if (box.type == OMC_FOURCC('E', 'x', 'i', 'f')) {
+            omc_blk_ref block;
+
+            omc_scan_init_block(&block);
+            block.format = OMC_SCAN_FMT_JXL;
+            block.kind = OMC_BLK_EXIF;
+            block.outer_offset = box.offset;
+            block.outer_size = box.size;
+            block.data_offset = payload_off;
+            block.data_size = payload_size;
+            block.id = box.type;
+            omc_scan_skip_bmff_exif_offset(&block, bytes, size);
+            omc_scan_sink_emit(&sink, &block);
+        } else if (box.type == OMC_FOURCC('x', 'm', 'l', ' ')) {
+            omc_blk_ref block;
+
+            omc_scan_init_block(&block);
+            block.format = OMC_SCAN_FMT_JXL;
+            block.kind = OMC_BLK_XMP;
+            block.outer_offset = box.offset;
+            block.outer_size = box.size;
+            block.data_offset = payload_off;
+            block.data_size = payload_size;
+            block.id = box.type;
+            omc_scan_sink_emit(&sink, &block);
+        } else if (box.type == OMC_FOURCC('j', 'u', 'm', 'b')
+                   || box.type == OMC_FOURCC('c', '2', 'p', 'a')) {
+            omc_blk_ref block;
+
+            omc_scan_init_block(&block);
+            block.format = OMC_SCAN_FMT_JXL;
+            block.kind = OMC_BLK_JUMBF;
+            block.outer_offset = box.offset;
+            block.outer_size = box.size;
+            block.data_offset = payload_off;
+            block.data_size = payload_size;
+            block.id = box.type;
+            omc_scan_sink_emit(&sink, &block);
+        } else if (box.type == OMC_FOURCC('b', 'r', 'o', 'b')
+                   && payload_size >= 4U) {
+            omc_u32 realtype;
+
+            if (omc_scan_read_u32be(bytes, size, payload_off, &realtype)) {
+                omc_blk_ref block;
+
+                omc_scan_init_block(&block);
+                block.format = OMC_SCAN_FMT_JXL;
+                block.kind = OMC_BLK_COMP_METADATA;
+                block.compression = OMC_BLK_COMP_BROTLI;
+                block.chunking = OMC_BLK_CHUNK_BROB_REALTYPE;
+                block.outer_offset = box.offset;
+                block.outer_size = box.size;
+                block.data_offset = payload_off + 4U;
+                block.data_size = payload_size - 4U;
+                block.id = box.type;
+                block.aux_u32 = realtype;
+                omc_scan_sink_emit(&sink, &block);
+            }
+        }
+
+        off += box.size;
+        if (box.size == 0U) {
+            break;
+        }
+    }
+
+    return sink.result;
+}
+
+omc_scan_res
+omc_scan_meas_jxl(const omc_u8* bytes, omc_size size)
+{
+    return omc_scan_normalize_measure(
+        omc_scan_jxl(bytes, size, (omc_blk_ref*)0, 0U));
+}
+
 static int
 omc_scan_bmff_type_looks_ascii(omc_u32 type)
 {
@@ -1111,6 +1458,7 @@ omc_scan_bmff_format_from_ftyp(const omc_u8* bytes, omc_size size,
     int is_heif;
     int is_avif;
     int is_cr3;
+    int is_jp2;
     omc_u64 off;
 
     if (ftyp == (const omc_bmff_box*)0) {
@@ -1129,6 +1477,7 @@ omc_scan_bmff_format_from_ftyp(const omc_u8* bytes, omc_size size,
     is_heif = 0;
     is_avif = 0;
     is_cr3 = 0;
+    is_jp2 = 0;
 
 #define OMC_NOTE_BMFF_BRAND(v) \
     do { \
@@ -1147,6 +1496,15 @@ omc_scan_bmff_format_from_ftyp(const omc_u8* bytes, omc_size size,
             || (v) == OMC_FOURCC('h', 'e', 'v', 'c') \
             || (v) == OMC_FOURCC('h', 'e', 'v', 'x')) { \
             is_heif = 1; \
+        } \
+        if ((v) == OMC_FOURCC('j', 'p', '2', ' ') \
+            || (v) == OMC_FOURCC('j', 'p', 'x', ' ') \
+            || (v) == OMC_FOURCC('j', 'p', 'm', ' ') \
+            || (v) == OMC_FOURCC('m', 'j', 'p', '2') \
+            || (v) == OMC_FOURCC('j', 'p', 'h', ' ') \
+            || (v) == OMC_FOURCC('j', 'h', 'c', ' ') \
+            || (v) == OMC_FOURCC('j', 'p', 'f', ' ')) { \
+            is_jp2 = 1; \
         } \
     } while (0)
 
@@ -1169,6 +1527,9 @@ omc_scan_bmff_format_from_ftyp(const omc_u8* bytes, omc_size size,
     }
     if (is_avif) {
         return OMC_SCAN_FMT_AVIF;
+    }
+    if (is_jp2) {
+        return OMC_SCAN_FMT_JP2;
     }
     if (is_heif) {
         return OMC_SCAN_FMT_HEIF;
@@ -2724,6 +3085,10 @@ omc_scan_bmff_scan_boxes(const omc_u8* bytes, omc_size size,
 
         if (box.type == OMC_FOURCC('m', 'e', 't', 'a')) {
             omc_scan_bmff_scan_meta_box(bytes, size, &box, format, sink);
+        } else if (format == OMC_SCAN_FMT_JP2
+                   && omc_scan_jp2_emit_direct_metadata_box(bytes, size, &box,
+                                                            sink)) {
+            /* handled */
         } else if (box.type == OMC_FOURCC('E', 'x', 'i', 'f')) {
             omc_blk_ref block;
 
@@ -2736,7 +3101,9 @@ omc_scan_bmff_scan_boxes(const omc_u8* bytes, omc_size size,
             block.data_size = box.size - box.header_size;
             block.id = box.type;
             omc_scan_skip_bmff_exif_offset(&block, bytes, size);
-            omc_scan_skip_exif_preamble(&block, bytes, size);
+            if (format != OMC_SCAN_FMT_JXL) {
+                omc_scan_skip_exif_preamble(&block, bytes, size);
+            }
             omc_scan_sink_emit(sink, &block);
         } else if (box.type == OMC_FOURCC('x', 'm', 'l', ' ')) {
             omc_blk_ref block;
@@ -2750,6 +3117,28 @@ omc_scan_bmff_scan_boxes(const omc_u8* bytes, omc_size size,
             block.data_size = box.size - box.header_size;
             block.id = box.type;
             omc_scan_sink_emit(sink, &block);
+        } else if (format == OMC_SCAN_FMT_JXL
+                   && box.type == OMC_FOURCC('b', 'r', 'o', 'b')
+                   && box.size - box.header_size >= 4U) {
+            omc_u32 realtype;
+
+            if (omc_scan_read_u32be(bytes, size, box.offset + box.header_size,
+                                    &realtype)) {
+                omc_blk_ref block;
+
+                omc_scan_init_block(&block);
+                block.format = format;
+                block.kind = OMC_BLK_COMP_METADATA;
+                block.compression = OMC_BLK_COMP_BROTLI;
+                block.chunking = OMC_BLK_CHUNK_BROB_REALTYPE;
+                block.outer_offset = box.offset;
+                block.outer_size = box.size;
+                block.data_offset = box.offset + box.header_size + 4U;
+                block.data_size = box.size - box.header_size - 4U;
+                block.id = box.type;
+                block.aux_u32 = realtype;
+                omc_scan_sink_emit(sink, &block);
+            }
         } else if (box.type == OMC_FOURCC('j', 'u', 'm', 'b')
                    || box.type == OMC_FOURCC('c', '2', 'p', 'a')) {
             omc_blk_ref block;
@@ -2764,7 +3153,10 @@ omc_scan_bmff_scan_boxes(const omc_u8* bytes, omc_size size,
             block.id = box.type;
             omc_scan_sink_emit(sink, &block);
         } else if (box.type == OMC_FOURCC('u', 'u', 'i', 'd') && box.has_uuid) {
-            if (omc_scan_bmff_uuid_is(&box, k_uuid_xmp)) {
+            if (format == OMC_SCAN_FMT_JP2
+                && omc_scan_jp2_emit_uuid_payload(bytes, size, &box, sink)) {
+                /* handled */
+            } else if (omc_scan_bmff_uuid_is(&box, k_uuid_xmp)) {
                 omc_scan_bmff_emit_uuid_payload(sink, format, OMC_BLK_XMP, &box);
             } else if (omc_scan_bmff_uuid_is(&box, k_uuid_exif)
                        || omc_scan_bmff_uuid_is(&box, k_uuid_geotiff)) {
@@ -2847,6 +3239,8 @@ omc_scan_res
 omc_scan_auto(const omc_u8* bytes, omc_size size,
               omc_blk_ref* out_blocks, omc_u32 out_cap)
 {
+    omc_u32 first_size;
+    omc_u32 first_type;
     omc_u16 tiff_version;
 
     if (bytes == (const omc_u8*)0) {
@@ -2866,6 +3260,18 @@ omc_scan_auto(const omc_u8* bytes, omc_size size,
     if (size >= 12U && omc_scan_match(bytes, size, 0U, "RIFF", 4U)
         && omc_scan_match(bytes, size, 8U, "WEBP", 4U)) {
         return omc_scan_webp(bytes, size, out_blocks, out_cap);
+    }
+
+    if (size >= 12U
+        && omc_scan_read_u32be(bytes, size, 0U, &first_size)
+        && omc_scan_read_u32be(bytes, size, 4U, &first_type)
+        && first_size == 12U) {
+        if (first_type == OMC_FOURCC('j', 'P', ' ', ' ')) {
+            return omc_scan_jp2(bytes, size, out_blocks, out_cap);
+        }
+        if (first_type == OMC_FOURCC('J', 'X', 'L', ' ')) {
+            return omc_scan_jxl(bytes, size, out_blocks, out_cap);
+        }
     }
 
     if (size >= 8U) {
