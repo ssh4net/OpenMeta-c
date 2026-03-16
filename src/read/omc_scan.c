@@ -52,6 +52,32 @@ omc_scan_match(const omc_u8* bytes, omc_size size, omc_u64 offset,
     return memcmp(bytes + (omc_size)offset, sig, sig_size) == 0;
 }
 
+static omc_u64
+omc_scan_find_match(const omc_u8* bytes, omc_size size, omc_u64 start,
+                    omc_u64 end, const char* sig, omc_size sig_size)
+{
+    omc_u64 last;
+    omc_u64 off;
+
+    if (bytes == (const omc_u8*)0 || sig == (const char*)0) {
+        return ~(omc_u64)0;
+    }
+    if (start > end || end > (omc_u64)size || sig_size == 0U) {
+        return ~(omc_u64)0;
+    }
+    if ((omc_u64)sig_size > end - start) {
+        return ~(omc_u64)0;
+    }
+
+    last = end - (omc_u64)sig_size;
+    for (off = start; off <= last; ++off) {
+        if (memcmp(bytes + (omc_size)off, sig, sig_size) == 0) {
+            return off;
+        }
+    }
+    return ~(omc_u64)0;
+}
+
 static int
 omc_scan_read_u16be(const omc_u8* bytes, omc_size size, omc_u64 offset,
                     omc_u16* out_value)
@@ -889,6 +915,246 @@ omc_scan_meas_tiff(const omc_u8* bytes, omc_size size)
 {
     return omc_scan_normalize_measure(
         omc_scan_tiff(bytes, size, (omc_blk_ref*)0, 0U));
+}
+
+omc_scan_res
+omc_scan_crw(const omc_u8* bytes, omc_size size,
+             omc_blk_ref* out_blocks, omc_u32 out_cap)
+{
+    omc_scan_sink sink;
+    omc_u32 root_off;
+    int little_endian;
+    omc_blk_ref block;
+
+    omc_scan_sink_init(&sink, out_blocks, out_cap);
+
+    if (bytes == (const omc_u8*)0) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (size < 14U) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+
+    little_endian = 0;
+    if (bytes[0] == (omc_u8)'I' && bytes[1] == (omc_u8)'I') {
+        little_endian = 1;
+    } else if (!(bytes[0] == (omc_u8)'M' && bytes[1] == (omc_u8)'M')) {
+        sink.result.status = OMC_SCAN_UNSUPPORTED;
+        return sink.result;
+    }
+    if (!omc_scan_match(bytes, size, 6U, "HEAPCCDR", 8U)) {
+        sink.result.status = OMC_SCAN_UNSUPPORTED;
+        return sink.result;
+    }
+
+    if (little_endian) {
+        if (!omc_scan_read_u32le(bytes, size, 2U, &root_off)) {
+            sink.result.status = OMC_SCAN_MALFORMED;
+            return sink.result;
+        }
+    } else {
+        if (!omc_scan_read_u32be(bytes, size, 2U, &root_off)) {
+            sink.result.status = OMC_SCAN_MALFORMED;
+            return sink.result;
+        }
+    }
+    if (root_off < 14U || (omc_u64)root_off > (omc_u64)size) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+
+    omc_scan_init_block(&block);
+    block.format = OMC_SCAN_FMT_CRW;
+    block.kind = OMC_BLK_CIFF;
+    block.outer_offset = 0U;
+    block.outer_size = (omc_u64)size;
+    block.data_offset = 0U;
+    block.data_size = (omc_u64)size;
+    block.id = OMC_FOURCC('C', 'R', 'W', ' ');
+    block.aux_u32 = root_off;
+    omc_scan_sink_emit(&sink, &block);
+    return sink.result;
+}
+
+omc_scan_res
+omc_scan_meas_crw(const omc_u8* bytes, omc_size size)
+{
+    return omc_scan_normalize_measure(
+        omc_scan_crw(bytes, size, (omc_blk_ref*)0, 0U));
+}
+
+omc_scan_res
+omc_scan_raf(const omc_u8* bytes, omc_size size,
+             omc_blk_ref* out_blocks, omc_u32 out_cap)
+{
+    static const char k_xmp_sig[] = "http://ns.adobe.com/xap/1.0/\0";
+    static const char k_close_xmpmeta[] = "</x:xmpmeta>";
+    static const char k_close_rdf[] = "</rdf:RDF>";
+    omc_scan_sink sink;
+    omc_blk_ref block;
+    omc_scan_res tiff_res;
+    omc_u64 tiff_off;
+    omc_u64 max_search;
+    omc_u64 sig_off;
+    omc_u64 data_off;
+    omc_u64 packet_end;
+    omc_u64 end;
+    omc_u64 close;
+
+    omc_scan_sink_init(&sink, out_blocks, out_cap);
+
+    if (bytes == (const omc_u8*)0) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (size < 16U) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (!omc_scan_match(bytes, size, 0U, "FUJIFILMCCD-RAW ", 16U)) {
+        sink.result.status = OMC_SCAN_UNSUPPORTED;
+        return sink.result;
+    }
+
+    tiff_off = 160U;
+    if (tiff_off >= (omc_u64)size
+        || !omc_scan_looks_like_tiff_header(bytes, size, tiff_off)) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+
+    tiff_res = omc_scan_tiff(bytes + (omc_size)tiff_off,
+                             size - (omc_size)tiff_off, &block, 1U);
+    if (tiff_res.status != OMC_SCAN_OK || tiff_res.written != 1U) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+
+    block.format = OMC_SCAN_FMT_RAF;
+    block.outer_offset += tiff_off;
+    block.data_offset += tiff_off;
+    omc_scan_sink_emit(&sink, &block);
+
+    max_search = (omc_u64)size;
+    if (max_search > 32U * 1024U * 1024U) {
+        max_search = 32U * 1024U * 1024U;
+    }
+    sig_off = omc_scan_find_match(bytes, size, 0U, max_search, k_xmp_sig,
+                                  sizeof(k_xmp_sig) - 1U);
+    if (sig_off == ~(omc_u64)0) {
+        return sink.result;
+    }
+
+    data_off = sig_off + (sizeof(k_xmp_sig) - 1U);
+    packet_end = data_off + (512U * 1024U);
+    if (packet_end > (omc_u64)size) {
+        packet_end = (omc_u64)size;
+    }
+
+    end = packet_end;
+    close = omc_scan_find_match(bytes, size, data_off, packet_end,
+                                k_close_xmpmeta,
+                                sizeof(k_close_xmpmeta) - 1U);
+    if (close != ~(omc_u64)0) {
+        end = close + (sizeof(k_close_xmpmeta) - 1U);
+    } else {
+        close = omc_scan_find_match(bytes, size, data_off, packet_end,
+                                    k_close_rdf, sizeof(k_close_rdf) - 1U);
+        if (close != ~(omc_u64)0) {
+            end = close + (sizeof(k_close_rdf) - 1U);
+        }
+    }
+
+    if (end > data_off && end > sig_off) {
+        omc_scan_init_block(&block);
+        block.format = OMC_SCAN_FMT_RAF;
+        block.kind = OMC_BLK_XMP;
+        block.outer_offset = sig_off;
+        block.outer_size = end - sig_off;
+        block.data_offset = data_off;
+        block.data_size = end - data_off;
+        block.id = OMC_FOURCC('x', 'm', 'p', ' ');
+        omc_scan_sink_emit(&sink, &block);
+    }
+
+    return sink.result;
+}
+
+omc_scan_res
+omc_scan_meas_raf(const omc_u8* bytes, omc_size size)
+{
+    return omc_scan_normalize_measure(
+        omc_scan_raf(bytes, size, (omc_blk_ref*)0, 0U));
+}
+
+omc_scan_res
+omc_scan_x3f(const omc_u8* bytes, omc_size size,
+             omc_blk_ref* out_blocks, omc_u32 out_cap)
+{
+    omc_scan_sink sink;
+    omc_u64 max_search;
+    omc_u64 off;
+    omc_blk_ref block;
+    omc_scan_res tiff_res;
+
+    omc_scan_sink_init(&sink, out_blocks, out_cap);
+
+    if (bytes == (const omc_u8*)0) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (size < 4U) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (!omc_scan_match(bytes, size, 0U, "FOVb", 4U)) {
+        sink.result.status = OMC_SCAN_UNSUPPORTED;
+        return sink.result;
+    }
+
+    max_search = (omc_u64)size;
+    if (max_search > 4U * 1024U * 1024U) {
+        max_search = 4U * 1024U * 1024U;
+    }
+    for (off = 0U; off + 10U <= max_search; ++off) {
+        omc_u64 tiff_off;
+
+        if (!omc_scan_match(bytes, size, off, "Exif", 4U)
+            || bytes[(omc_size)off + 4U] != 0U
+            || bytes[(omc_size)off + 5U] != 0U) {
+            continue;
+        }
+
+        tiff_off = off + 6U;
+        if (!omc_scan_looks_like_tiff_header(bytes, size, tiff_off)) {
+            continue;
+        }
+
+        tiff_res = omc_scan_tiff(bytes + (omc_size)tiff_off,
+                                 size - (omc_size)tiff_off, &block, 1U);
+        if (tiff_res.status != OMC_SCAN_OK || tiff_res.written != 1U) {
+            sink.result.status = OMC_SCAN_MALFORMED;
+            return sink.result;
+        }
+
+        block.format = OMC_SCAN_FMT_X3F;
+        block.outer_offset += tiff_off;
+        block.data_offset += tiff_off;
+        omc_scan_sink_emit(&sink, &block);
+        return sink.result;
+    }
+
+    sink.result.status = OMC_SCAN_MALFORMED;
+    return sink.result;
+}
+
+omc_scan_res
+omc_scan_meas_x3f(const omc_u8* bytes, omc_size size)
+{
+    return omc_scan_normalize_measure(
+        omc_scan_x3f(bytes, size, (omc_blk_ref*)0, 0U));
 }
 
 omc_scan_res
@@ -3961,6 +4227,21 @@ omc_scan_auto(const omc_u8* bytes, omc_size size,
         && (omc_scan_match(bytes, size, 0U, "GIF87a", 6U)
             || omc_scan_match(bytes, size, 0U, "GIF89a", 6U))) {
         return omc_scan_gif(bytes, size, out_blocks, out_cap);
+    }
+
+    if (size >= 16U && omc_scan_match(bytes, size, 0U, "FUJIFILMCCD-RAW ", 16U)) {
+        return omc_scan_raf(bytes, size, out_blocks, out_cap);
+    }
+
+    if (size >= 4U && omc_scan_match(bytes, size, 0U, "FOVb", 4U)) {
+        return omc_scan_x3f(bytes, size, out_blocks, out_cap);
+    }
+
+    if (size >= 14U
+        && ((bytes[0] == (omc_u8)'I' && bytes[1] == (omc_u8)'I')
+            || (bytes[0] == (omc_u8)'M' && bytes[1] == (omc_u8)'M'))
+        && omc_scan_match(bytes, size, 6U, "HEAPCCDR", 8U)) {
+        return omc_scan_crw(bytes, size, out_blocks, out_cap);
     }
 
     if (size >= 12U

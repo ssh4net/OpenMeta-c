@@ -24,6 +24,13 @@ append_text(omc_u8* out, omc_size* io_size, const char* text)
 }
 
 static void
+append_zeroes(omc_u8* out, omc_size* io_size, omc_size count)
+{
+    memset(out + *io_size, 0, count);
+    *io_size += count;
+}
+
+static void
 append_u16be(omc_u8* out, omc_size* io_size, omc_u16 value)
 {
     append_u8(out, io_size, (omc_u8)((value >> 8) & 0xFFU));
@@ -571,6 +578,51 @@ make_test_gif_all(omc_u8* out)
     append_gif_sub_blocks(out, &size, icc, sizeof(icc));
 
     append_u8(out, &size, 0x3BU);
+    return size;
+}
+
+static omc_size
+make_test_raf_all(omc_u8* out)
+{
+    static const char xmp_sig[] = "http://ns.adobe.com/xap/1.0/\0";
+    static const char xmp[] =
+        "<x:xmpmeta xmlns:x='adobe:ns:meta/'>"
+        "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>"
+        "<rdf:Description xmlns:xmp='http://ns.adobe.com/xap/1.0/' "
+        "xmp:CreatorTool='OpenMeta'/>"
+        "</rdf:RDF>"
+        "</x:xmpmeta>";
+    omc_u8 tiff[64];
+    omc_size tiff_size;
+    omc_size size;
+
+    tiff_size = make_test_tiff_le(tiff);
+    size = 0U;
+    append_text(out, &size, "FUJIFILMCCD-RAW ");
+    if (size < 160U) {
+        append_zeroes(out, &size, 160U - size);
+    }
+    append_bytes(out, &size, tiff, tiff_size);
+    append_bytes(out, &size, xmp_sig, sizeof(xmp_sig) - 1U);
+    append_text(out, &size, xmp);
+    return size;
+}
+
+static omc_size
+make_test_x3f_all(omc_u8* out)
+{
+    omc_u8 tiff[64];
+    omc_size tiff_size;
+    omc_size size;
+
+    tiff_size = make_test_tiff_le(tiff);
+    size = 0U;
+    append_text(out, &size, "FOVb");
+    append_zeroes(out, &size, 60U);
+    append_text(out, &size, "Exif");
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, tiff, tiff_size);
     return size;
 }
 
@@ -2226,6 +2278,87 @@ test_read_gif_all(void)
 }
 
 static void
+test_read_raf_all(void)
+{
+    omc_u8 raf[1024];
+    omc_size raf_size;
+    omc_store store;
+    omc_blk_ref blocks[8];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload[512];
+    omc_u32 payload_parts[16];
+    omc_read_res res;
+    const omc_entry* exif_make;
+    const omc_entry* xmp_tool;
+    const omc_block_info* block;
+
+    raf_size = make_test_raf_all(raf);
+    omc_store_init(&store);
+
+    res = omc_read_simple(raf, raf_size, &store, blocks, 8U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 16U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.pay.status == OMC_PAY_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    assert(res.xmp.status == OMC_XMP_OK);
+    assert(store.block_count == 2U);
+
+    exif_make = find_exif_entry(&store, "ifd0", 0x010FU);
+    assert(exif_make != (const omc_entry*)0);
+    block = omc_store_block(&store, exif_make->origin.block);
+    assert(block != (const omc_block_info*)0);
+    assert(block->format == OMC_SCAN_FMT_RAF);
+    assert(block->kind == OMC_BLK_EXIF);
+
+    xmp_tool = find_xmp_entry(&store, "http://ns.adobe.com/xap/1.0/",
+                              "CreatorTool");
+    assert(xmp_tool != (const omc_entry*)0);
+    block = omc_store_block(&store, xmp_tool->origin.block);
+    assert(block != (const omc_block_info*)0);
+    assert(block->format == OMC_SCAN_FMT_RAF);
+    assert(block->kind == OMC_BLK_XMP);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_x3f_exif(void)
+{
+    omc_u8 x3f[512];
+    omc_size x3f_size;
+    omc_store store;
+    omc_blk_ref blocks[4];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload[256];
+    omc_u32 payload_parts[8];
+    omc_read_res res;
+    const omc_entry* exif_make;
+    const omc_block_info* block;
+
+    x3f_size = make_test_x3f_all(x3f);
+    omc_store_init(&store);
+
+    res = omc_read_simple(x3f, x3f_size, &store, blocks, 4U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    assert(store.block_count == 1U);
+
+    exif_make = find_exif_entry(&store, "ifd0", 0x010FU);
+    assert(exif_make != (const omc_entry*)0);
+    block = omc_store_block(&store, exif_make->origin.block);
+    assert(block != (const omc_block_info*)0);
+    assert(block->format == OMC_SCAN_FMT_X3F);
+    assert(block->kind == OMC_BLK_EXIF);
+
+    omc_store_fini(&store);
+}
+
+static void
 test_read_bmff_heif_all(void)
 {
     omc_u8 file_bytes[2048];
@@ -2788,6 +2921,8 @@ main(void)
     test_read_png_xmp_compressed();
     test_read_webp_all();
     test_read_gif_all();
+    test_read_raf_all();
+    test_read_x3f_exif();
     test_read_bmff_fields();
     test_read_bmff_heif_all();
     test_read_bmff_avif_all();

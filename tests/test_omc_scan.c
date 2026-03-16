@@ -24,6 +24,13 @@ append_text(omc_u8* out, omc_size* io_size, const char* text)
 }
 
 static void
+append_zeroes(omc_u8* out, omc_size* io_size, omc_size count)
+{
+    memset(out + *io_size, 0, count);
+    *io_size += count;
+}
+
+static void
 append_u16be(omc_u8* out, omc_size* io_size, omc_u16 value)
 {
     append_u8(out, io_size, (omc_u8)((value >> 8) & 0xFFU));
@@ -320,6 +327,57 @@ make_test_gif_scan(omc_u8* out)
     append_gif_sub_blocks(out, &size, icc, sizeof(icc));
 
     append_u8(out, &size, 0x3BU);
+    return size;
+}
+
+static omc_size
+make_test_raf_scan(omc_u8* out)
+{
+    static const char xmp_sig[] = "http://ns.adobe.com/xap/1.0/\0";
+    static const char xmp_packet[] = "<x:xmpmeta/>";
+    omc_u8 tiff[32];
+    omc_size tiff_size;
+    omc_size size;
+
+    tiff_size = make_test_tiff_le(tiff);
+    size = 0U;
+    append_text(out, &size, "FUJIFILMCCD-RAW ");
+    if (size < 160U) {
+        append_zeroes(out, &size, 160U - size);
+    }
+    append_bytes(out, &size, tiff, tiff_size);
+    append_bytes(out, &size, xmp_sig, sizeof(xmp_sig) - 1U);
+    append_text(out, &size, xmp_packet);
+    return size;
+}
+
+static omc_size
+make_test_x3f_scan(omc_u8* out)
+{
+    omc_u8 tiff[32];
+    omc_size tiff_size;
+    omc_size size;
+
+    tiff_size = make_test_tiff_le(tiff);
+    size = 0U;
+    append_text(out, &size, "FOVb");
+    append_zeroes(out, &size, 60U);
+    append_text(out, &size, "Exif");
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, tiff, tiff_size);
+    return size;
+}
+
+static omc_size
+make_test_crw_scan(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u32le(out, &size, 14U);
+    append_text(out, &size, "HEAPCCDR");
     return size;
 }
 
@@ -1160,6 +1218,104 @@ test_scan_gif(void)
 }
 
 static void
+test_scan_raf(void)
+{
+    omc_u8 raf_bytes[512];
+    omc_size raf_size;
+    omc_blk_ref blocks[4];
+    omc_scan_res res;
+
+    raf_size = make_test_raf_scan(raf_bytes);
+    memset(blocks, 0, sizeof(blocks));
+    res = omc_scan_raf(raf_bytes, raf_size, blocks, 4U);
+
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 2U);
+    assert(res.needed == 2U);
+
+    assert(blocks[0].format == OMC_SCAN_FMT_RAF);
+    assert(blocks[0].kind == OMC_BLK_EXIF);
+    assert(blocks[0].data_offset == 160U);
+
+    assert(blocks[1].format == OMC_SCAN_FMT_RAF);
+    assert(blocks[1].kind == OMC_BLK_XMP);
+    assert(blocks[1].id == fourcc('x', 'm', 'p', ' '));
+    assert(memcmp(raf_bytes + (omc_size)blocks[1].data_offset,
+                  "<x:xmpmeta/>", 12U) == 0);
+
+    res = omc_scan_auto(raf_bytes, raf_size, blocks, 4U);
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 2U);
+    assert(res.needed == 2U);
+
+    res = omc_scan_meas_raf(raf_bytes, raf_size);
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 0U);
+    assert(res.needed == 2U);
+}
+
+static void
+test_scan_x3f(void)
+{
+    omc_u8 x3f_bytes[256];
+    omc_size x3f_size;
+    omc_blk_ref blocks[2];
+    omc_scan_res res;
+
+    x3f_size = make_test_x3f_scan(x3f_bytes);
+    memset(blocks, 0, sizeof(blocks));
+    res = omc_scan_x3f(x3f_bytes, x3f_size, blocks, 2U);
+
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 1U);
+    assert(res.needed == 1U);
+    assert(blocks[0].format == OMC_SCAN_FMT_X3F);
+    assert(blocks[0].kind == OMC_BLK_EXIF);
+    assert(blocks[0].data_offset == 70U);
+
+    res = omc_scan_auto(x3f_bytes, x3f_size, blocks, 2U);
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 1U);
+    assert(res.needed == 1U);
+
+    res = omc_scan_meas_x3f(x3f_bytes, x3f_size);
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 0U);
+    assert(res.needed == 1U);
+}
+
+static void
+test_scan_crw(void)
+{
+    omc_u8 crw_bytes[32];
+    omc_size crw_size;
+    omc_blk_ref block;
+    omc_scan_res res;
+
+    crw_size = make_test_crw_scan(crw_bytes);
+    memset(&block, 0, sizeof(block));
+    res = omc_scan_crw(crw_bytes, crw_size, &block, 1U);
+
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 1U);
+    assert(res.needed == 1U);
+    assert(block.format == OMC_SCAN_FMT_CRW);
+    assert(block.kind == OMC_BLK_CIFF);
+    assert(block.aux_u32 == 14U);
+    assert(block.id == fourcc('C', 'R', 'W', ' '));
+
+    res = omc_scan_auto(crw_bytes, crw_size, &block, 1U);
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 1U);
+    assert(res.needed == 1U);
+
+    res = omc_scan_meas_crw(crw_bytes, crw_size);
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 0U);
+    assert(res.needed == 1U);
+}
+
+static void
 test_scan_tiff(void)
 {
     static const omc_u8 tiff_bytes[] = {
@@ -1409,6 +1565,9 @@ main(void)
     test_scan_png_text();
     test_scan_webp();
     test_scan_gif();
+    test_scan_raf();
+    test_scan_x3f();
+    test_scan_crw();
     test_scan_tiff();
     test_scan_bmff_heif_and_avif();
     test_scan_bmff_cr3();

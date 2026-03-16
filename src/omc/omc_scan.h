@@ -24,7 +24,10 @@ typedef enum omc_scan_fmt {
     OMC_SCAN_FMT_JXL = 7,
     OMC_SCAN_FMT_HEIF = 8,
     OMC_SCAN_FMT_AVIF = 9,
-    OMC_SCAN_FMT_CR3 = 10
+    OMC_SCAN_FMT_CR3 = 10,
+    OMC_SCAN_FMT_CRW = 11,
+    OMC_SCAN_FMT_RAF = 12,
+    OMC_SCAN_FMT_X3F = 13
 } omc_scan_fmt;
 
 typedef enum omc_blk_kind {
@@ -112,6 +115,27 @@ omc_scan_tiff(const omc_u8* bytes, omc_size size,
 
 OMC_API omc_scan_res
 omc_scan_meas_tiff(const omc_u8* bytes, omc_size size);
+
+OMC_API omc_scan_res
+omc_scan_crw(const omc_u8* bytes, omc_size size,
+             omc_blk_ref* out_blocks, omc_u32 out_cap);
+
+OMC_API omc_scan_res
+omc_scan_meas_crw(const omc_u8* bytes, omc_size size);
+
+OMC_API omc_scan_res
+omc_scan_raf(const omc_u8* bytes, omc_size size,
+             omc_blk_ref* out_blocks, omc_u32 out_cap);
+
+OMC_API omc_scan_res
+omc_scan_meas_raf(const omc_u8* bytes, omc_size size);
+
+OMC_API omc_scan_res
+omc_scan_x3f(const omc_u8* bytes, omc_size size,
+             omc_blk_ref* out_blocks, omc_u32 out_cap);
+
+OMC_API omc_scan_res
+omc_scan_meas_x3f(const omc_u8* bytes, omc_size size);
 
 OMC_API omc_scan_res
 omc_scan_jp2(const omc_u8* bytes, omc_size size,
