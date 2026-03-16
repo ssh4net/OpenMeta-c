@@ -11,6 +11,10 @@ omc_read_init_res(omc_read_res* res)
     res->pay.status = OMC_PAY_OK;
     res->pay.written = 0U;
     res->pay.needed = 0U;
+    res->bmff.status = OMC_BMFF_OK;
+    res->bmff.boxes_scanned = 0U;
+    res->bmff.item_infos = 0U;
+    res->bmff.entries_decoded = 0U;
     res->exif.status = OMC_EXIF_OK;
     res->exif.ifds_written = 0U;
     res->exif.ifds_needed = 0U;
@@ -75,6 +79,27 @@ omc_read_merge_pay(omc_pay_res* dst, omc_pay_res src)
         return;
     }
     if (src.status == OMC_PAY_TRUNCATED) {
+        dst->status = src.status;
+    }
+}
+
+static void
+omc_read_merge_bmff(omc_bmff_res* dst, omc_bmff_res src)
+{
+    dst->boxes_scanned += src.boxes_scanned;
+    dst->item_infos += src.item_infos;
+    dst->entries_decoded += src.entries_decoded;
+    if (dst->status == OMC_BMFF_NOMEM || dst->status == OMC_BMFF_LIMIT) {
+        return;
+    }
+    if (src.status == OMC_BMFF_NOMEM || src.status == OMC_BMFF_LIMIT) {
+        dst->status = src.status;
+        return;
+    }
+    if (dst->status == OMC_BMFF_MALFORMED) {
+        return;
+    }
+    if (src.status == OMC_BMFF_MALFORMED) {
         dst->status = src.status;
     }
 }
@@ -271,6 +296,28 @@ omc_read_store_block(omc_store* store, const omc_blk_ref* block,
 }
 
 static int
+omc_read_read_u32be(const omc_u8* bytes, omc_size size, omc_u64 off,
+                    omc_u32* out_value)
+{
+    omc_u32 value;
+
+    if (bytes == (const omc_u8*)0 || out_value == (omc_u32*)0) {
+        return 0;
+    }
+    if (off + 4U > (omc_u64)size) {
+        return 0;
+    }
+
+    value = 0U;
+    value |= (omc_u32)bytes[(omc_size)off + 0U] << 24;
+    value |= (omc_u32)bytes[(omc_size)off + 1U] << 16;
+    value |= (omc_u32)bytes[(omc_size)off + 2U] << 8;
+    value |= (omc_u32)bytes[(omc_size)off + 3U] << 0;
+    *out_value = value;
+    return 1;
+}
+
+static int
 omc_read_should_decode_block(const omc_blk_ref* block)
 {
     if (block == (const omc_blk_ref*)0) {
@@ -280,6 +327,309 @@ omc_read_should_decode_block(const omc_blk_ref* block)
         return 1;
     }
     return block->part_index == 0U;
+}
+
+static int
+omc_read_has_nul(const omc_u8* bytes, omc_size size)
+{
+    omc_size i;
+
+    if (bytes == (const omc_u8*)0) {
+        return 0;
+    }
+    for (i = 0U; i < size; ++i) {
+        if (bytes[i] == 0U) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
+omc_read_bytes_ascii(const omc_u8* bytes, omc_size size)
+{
+    omc_size i;
+
+    if (bytes == (const omc_u8*)0) {
+        return 0;
+    }
+    for (i = 0U; i < size; ++i) {
+        if (bytes[i] >= 0x80U) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+omc_read_bytes_valid_utf8(const omc_u8* bytes, omc_size size)
+{
+    omc_size i;
+
+    if (bytes == (const omc_u8*)0) {
+        return 0;
+    }
+
+    i = 0U;
+    while (i < size) {
+        omc_u8 c0;
+        omc_u32 cp;
+        omc_size needed;
+        omc_u32 min_cp;
+        omc_size j;
+
+        c0 = bytes[i];
+        if (c0 < 0x80U) {
+            i += 1U;
+            continue;
+        }
+        if ((c0 & 0xE0U) == 0xC0U) {
+            needed = 1U;
+            cp = c0 & 0x1FU;
+            min_cp = 0x80U;
+        } else if ((c0 & 0xF0U) == 0xE0U) {
+            needed = 2U;
+            cp = c0 & 0x0FU;
+            min_cp = 0x800U;
+        } else if ((c0 & 0xF8U) == 0xF0U) {
+            needed = 3U;
+            cp = c0 & 0x07U;
+            min_cp = 0x10000U;
+        } else {
+            return 0;
+        }
+        if (i + needed >= size) {
+            return 0;
+        }
+        for (j = 1U; j <= needed; ++j) {
+            omc_u8 cx;
+
+            cx = bytes[i + j];
+            if ((cx & 0xC0U) != 0x80U) {
+                return 0;
+            }
+            cp = (cp << 6) | (omc_u32)(cx & 0x3FU);
+        }
+        if (cp < min_cp || cp > 0x10FFFFU) {
+            return 0;
+        }
+        if (cp >= 0xD800U && cp <= 0xDFFFU) {
+            return 0;
+        }
+        i += needed + 1U;
+    }
+    return 1;
+}
+
+static int
+omc_read_emit_comment_entry(omc_store* store, omc_block_id block_id,
+                            const omc_u8* bytes, omc_size size)
+{
+    omc_entry entry;
+    omc_byte_ref value_ref;
+    omc_status st;
+
+    if (store == (omc_store*)0 || bytes == (const omc_u8*)0) {
+        return 0;
+    }
+
+    st = omc_arena_append(&store->arena, bytes, size, &value_ref);
+    if (st != OMC_STATUS_OK) {
+        return 0;
+    }
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_comment(&entry.key);
+    if (!omc_read_has_nul(bytes, size) && omc_read_bytes_ascii(bytes, size)) {
+        omc_val_make_text(&entry.value, value_ref, OMC_TEXT_ASCII);
+    } else if (!omc_read_has_nul(bytes, size)
+               && omc_read_bytes_valid_utf8(bytes, size)) {
+        omc_val_make_text(&entry.value, value_ref, OMC_TEXT_UTF8);
+    } else {
+        omc_val_make_bytes(&entry.value, value_ref);
+    }
+    entry.origin.block = block_id;
+    entry.origin.order_in_block = 0U;
+    entry.origin.wire_type.family = OMC_WIRE_OTHER;
+    return omc_store_add_entry(store, &entry, (omc_entry_id*)0)
+           == OMC_STATUS_OK;
+}
+
+static int
+omc_read_emit_png_text_entry(omc_store* store, omc_block_id block_id,
+                             omc_u32* io_order, const omc_u8* keyword,
+                             omc_size keyword_size, const char* field,
+                             const omc_u8* text, omc_size text_size,
+                             omc_text_encoding enc)
+{
+    omc_entry entry;
+    omc_byte_ref keyword_ref;
+    omc_byte_ref field_ref;
+    omc_byte_ref value_ref;
+    omc_status st;
+
+    if (store == (omc_store*)0 || io_order == (omc_u32*)0
+        || keyword == (const omc_u8*)0 || field == (const char*)0
+        || text == (const omc_u8*)0) {
+        return 0;
+    }
+
+    st = omc_arena_append(&store->arena, keyword, keyword_size, &keyword_ref);
+    if (st != OMC_STATUS_OK) {
+        return 0;
+    }
+    st = omc_arena_append(&store->arena, field, strlen(field), &field_ref);
+    if (st != OMC_STATUS_OK) {
+        return 0;
+    }
+    st = omc_arena_append(&store->arena, text, text_size, &value_ref);
+    if (st != OMC_STATUS_OK) {
+        return 0;
+    }
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_png_text(&entry.key, keyword_ref, field_ref);
+    omc_val_make_text(&entry.value, value_ref, enc);
+    entry.origin.block = block_id;
+    entry.origin.order_in_block = *io_order;
+    entry.origin.wire_type.family = OMC_WIRE_OTHER;
+    if (omc_store_add_entry(store, &entry, (omc_entry_id*)0)
+        != OMC_STATUS_OK) {
+        return 0;
+    }
+
+    *io_order += 1U;
+    return 1;
+}
+
+static void
+omc_read_decode_png_text(const omc_u8* file_bytes, omc_size file_size,
+                         const omc_blk_ref* block, omc_const_bytes block_view,
+                         int payload_decompressed, omc_store* store,
+                         omc_block_id block_id)
+{
+    omc_u32 data_size;
+    omc_u32 type;
+    const omc_u8* data;
+    omc_u32 order;
+    omc_size keyword_end;
+
+    if (file_bytes == (const omc_u8*)0 || block == (const omc_blk_ref*)0
+        || store == (omc_store*)0) {
+        return;
+    }
+    if (block->format != OMC_SCAN_FMT_PNG || block->kind != OMC_BLK_TEXT) {
+        return;
+    }
+    if (block->outer_offset > (omc_u64)file_size
+        || block->outer_size > ((omc_u64)file_size - block->outer_offset)
+        || block->outer_size < 12U) {
+        return;
+    }
+    if (!omc_read_read_u32be(file_bytes, file_size, block->outer_offset + 0U,
+                             &data_size)
+        || !omc_read_read_u32be(file_bytes, file_size, block->outer_offset + 4U,
+                                &type)) {
+        return;
+    }
+    if ((omc_u64)data_size + 12U != block->outer_size) {
+        return;
+    }
+
+    data = file_bytes + (omc_size)block->outer_offset + 8U;
+    order = 0U;
+    if (type == OMC_FOURCC('t', 'E', 'X', 't')) {
+        const omc_u8* text;
+        omc_size text_size;
+
+        keyword_end = 0U;
+        while (keyword_end < data_size && data[keyword_end] != 0U) {
+            keyword_end += 1U;
+        }
+        if (keyword_end >= data_size) {
+            return;
+        }
+        text = data + keyword_end + 1U;
+        text_size = (omc_size)data_size - (keyword_end + 1U);
+        (void)omc_read_emit_png_text_entry(store, block_id, &order, data,
+                                           keyword_end, "text", text,
+                                           text_size, OMC_TEXT_UNKNOWN);
+        return;
+    }
+
+    if (type == OMC_FOURCC('z', 'T', 'X', 't')) {
+        keyword_end = 0U;
+        while (keyword_end < data_size && data[keyword_end] != 0U) {
+            keyword_end += 1U;
+        }
+        if (keyword_end + 2U > data_size || !payload_decompressed) {
+            return;
+        }
+        (void)omc_read_emit_png_text_entry(store, block_id, &order, data,
+                                           keyword_end, "text",
+                                           block_view.data, block_view.size,
+                                           OMC_TEXT_UNKNOWN);
+        return;
+    }
+
+    if (type == OMC_FOURCC('i', 'T', 'X', 't')) {
+        omc_size p;
+        omc_size lang_end;
+        omc_size translated_start;
+        omc_size translated_end;
+        int compressed;
+
+        keyword_end = 0U;
+        while (keyword_end < data_size && data[keyword_end] != 0U) {
+            keyword_end += 1U;
+        }
+        if (keyword_end + 3U > data_size) {
+            return;
+        }
+
+        compressed = data[keyword_end + 1U] != 0U;
+        if (compressed && !payload_decompressed) {
+            return;
+        }
+
+        p = keyword_end + 3U;
+        lang_end = p;
+        while (lang_end < data_size && data[lang_end] != 0U) {
+            lang_end += 1U;
+        }
+        if (lang_end >= data_size) {
+            return;
+        }
+
+        translated_start = lang_end + 1U;
+        translated_end = translated_start;
+        while (translated_end < data_size && data[translated_end] != 0U) {
+            translated_end += 1U;
+        }
+        if (translated_end >= data_size) {
+            return;
+        }
+
+        if (lang_end > p) {
+            (void)omc_read_emit_png_text_entry(store, block_id, &order, data,
+                                               keyword_end, "language",
+                                               data + p, lang_end - p,
+                                               OMC_TEXT_ASCII);
+        }
+        if (translated_end > translated_start) {
+            (void)omc_read_emit_png_text_entry(store, block_id, &order, data,
+                                               keyword_end,
+                                               "translated_keyword",
+                                               data + translated_start,
+                                               translated_end
+                                                   - translated_start,
+                                               OMC_TEXT_UTF8);
+        }
+        (void)omc_read_emit_png_text_entry(store, block_id, &order, data,
+                                           keyword_end, "text",
+                                           block_view.data, block_view.size,
+                                           OMC_TEXT_UTF8);
+    }
 }
 
 static int
@@ -453,6 +803,7 @@ omc_read_opts_init(omc_read_opts* opts)
         return;
     }
 
+    omc_bmff_opts_init(&opts->bmff);
     omc_exif_opts_init(&opts->exif);
     omc_icc_opts_init(&opts->icc);
     omc_iptc_opts_init(&opts->iptc);
@@ -488,6 +839,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
 
     if (file_bytes == (const omc_u8*)0 || store == (omc_store*)0) {
         res.scan.status = OMC_SCAN_MALFORMED;
+        res.bmff.status = OMC_BMFF_MALFORMED;
         res.exif.status = OMC_EXIF_MALFORMED;
         res.icc.status = OMC_ICC_MALFORMED;
         res.iptc.status = OMC_IPTC_MALFORMED;
@@ -499,6 +851,9 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
 
     entries_before = store->entry_count;
     res.scan = omc_scan_auto(file_bytes, file_size, out_blocks, block_cap);
+    omc_read_merge_bmff(&res.bmff,
+                        omc_bmff_dec(file_bytes, file_size, store,
+                                     &use_opts->bmff));
 
     for (i = 0U; i < res.scan.written; ++i) {
         const omc_blk_ref* block;
@@ -684,6 +1039,38 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                         &use_opts->exif);
                 omc_read_merge_exif(&res.exif, exif_res);
             }
+        } else if (block->kind == OMC_BLK_COMMENT) {
+            omc_const_bytes block_view;
+            omc_pay_res pay_res;
+
+            if (!omc_read_block_view(file_bytes, file_size, out_blocks,
+                                     res.scan.written, i, payload, payload_cap,
+                                     payload_scratch_indices,
+                                     payload_scratch_cap, &use_opts->pay,
+                                     &block_view, &pay_res)) {
+                omc_read_merge_pay(&res.pay, pay_res);
+                continue;
+            }
+
+            omc_read_merge_pay(&res.pay, pay_res);
+            (void)omc_read_emit_comment_entry(store, block_id, block_view.data,
+                                              block_view.size);
+        } else if (block->kind == OMC_BLK_TEXT) {
+            omc_const_bytes block_view;
+            omc_pay_res pay_res;
+
+            if (!omc_read_block_view(file_bytes, file_size, out_blocks,
+                                     res.scan.written, i, payload, payload_cap,
+                                     payload_scratch_indices,
+                                     payload_scratch_cap, &use_opts->pay,
+                                     &block_view, &pay_res)) {
+                omc_read_merge_pay(&res.pay, pay_res);
+                continue;
+            }
+
+            omc_read_merge_pay(&res.pay, pay_res);
+            omc_read_decode_png_text(file_bytes, file_size, block, block_view,
+                                     1, store, block_id);
         }
     }
 

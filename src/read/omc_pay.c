@@ -34,11 +34,13 @@ omc_pay_same_stream(const omc_blk_ref* seed, const omc_blk_ref* cand)
     return 1;
 }
 
+#if OMC_HAVE_ZLIB || OMC_HAVE_BROTLI
 static omc_u64
 omc_pay_min_u64(omc_u64 a, omc_u64 b)
 {
     return (a < b) ? a : b;
 }
+#endif
 
 static int
 omc_pay_copy_range(const omc_u8* file_bytes, omc_size file_size,

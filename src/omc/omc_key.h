@@ -9,17 +9,19 @@ OMC_EXTERN_C_BEGIN
 
 typedef enum omc_key_kind {
     OMC_KEY_EXIF_TAG = 0,
-    OMC_KEY_EXR_ATTR = 1,
-    OMC_KEY_IPTC_DATASET = 2,
-    OMC_KEY_XMP_PROPERTY = 3,
-    OMC_KEY_ICC_HEADER_FIELD = 4,
-    OMC_KEY_ICC_TAG = 5,
-    OMC_KEY_PHOTOSHOP_IRB = 6,
-    OMC_KEY_GEOTIFF_KEY = 7,
-    OMC_KEY_PRINTIM_FIELD = 8,
-    OMC_KEY_BMFF_FIELD = 9,
-    OMC_KEY_JUMBF_FIELD = 10,
-    OMC_KEY_JUMBF_CBOR_KEY = 11
+    OMC_KEY_COMMENT = 1,
+    OMC_KEY_EXR_ATTR = 2,
+    OMC_KEY_IPTC_DATASET = 3,
+    OMC_KEY_XMP_PROPERTY = 4,
+    OMC_KEY_ICC_HEADER_FIELD = 5,
+    OMC_KEY_ICC_TAG = 6,
+    OMC_KEY_PHOTOSHOP_IRB = 7,
+    OMC_KEY_GEOTIFF_KEY = 8,
+    OMC_KEY_PRINTIM_FIELD = 9,
+    OMC_KEY_BMFF_FIELD = 10,
+    OMC_KEY_JUMBF_FIELD = 11,
+    OMC_KEY_JUMBF_CBOR_KEY = 12,
+    OMC_KEY_PNG_TEXT = 13
 } omc_key_kind;
 
 typedef struct omc_key {
@@ -29,6 +31,9 @@ typedef struct omc_key {
             omc_byte_ref ifd;
             omc_u16 tag;
         } exif_tag;
+        struct {
+            omc_u8 reserved;
+        } comment;
         struct {
             omc_u32 part_index;
             omc_byte_ref name;
@@ -65,6 +70,10 @@ typedef struct omc_key {
         struct {
             omc_byte_ref key;
         } jumbf_cbor_key;
+        struct {
+            omc_byte_ref keyword;
+            omc_byte_ref field;
+        } png_text;
     } u;
 } omc_key;
 
@@ -73,6 +82,9 @@ omc_key_init(omc_key* key);
 
 OMC_API void
 omc_key_make_exif_tag(omc_key* key, omc_byte_ref ifd, omc_u16 tag);
+
+OMC_API void
+omc_key_make_comment(omc_key* key);
 
 OMC_API void
 omc_key_make_xmp_property(omc_key* key, omc_byte_ref schema_ns,
@@ -91,10 +103,16 @@ OMC_API void
 omc_key_make_photoshop_irb(omc_key* key, omc_u16 resource_id);
 
 OMC_API void
+omc_key_make_bmff_field(omc_key* key, omc_byte_ref field);
+
+OMC_API void
 omc_key_make_jumbf_field(omc_key* key, omc_byte_ref field);
 
 OMC_API void
 omc_key_make_jumbf_cbor_key(omc_key* key, omc_byte_ref ref);
+
+OMC_API void
+omc_key_make_png_text(omc_key* key, omc_byte_ref keyword, omc_byte_ref field);
 
 OMC_EXTERN_C_END
 

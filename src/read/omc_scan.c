@@ -1003,7 +1003,51 @@ omc_scan_png(const omc_u8* bytes, omc_size size,
                     block.compression = OMC_BLK_COMP_DEFLATE;
                 }
                 omc_scan_sink_emit(&sink, &block);
+            } else if (text_off <= end) {
+                omc_scan_init_block(&block);
+                block.format = OMC_SCAN_FMT_PNG;
+                block.kind = OMC_BLK_TEXT;
+                block.outer_offset = chunk_off;
+                block.outer_size = chunk_size;
+                block.data_offset = text_off;
+                block.data_size = end - text_off;
+                block.id = type;
+                if (comp_flag != 0U) {
+                    block.compression = OMC_BLK_COMP_DEFLATE;
+                }
+                omc_scan_sink_emit(&sink, &block);
             }
+        } else if (type == OMC_FOURCC('z', 'T', 'X', 't')) {
+            omc_u64 p;
+            omc_u64 end;
+
+            p = data_off;
+            end = data_off + data_size;
+            while (p < end && bytes[(omc_size)p] != 0U) {
+                p += 1U;
+            }
+            if (p + 2U <= end) {
+                omc_scan_init_block(&block);
+                block.format = OMC_SCAN_FMT_PNG;
+                block.kind = OMC_BLK_TEXT;
+                block.compression = OMC_BLK_COMP_DEFLATE;
+                block.outer_offset = chunk_off;
+                block.outer_size = chunk_size;
+                block.data_offset = p + 2U;
+                block.data_size = end - (p + 2U);
+                block.id = type;
+                omc_scan_sink_emit(&sink, &block);
+            }
+        } else if (type == OMC_FOURCC('t', 'E', 'X', 't')) {
+            omc_scan_init_block(&block);
+            block.format = OMC_SCAN_FMT_PNG;
+            block.kind = OMC_BLK_TEXT;
+            block.outer_offset = chunk_off;
+            block.outer_size = chunk_size;
+            block.data_offset = data_off;
+            block.data_size = data_size;
+            block.id = type;
+            omc_scan_sink_emit(&sink, &block);
         }
 
     next_png_chunk:

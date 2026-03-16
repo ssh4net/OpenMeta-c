@@ -42,6 +42,7 @@ set(OMC_SOURCES
   core/omc_key.c
   core/omc_val.c
   core/omc_store.c
+  read/omc_bmff.c
   read/omc_exif.c
   read/omc_icc.c
   read/omc_iptc.c

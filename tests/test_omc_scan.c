@@ -185,6 +185,48 @@ make_test_png_scan(omc_u8* out)
     return size;
 }
 
+static omc_size
+make_test_png_text_scan(omc_u8* out)
+{
+    static const omc_u8 png_sig[8] = {
+        0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU
+    };
+    static const omc_u8 ztxt_payload[] = {
+        'C', 'o', 'm', 'm', 'e', 'n', 't', 0x00U, 0x00U,
+        0x78U, 0x01U, 0x01U, 0x03U, 0x00U, 0xFCU, 0xFFU,
+        'A', 'B', 'C', 0x01U, 0x8DU, 0x00U, 0xC7U
+    };
+    omc_u8 text_payload[64];
+    omc_u8 itxt_payload[96];
+    omc_size text_size;
+    omc_size itxt_size;
+    omc_size size;
+
+    text_size = 0U;
+    append_text(text_payload, &text_size, "Author");
+    append_u8(text_payload, &text_size, 0U);
+    append_text(text_payload, &text_size, "Alice");
+
+    itxt_size = 0U;
+    append_text(itxt_payload, &itxt_size, "Description");
+    append_u8(itxt_payload, &itxt_size, 0U);
+    append_u8(itxt_payload, &itxt_size, 0U);
+    append_u8(itxt_payload, &itxt_size, 0U);
+    append_text(itxt_payload, &itxt_size, "en");
+    append_u8(itxt_payload, &itxt_size, 0U);
+    append_text(itxt_payload, &itxt_size, "Beschreibung");
+    append_u8(itxt_payload, &itxt_size, 0U);
+    append_text(itxt_payload, &itxt_size, "OpenMeta PNG");
+
+    size = 0U;
+    append_bytes(out, &size, png_sig, sizeof(png_sig));
+    append_png_chunk(out, &size, "tEXt", text_payload, text_size);
+    append_png_chunk(out, &size, "zTXt", ztxt_payload, sizeof(ztxt_payload));
+    append_png_chunk(out, &size, "iTXt", itxt_payload, itxt_size);
+    append_png_chunk(out, &size, "IEND", (const omc_u8*)0, 0U);
+    return size;
+}
+
 static void
 append_webp_chunk(omc_u8* out, omc_size* io_size, const char* type,
                   const omc_u8* payload, omc_size payload_size)
@@ -964,6 +1006,34 @@ test_scan_png(void)
 }
 
 static void
+test_scan_png_text(void)
+{
+    omc_u8 png_bytes[256];
+    omc_size png_size;
+    omc_blk_ref blocks[4];
+    omc_scan_res res;
+
+    png_size = make_test_png_text_scan(png_bytes);
+    memset(blocks, 0, sizeof(blocks));
+    res = omc_scan_auto(png_bytes, png_size, blocks, 4U);
+
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 3U);
+    assert(blocks[0].format == OMC_SCAN_FMT_PNG);
+    assert(blocks[0].kind == OMC_BLK_TEXT);
+    assert(blocks[0].compression == OMC_BLK_COMP_NONE);
+    assert(blocks[0].id == fourcc('t', 'E', 'X', 't'));
+    assert(blocks[1].format == OMC_SCAN_FMT_PNG);
+    assert(blocks[1].kind == OMC_BLK_TEXT);
+    assert(blocks[1].compression == OMC_BLK_COMP_DEFLATE);
+    assert(blocks[1].id == fourcc('z', 'T', 'X', 't'));
+    assert(blocks[2].format == OMC_SCAN_FMT_PNG);
+    assert(blocks[2].kind == OMC_BLK_TEXT);
+    assert(blocks[2].compression == OMC_BLK_COMP_NONE);
+    assert(blocks[2].id == fourcc('i', 'T', 'X', 't'));
+}
+
+static void
 test_scan_webp(void)
 {
     omc_u8 webp_bytes[256];
@@ -1241,6 +1311,7 @@ main(void)
     test_scan_jpeg();
     test_scan_jpeg_app11_jumbf();
     test_scan_png();
+    test_scan_png_text();
     test_scan_webp();
     test_scan_tiff();
     test_scan_bmff_heif_and_avif();
