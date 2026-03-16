@@ -238,6 +238,35 @@ omc_scan_init_block(omc_blk_ref* block)
     block->chunking = OMC_BLK_CHUNK_NONE;
 }
 
+static int
+omc_scan_skip_gif_sub_blocks(const omc_u8* bytes, omc_size size,
+                             omc_u64 start, omc_u64* out_end)
+{
+    omc_u64 p;
+
+    if (bytes == (const omc_u8*)0 || out_end == (omc_u64*)0
+        || start > (omc_u64)size) {
+        return 0;
+    }
+
+    p = start;
+    while (p < (omc_u64)size) {
+        omc_u8 sub_size;
+
+        sub_size = bytes[(omc_size)p];
+        p += 1U;
+        if (sub_size == 0U) {
+            *out_end = p;
+            return 1;
+        }
+        if ((omc_u64)sub_size > ((omc_u64)size - p)) {
+            return 0;
+        }
+        p += (omc_u64)sub_size;
+    }
+    return 0;
+}
+
 static omc_u64
 omc_scan_fnv1a64(const omc_u8* bytes, omc_size size, omc_u64 offset,
                  omc_u64 span_size)
@@ -1175,6 +1204,201 @@ omc_scan_meas_webp(const omc_u8* bytes, omc_size size)
 {
     return omc_scan_normalize_measure(
         omc_scan_webp(bytes, size, (omc_blk_ref*)0, 0U));
+}
+
+omc_scan_res
+omc_scan_gif(const omc_u8* bytes, omc_size size,
+             omc_blk_ref* out_blocks, omc_u32 out_cap)
+{
+    omc_scan_sink sink;
+    omc_u64 offset;
+
+    omc_scan_sink_init(&sink, out_blocks, out_cap);
+
+    if (bytes == (const omc_u8*)0) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (size < 13U) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+    if (!omc_scan_match(bytes, size, 0U, "GIF87a", 6U)
+        && !omc_scan_match(bytes, size, 0U, "GIF89a", 6U)) {
+        sink.result.status = OMC_SCAN_UNSUPPORTED;
+        return sink.result;
+    }
+
+    offset = 6U;
+    if (offset + 7U > (omc_u64)size) {
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+
+    {
+        omc_u8 packed;
+
+        packed = bytes[(omc_size)offset + 4U];
+        offset += 7U;
+        if ((packed & 0x80U) != 0U) {
+            omc_u64 gct_bytes;
+
+            gct_bytes = (omc_u64)3U << ((packed & 0x07U) + 1U);
+            if (offset + gct_bytes > (omc_u64)size) {
+                sink.result.status = OMC_SCAN_MALFORMED;
+                return sink.result;
+            }
+            offset += gct_bytes;
+        }
+    }
+
+    while (offset < (omc_u64)size) {
+        omc_u8 introducer;
+
+        introducer = bytes[(omc_size)offset];
+        if (introducer == 0x3BU) {
+            break;
+        }
+        if (introducer == 0x21U) {
+            omc_u8 label;
+
+            if (offset + 2U > (omc_u64)size) {
+                sink.result.status = OMC_SCAN_MALFORMED;
+                return sink.result;
+            }
+            label = bytes[(omc_size)offset + 1U];
+            if (label == 0xFEU) {
+                omc_u64 data_off;
+                omc_u64 ext_end;
+                omc_blk_ref block;
+
+                data_off = offset + 2U;
+                if (!omc_scan_skip_gif_sub_blocks(bytes, size, data_off,
+                                                  &ext_end)) {
+                    sink.result.status = OMC_SCAN_MALFORMED;
+                    return sink.result;
+                }
+                omc_scan_init_block(&block);
+                block.format = OMC_SCAN_FMT_GIF;
+                block.kind = OMC_BLK_COMMENT;
+                block.chunking = OMC_BLK_CHUNK_GIF_SUB;
+                block.outer_offset = offset;
+                block.outer_size = ext_end - offset;
+                block.data_offset = data_off;
+                block.data_size = ext_end - data_off;
+                block.id = 0x21FEU;
+                omc_scan_sink_emit(&sink, &block);
+                offset = ext_end;
+                continue;
+            }
+            if (label == 0xFFU) {
+                omc_u8 app_block_size;
+                omc_u64 app_id_off;
+                omc_u64 data_off;
+                omc_u64 ext_end;
+                int is_xmp;
+                int is_icc;
+
+                if (offset + 3U > (omc_u64)size) {
+                    sink.result.status = OMC_SCAN_MALFORMED;
+                    return sink.result;
+                }
+                app_block_size = bytes[(omc_size)offset + 2U];
+                if (offset + 3U + (omc_u64)app_block_size > (omc_u64)size) {
+                    sink.result.status = OMC_SCAN_MALFORMED;
+                    return sink.result;
+                }
+
+                app_id_off = offset + 3U;
+                data_off = app_id_off + (omc_u64)app_block_size;
+                if (!omc_scan_skip_gif_sub_blocks(bytes, size, data_off,
+                                                  &ext_end)) {
+                    sink.result.status = OMC_SCAN_MALFORMED;
+                    return sink.result;
+                }
+
+                is_xmp = 0;
+                is_icc = 0;
+                if (app_block_size == 11U) {
+                    is_xmp = omc_scan_match(bytes, size, app_id_off,
+                                            "XMP Data", 8U)
+                             && omc_scan_match(bytes, size, app_id_off + 8U,
+                                               "XMP", 3U);
+                    is_icc = omc_scan_match(bytes, size, app_id_off,
+                                            "ICCRGBG1", 8U)
+                             && omc_scan_match(bytes, size, app_id_off + 8U,
+                                               "012", 3U);
+                }
+                if (is_xmp || is_icc) {
+                    omc_blk_ref block;
+
+                    omc_scan_init_block(&block);
+                    block.format = OMC_SCAN_FMT_GIF;
+                    block.kind = is_xmp ? OMC_BLK_XMP : OMC_BLK_ICC;
+                    block.chunking = OMC_BLK_CHUNK_GIF_SUB;
+                    block.outer_offset = offset;
+                    block.outer_size = ext_end - offset;
+                    block.data_offset = data_off;
+                    block.data_size = ext_end - data_off;
+                    block.id = 0x21FFU;
+                    omc_scan_sink_emit(&sink, &block);
+                }
+
+                offset = ext_end;
+                continue;
+            }
+
+            if (!omc_scan_skip_gif_sub_blocks(bytes, size, offset + 2U,
+                                              &offset)) {
+                sink.result.status = OMC_SCAN_MALFORMED;
+                return sink.result;
+            }
+            continue;
+        }
+
+        if (introducer == 0x2CU) {
+            omc_u8 packed;
+
+            if (offset + 10U > (omc_u64)size) {
+                sink.result.status = OMC_SCAN_MALFORMED;
+                return sink.result;
+            }
+            packed = bytes[(omc_size)offset + 9U];
+            offset += 10U;
+            if ((packed & 0x80U) != 0U) {
+                omc_u64 lct_bytes;
+
+                lct_bytes = (omc_u64)3U << ((packed & 0x07U) + 1U);
+                if (offset + lct_bytes > (omc_u64)size) {
+                    sink.result.status = OMC_SCAN_MALFORMED;
+                    return sink.result;
+                }
+                offset += lct_bytes;
+            }
+            if (offset + 1U > (omc_u64)size) {
+                sink.result.status = OMC_SCAN_MALFORMED;
+                return sink.result;
+            }
+            offset += 1U;
+            if (!omc_scan_skip_gif_sub_blocks(bytes, size, offset, &offset)) {
+                sink.result.status = OMC_SCAN_MALFORMED;
+                return sink.result;
+            }
+            continue;
+        }
+
+        sink.result.status = OMC_SCAN_MALFORMED;
+        return sink.result;
+    }
+
+    return sink.result;
+}
+
+omc_scan_res
+omc_scan_meas_gif(const omc_u8* bytes, omc_size size)
+{
+    return omc_scan_normalize_measure(
+        omc_scan_gif(bytes, size, (omc_blk_ref*)0, 0U));
 }
 
 typedef struct omc_bmff_box {
@@ -3731,6 +3955,12 @@ omc_scan_auto(const omc_u8* bytes, omc_size size,
     if (size >= 12U && omc_scan_match(bytes, size, 0U, "RIFF", 4U)
         && omc_scan_match(bytes, size, 8U, "WEBP", 4U)) {
         return omc_scan_webp(bytes, size, out_blocks, out_cap);
+    }
+
+    if (size >= 6U
+        && (omc_scan_match(bytes, size, 0U, "GIF87a", 6U)
+            || omc_scan_match(bytes, size, 0U, "GIF89a", 6U))) {
+        return omc_scan_gif(bytes, size, out_blocks, out_cap);
     }
 
     if (size >= 12U

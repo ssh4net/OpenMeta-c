@@ -138,6 +138,27 @@ append_webp_chunk(omc_u8* out, omc_size* io_size, const char* type,
 }
 
 static void
+append_gif_sub_blocks(omc_u8* out, omc_size* io_size, const omc_u8* payload,
+                      omc_size payload_size)
+{
+    omc_size off;
+
+    off = 0U;
+    while (off < payload_size) {
+        omc_size chunk_size;
+
+        chunk_size = payload_size - off;
+        if (chunk_size > 255U) {
+            chunk_size = 255U;
+        }
+        append_u8(out, io_size, (omc_u8)chunk_size);
+        append_bytes(out, io_size, payload + off, chunk_size);
+        off += chunk_size;
+    }
+    append_u8(out, io_size, 0U);
+}
+
+static void
 append_fullbox_header(omc_u8* out, omc_size* io_size, omc_u8 version)
 {
     append_u8(out, io_size, version);
@@ -509,6 +530,47 @@ make_test_webp_all(omc_u8* out)
                       sizeof(xmp) - 1U);
     append_webp_chunk(out, &size, "ICCP", icc, sizeof(icc));
     write_u32le_at(out, 4U, (omc_u32)(size - 8U));
+    return size;
+}
+
+static omc_size
+make_test_gif_all(omc_u8* out)
+{
+    static const char xmp[] =
+        "<x:xmpmeta xmlns:x='adobe:ns:meta/'>"
+        "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>"
+        "<rdf:Description xmlns:xmp='http://ns.adobe.com/xap/1.0/' "
+        "xmp:CreatorTool='OpenMeta'/>"
+        "</rdf:RDF>"
+        "</x:xmpmeta>";
+    static const char comment[] = "OpenMeta GIF comment";
+    omc_u8 icc[160];
+    omc_size size;
+
+    build_test_icc(icc, sizeof(icc));
+
+    size = 0U;
+    append_text(out, &size, "GIF89a");
+    append_bytes(out, &size, "\x01\x00\x01\x00\x00\x00\x00", 7U);
+
+    append_u8(out, &size, 0x21U);
+    append_u8(out, &size, 0xFEU);
+    append_gif_sub_blocks(out, &size, (const omc_u8*)comment,
+                          sizeof(comment) - 1U);
+
+    append_u8(out, &size, 0x21U);
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 11U);
+    append_text(out, &size, "XMP DataXMP");
+    append_gif_sub_blocks(out, &size, (const omc_u8*)xmp, sizeof(xmp) - 1U);
+
+    append_u8(out, &size, 0x21U);
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 11U);
+    append_text(out, &size, "ICCRGBG1012");
+    append_gif_sub_blocks(out, &size, icc, sizeof(icc));
+
+    append_u8(out, &size, 0x3BU);
     return size;
 }
 
@@ -2103,6 +2165,67 @@ test_read_webp_all(void)
 }
 
 static void
+test_read_gif_all(void)
+{
+    omc_u8 gif[1024];
+    omc_size gif_size;
+    omc_store store;
+    omc_blk_ref blocks[8];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload[512];
+    omc_u32 payload_parts[16];
+    omc_read_res res;
+    const omc_entry* comment;
+    const omc_entry* xmp_tool;
+    const omc_entry* icc_size;
+    const omc_block_info* block;
+    omc_const_bytes value_view;
+
+    gif_size = make_test_gif_all(gif);
+    omc_store_init(&store);
+
+    res = omc_read_simple(gif, gif_size, &store, blocks, 8U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 16U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.pay.status == OMC_PAY_OK);
+    assert(res.xmp.status == OMC_XMP_OK);
+    assert(res.icc.status == OMC_ICC_OK);
+    assert(store.block_count == 3U);
+
+    comment = find_comment_entry(&store);
+    assert(comment != (const omc_entry*)0);
+    assert(comment->value.kind == OMC_VAL_TEXT);
+    assert(comment->value.text_encoding == OMC_TEXT_ASCII);
+    value_view = omc_arena_view(&store.arena, comment->value.u.ref);
+    assert(value_view.size == 20U);
+    assert(memcmp(value_view.data, "OpenMeta GIF comment", value_view.size)
+           == 0);
+    block = omc_store_block(&store, comment->origin.block);
+    assert(block != (const omc_block_info*)0);
+    assert(block->format == OMC_SCAN_FMT_GIF);
+    assert(block->kind == OMC_BLK_COMMENT);
+
+    xmp_tool = find_xmp_entry(&store, "http://ns.adobe.com/xap/1.0/",
+                              "CreatorTool");
+    assert(xmp_tool != (const omc_entry*)0);
+    block = omc_store_block(&store, xmp_tool->origin.block);
+    assert(block != (const omc_block_info*)0);
+    assert(block->format == OMC_SCAN_FMT_GIF);
+    assert(block->kind == OMC_BLK_XMP);
+
+    icc_size = find_icc_header(&store, 0U);
+    assert(icc_size != (const omc_entry*)0);
+    block = omc_store_block(&store, icc_size->origin.block);
+    assert(block != (const omc_block_info*)0);
+    assert(block->format == OMC_SCAN_FMT_GIF);
+    assert(block->kind == OMC_BLK_ICC);
+
+    omc_store_fini(&store);
+}
+
+static void
 test_read_bmff_heif_all(void)
 {
     omc_u8 file_bytes[2048];
@@ -2664,6 +2787,7 @@ main(void)
     test_read_png_text();
     test_read_png_xmp_compressed();
     test_read_webp_all();
+    test_read_gif_all();
     test_read_bmff_fields();
     test_read_bmff_heif_all();
     test_read_bmff_avif_all();

@@ -63,6 +63,27 @@ fourcc(char a, char b, char c, char d)
     return OMC_FOURCC(a, b, c, d);
 }
 
+static void
+append_gif_sub_blocks(omc_u8* out, omc_size* io_size, const omc_u8* payload,
+                      omc_size payload_size)
+{
+    omc_size off;
+
+    off = 0U;
+    while (off < payload_size) {
+        omc_size chunk_size;
+
+        chunk_size = payload_size - off;
+        if (chunk_size > 255U) {
+            chunk_size = 255U;
+        }
+        append_u8(out, io_size, (omc_u8)chunk_size);
+        append_bytes(out, io_size, payload + off, chunk_size);
+        off += chunk_size;
+    }
+    append_u8(out, io_size, 0U);
+}
+
 static omc_size
 make_test_tiff_le(omc_u8* out)
 {
@@ -267,6 +288,38 @@ make_test_webp_scan(omc_u8* out)
     append_webp_chunk(out, &size, "XMP ", xmp_payload, sizeof(xmp_payload));
     append_webp_chunk(out, &size, "ICCP", icc_payload, sizeof(icc_payload));
     write_u32le_at(out, 4U, (omc_u32)(size - 8U));
+    return size;
+}
+
+static omc_size
+make_test_gif_scan(omc_u8* out)
+{
+    static const omc_u8 comment[] = "OpenMeta GIF comment";
+    static const omc_u8 xmp[] = "<x:xmpmeta/>";
+    static const omc_u8 icc[] = { 0x00U, 0x01U, 0x02U, 0x03U };
+    omc_size size;
+
+    size = 0U;
+    append_text(out, &size, "GIF89a");
+    append_bytes(out, &size, "\x01\x00\x01\x00\x00\x00\x00", 7U);
+
+    append_u8(out, &size, 0x21U);
+    append_u8(out, &size, 0xFEU);
+    append_gif_sub_blocks(out, &size, comment, sizeof(comment) - 1U);
+
+    append_u8(out, &size, 0x21U);
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 11U);
+    append_text(out, &size, "XMP DataXMP");
+    append_gif_sub_blocks(out, &size, xmp, sizeof(xmp) - 1U);
+
+    append_u8(out, &size, 0x21U);
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 11U);
+    append_text(out, &size, "ICCRGBG1012");
+    append_gif_sub_blocks(out, &size, icc, sizeof(icc));
+
+    append_u8(out, &size, 0x3BU);
     return size;
 }
 
@@ -1065,6 +1118,48 @@ test_scan_webp(void)
 }
 
 static void
+test_scan_gif(void)
+{
+    omc_u8 gif_bytes[256];
+    omc_size gif_size;
+    omc_blk_ref blocks[4];
+    omc_scan_res res;
+
+    gif_size = make_test_gif_scan(gif_bytes);
+    memset(blocks, 0, sizeof(blocks));
+    res = omc_scan_gif(gif_bytes, gif_size, blocks, 4U);
+
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 3U);
+    assert(res.needed == 3U);
+
+    assert(blocks[0].format == OMC_SCAN_FMT_GIF);
+    assert(blocks[0].kind == OMC_BLK_COMMENT);
+    assert(blocks[0].chunking == OMC_BLK_CHUNK_GIF_SUB);
+    assert(blocks[0].id == 0x21FEU);
+
+    assert(blocks[1].format == OMC_SCAN_FMT_GIF);
+    assert(blocks[1].kind == OMC_BLK_XMP);
+    assert(blocks[1].chunking == OMC_BLK_CHUNK_GIF_SUB);
+    assert(blocks[1].id == 0x21FFU);
+
+    assert(blocks[2].format == OMC_SCAN_FMT_GIF);
+    assert(blocks[2].kind == OMC_BLK_ICC);
+    assert(blocks[2].chunking == OMC_BLK_CHUNK_GIF_SUB);
+    assert(blocks[2].id == 0x21FFU);
+
+    res = omc_scan_auto(gif_bytes, gif_size, blocks, 4U);
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 3U);
+    assert(res.needed == 3U);
+
+    res = omc_scan_meas_gif(gif_bytes, gif_size);
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 0U);
+    assert(res.needed == 3U);
+}
+
+static void
 test_scan_tiff(void)
 {
     static const omc_u8 tiff_bytes[] = {
@@ -1313,6 +1408,7 @@ main(void)
     test_scan_png();
     test_scan_png_text();
     test_scan_webp();
+    test_scan_gif();
     test_scan_tiff();
     test_scan_bmff_heif_and_avif();
     test_scan_bmff_cr3();

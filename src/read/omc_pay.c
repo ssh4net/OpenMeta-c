@@ -88,6 +88,60 @@ omc_pay_copy_range(const omc_u8* file_bytes, omc_size file_size,
     return 1;
 }
 
+static int
+omc_pay_copy_gif_sub_blocks(const omc_u8* file_bytes, omc_size file_size,
+                            omc_u64 data_offset, omc_u64 data_size,
+                            omc_u8* out_payload, omc_size out_cap,
+                            omc_u64 max_output_bytes, omc_pay_res* res)
+{
+    omc_u64 p;
+    omc_u64 end;
+    omc_u64 out_offset;
+
+    if (data_offset > (omc_u64)file_size
+        || data_size > ((omc_u64)file_size - data_offset)) {
+        res->status = OMC_PAY_MALFORMED;
+        return 0;
+    }
+
+    p = data_offset;
+    end = data_offset + data_size;
+    out_offset = 0U;
+    while (p < end) {
+        omc_u8 sub_size;
+
+        sub_size = file_bytes[(omc_size)p];
+        p += 1U;
+        if (sub_size == 0U) {
+            if (p != end) {
+                res->status = OMC_PAY_MALFORMED;
+                return 0;
+            }
+            res->needed = out_offset;
+            return 1;
+        }
+        if ((omc_u64)sub_size > (end - p)) {
+            res->status = OMC_PAY_MALFORMED;
+            return 0;
+        }
+        if ((omc_u64)sub_size > (max_output_bytes - out_offset)) {
+            res->status = OMC_PAY_LIMIT;
+            res->needed = out_offset + (omc_u64)sub_size;
+            return 0;
+        }
+        res->needed = out_offset + (omc_u64)sub_size;
+        if (!omc_pay_copy_range(file_bytes, file_size, p, (omc_u64)sub_size,
+                                out_payload, out_cap, out_offset, res)) {
+            return 0;
+        }
+        out_offset += (omc_u64)sub_size;
+        p += (omc_u64)sub_size;
+    }
+
+    res->status = OMC_PAY_MALFORMED;
+    return 0;
+}
+
 #if OMC_HAVE_ZLIB
 static int
 omc_pay_inflate_zlib_range(const omc_u8* file_bytes, omc_size file_size,
@@ -407,6 +461,18 @@ omc_pay_ext(const omc_u8* file_bytes, omc_size file_size,
         if (!omc_pay_copy_range(file_bytes, file_size, seed->data_offset,
                                 seed->data_size, out_payload, out_cap, 0U,
                                 &res)) {
+            return res;
+        }
+        return res;
+    }
+
+    if (seed->chunking == OMC_BLK_CHUNK_GIF_SUB
+        && (seed->part_count == 0U || seed->part_count == 1U)) {
+        if (!omc_pay_copy_gif_sub_blocks(file_bytes, file_size,
+                                         seed->data_offset, seed->data_size,
+                                         out_payload, out_cap,
+                                         use_opts->limits.max_output_bytes,
+                                         &res)) {
             return res;
         }
         return res;

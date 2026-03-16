@@ -683,7 +683,8 @@ omc_read_block_view(const omc_u8* file_bytes, omc_size file_size,
     block = &blocks[block_index];
     if (block->compression == OMC_BLK_COMP_NONE
         && (block->part_count == 0U || block->part_count == 1U)
-        && block->chunking != OMC_BLK_CHUNK_JPEG_APP2_SEQ) {
+        && block->chunking != OMC_BLK_CHUNK_JPEG_APP2_SEQ
+        && block->chunking != OMC_BLK_CHUNK_GIF_SUB) {
         if (block->data_offset > (omc_u64)file_size
             || block->data_size > ((omc_u64)file_size - block->data_offset)) {
             out_pay->status = OMC_PAY_MALFORMED;
