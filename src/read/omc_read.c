@@ -26,6 +26,10 @@ omc_read_init_res(omc_read_res* res)
     res->irb.resources_decoded = 0U;
     res->irb.entries_decoded = 0U;
     res->irb.iptc_entries_decoded = 0U;
+    res->jumbf.status = OMC_JUMBF_OK;
+    res->jumbf.boxes_decoded = 0U;
+    res->jumbf.cbor_items = 0U;
+    res->jumbf.entries_decoded = 0U;
     res->xmp.status = OMC_XMP_OK;
     res->xmp.entries_decoded = 0U;
     res->entries_added = 0U;
@@ -222,6 +226,34 @@ omc_read_merge_xmp(omc_xmp_res* dst, omc_xmp_res src)
         return;
     }
     if (src.status == OMC_XMP_TRUNCATED) {
+        dst->status = src.status;
+    }
+}
+
+static void
+omc_read_merge_jumbf(omc_jumbf_res* dst, omc_jumbf_res src)
+{
+    dst->boxes_decoded += src.boxes_decoded;
+    dst->cbor_items += src.cbor_items;
+    dst->entries_decoded += src.entries_decoded;
+    if (dst->status == OMC_JUMBF_NOMEM || dst->status == OMC_JUMBF_LIMIT) {
+        return;
+    }
+    if (src.status == OMC_JUMBF_NOMEM || src.status == OMC_JUMBF_LIMIT) {
+        dst->status = src.status;
+        return;
+    }
+    if (dst->status == OMC_JUMBF_MALFORMED) {
+        return;
+    }
+    if (src.status == OMC_JUMBF_MALFORMED) {
+        dst->status = src.status;
+        return;
+    }
+    if (dst->status == OMC_JUMBF_UNSUPPORTED) {
+        return;
+    }
+    if (src.status == OMC_JUMBF_UNSUPPORTED) {
         dst->status = src.status;
     }
 }
@@ -425,6 +457,7 @@ omc_read_opts_init(omc_read_opts* opts)
     omc_icc_opts_init(&opts->icc);
     omc_iptc_opts_init(&opts->iptc);
     omc_irb_opts_init(&opts->irb);
+    omc_jumbf_opts_init(&opts->jumbf);
     omc_pay_opts_init(&opts->pay);
     omc_xmp_opts_init(&opts->xmp);
 }
@@ -459,6 +492,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
         res.icc.status = OMC_ICC_MALFORMED;
         res.iptc.status = OMC_IPTC_MALFORMED;
         res.irb.status = OMC_IRB_MALFORMED;
+        res.jumbf.status = OMC_JUMBF_MALFORMED;
         res.xmp.status = OMC_XMP_MALFORMED;
         return res;
     }
@@ -476,6 +510,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
             res.icc.status = OMC_ICC_NOMEM;
             res.iptc.status = OMC_IPTC_NOMEM;
             res.irb.status = OMC_IRB_NOMEM;
+            res.jumbf.status = OMC_JUMBF_NOMEM;
             res.xmp.status = OMC_XMP_NOMEM;
             break;
         }
@@ -592,6 +627,63 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                     block_id, OMC_ENTRY_FLAG_NONE,
                                     &use_opts->iptc);
             omc_read_merge_iptc(&res.iptc, iptc_res);
+        } else if (block->kind == OMC_BLK_JUMBF) {
+            omc_const_bytes block_view;
+            omc_pay_res pay_res;
+            omc_jumbf_res jumbf_res;
+
+            if (!omc_read_block_view(file_bytes, file_size, out_blocks,
+                                     res.scan.written, i, payload, payload_cap,
+                                     payload_scratch_indices,
+                                     payload_scratch_cap, &use_opts->pay,
+                                     &block_view, &pay_res)) {
+                omc_read_merge_pay(&res.pay, pay_res);
+                continue;
+            }
+
+            omc_read_merge_pay(&res.pay, pay_res);
+            jumbf_res = omc_jumbf_dec(block_view.data, block_view.size, store,
+                                      block_id, OMC_ENTRY_FLAG_NONE,
+                                      &use_opts->jumbf);
+            omc_read_merge_jumbf(&res.jumbf, jumbf_res);
+        } else if (block->kind == OMC_BLK_COMP_METADATA) {
+            omc_const_bytes block_view;
+            omc_pay_res pay_res;
+
+            if (!omc_read_block_view(file_bytes, file_size, out_blocks,
+                                     res.scan.written, i, payload, payload_cap,
+                                     payload_scratch_indices,
+                                     payload_scratch_cap, &use_opts->pay,
+                                     &block_view, &pay_res)) {
+                omc_read_merge_pay(&res.pay, pay_res);
+                continue;
+            }
+
+            omc_read_merge_pay(&res.pay, pay_res);
+            if (block->aux_u32 == OMC_FOURCC('x', 'm', 'l', ' ')) {
+                omc_xmp_res xmp_res;
+
+                xmp_res = omc_xmp_dec(block_view.data, block_view.size, store,
+                                      block_id, OMC_ENTRY_FLAG_NONE,
+                                      &use_opts->xmp);
+                omc_read_merge_xmp(&res.xmp, xmp_res);
+            } else if (block->aux_u32 == OMC_FOURCC('j', 'u', 'm', 'b')
+                       || block->aux_u32 == OMC_FOURCC('c', '2', 'p', 'a')) {
+                omc_jumbf_res jumbf_res;
+
+                jumbf_res = omc_jumbf_dec(block_view.data, block_view.size,
+                                          store, block_id,
+                                          OMC_ENTRY_FLAG_NONE,
+                                          &use_opts->jumbf);
+                omc_read_merge_jumbf(&res.jumbf, jumbf_res);
+            } else if (block->aux_u32 == OMC_FOURCC('E', 'x', 'i', 'f')) {
+                omc_exif_res exif_res;
+
+                exif_res = omc_exif_dec(block_view.data, block_view.size,
+                                        store, block_id, out_ifds, ifd_cap,
+                                        &use_opts->exif);
+                omc_read_merge_exif(&res.exif, exif_res);
+            }
         }
     }
 

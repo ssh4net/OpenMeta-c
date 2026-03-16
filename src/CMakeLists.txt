@@ -46,6 +46,7 @@ set(OMC_SOURCES
   read/omc_icc.c
   read/omc_iptc.c
   read/omc_irb.c
+  read/omc_jumbf.c
   read/omc_pay.c
   read/omc_read.c
   read/omc_scan.c
@@ -65,6 +66,13 @@ function(omc_add_target target_name target_kind)
     else()
       target_include_directories(${target_name} PRIVATE ${ZLIB_INCLUDE_DIRS})
       target_link_libraries(${target_name} PRIVATE ${ZLIB_LIBRARIES})
+    endif()
+  endif()
+  if(OMC_HAVE_BROTLI)
+    target_include_directories(${target_name} PRIVATE ${OMC_BROTLI_INCLUDE_DIR})
+    target_link_libraries(${target_name} PRIVATE ${OMC_BROTLI_DEC_LIB})
+    if(OMC_BROTLI_COMMON_LIB)
+      target_link_libraries(${target_name} PRIVATE ${OMC_BROTLI_COMMON_LIB})
     endif()
   endif()
   omc_apply_warnings(${target_name})

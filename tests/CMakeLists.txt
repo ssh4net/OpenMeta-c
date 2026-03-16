@@ -30,6 +30,10 @@ add_executable(omc_test_irb test_omc_irb.c)
 target_link_libraries(omc_test_irb PRIVATE omc)
 add_test(NAME omc_test_irb COMMAND omc_test_irb)
 
+add_executable(omc_test_jumbf test_omc_jumbf.c)
+target_link_libraries(omc_test_jumbf PRIVATE omc)
+add_test(NAME omc_test_jumbf COMMAND omc_test_jumbf)
+
 add_executable(omc_test_xmp test_omc_xmp.c)
 target_link_libraries(omc_test_xmp PRIVATE omc)
 add_test(NAME omc_test_xmp COMMAND omc_test_xmp)

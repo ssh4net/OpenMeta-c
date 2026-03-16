@@ -5,5 +5,6 @@
 #cmakedefine01 OMC_HAVE_U64_ULL
 #cmakedefine01 OMC_HAVE_U64_MSVC_INT64
 #cmakedefine01 OMC_HAVE_ZLIB
+#cmakedefine01 OMC_HAVE_BROTLI
 
 #endif

@@ -6,6 +6,10 @@
 #include <zlib.h>
 #endif
 
+#if OMC_HAVE_BROTLI
+#include <brotli/decode.h>
+#endif
+
 static void
 omc_pay_res_init(omc_pay_res* res)
 {
@@ -204,6 +208,102 @@ omc_pay_inflate_zlib_range(const omc_u8* file_bytes, omc_size file_size,
 }
 #endif
 
+#if OMC_HAVE_BROTLI
+static int
+omc_pay_brotli_range(const omc_u8* file_bytes, omc_size file_size,
+                     omc_u64 data_offset, omc_u64 data_size,
+                     omc_u8* out_payload, omc_size out_cap,
+                     omc_u64 max_output_bytes, omc_pay_res* res)
+{
+    BrotliDecoderState* state;
+    const uint8_t* next_in;
+    size_t avail_in;
+    omc_u64 total_out;
+    omc_u8 scratch[256];
+
+    if (data_offset > (omc_u64)file_size
+        || data_size > ((omc_u64)file_size - data_offset)) {
+        res->status = OMC_PAY_MALFORMED;
+        return 0;
+    }
+
+    state = BrotliDecoderCreateInstance((brotli_alloc_func)0,
+                                        (brotli_free_func)0, (void*)0);
+    if (state == (BrotliDecoderState*)0) {
+        res->status = OMC_PAY_NOMEM;
+        return 0;
+    }
+
+    next_in = (const uint8_t*)(file_bytes + (omc_size)data_offset);
+    avail_in = (size_t)data_size;
+    total_out = 0U;
+
+    for (;;) {
+        size_t avail_out;
+        uint8_t* next_out;
+        int use_scratch;
+        size_t out_before;
+        omc_u64 produced;
+        BrotliDecoderResult br;
+
+        if (total_out >= max_output_bytes) {
+            res->status = OMC_PAY_LIMIT;
+            BrotliDecoderDestroyInstance(state);
+            res->needed = total_out;
+            return 0;
+        }
+
+        use_scratch = 0;
+        if (out_payload != (omc_u8*)0 && res->written < (omc_u64)out_cap) {
+            avail_out = (size_t)omc_pay_min_u64((omc_u64)out_cap - res->written,
+                                                max_output_bytes - total_out);
+            next_out = (uint8_t*)(out_payload + (omc_size)res->written);
+        } else {
+            use_scratch = 1;
+            avail_out = (size_t)omc_pay_min_u64((omc_u64)sizeof(scratch),
+                                                max_output_bytes - total_out);
+            next_out = (uint8_t*)scratch;
+        }
+
+        out_before = avail_out;
+        br = BrotliDecoderDecompressStream(state, &avail_in, &next_in,
+                                           &avail_out, &next_out,
+                                           (size_t*)0);
+        produced = (omc_u64)(out_before - avail_out);
+
+        if (produced != 0U) {
+            total_out += produced;
+            if (use_scratch) {
+                if (res->status == OMC_PAY_OK) {
+                    res->status = OMC_PAY_TRUNCATED;
+                }
+            } else {
+                res->written += produced;
+            }
+        }
+
+        if (br == BROTLI_DECODER_RESULT_SUCCESS) {
+            break;
+        }
+        if (br == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
+            continue;
+        }
+        if (br == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
+            res->status = OMC_PAY_MALFORMED;
+        } else {
+            res->status = OMC_PAY_MALFORMED;
+        }
+        BrotliDecoderDestroyInstance(state);
+        res->needed = total_out;
+        return 0;
+    }
+
+    BrotliDecoderDestroyInstance(state);
+    res->needed = total_out;
+    return 1;
+}
+#endif
+
 void
 omc_pay_opts_init(omc_pay_opts* opts)
 {
@@ -249,24 +349,50 @@ omc_pay_ext(const omc_u8* file_bytes, omc_size file_size,
     seed = &blocks[seed_index];
     if (seed->compression != OMC_BLK_COMP_NONE) {
 #if OMC_HAVE_ZLIB
-        if (!use_opts->decompress || seed->compression != OMC_BLK_COMP_DEFLATE
-            || seed->chunking != OMC_BLK_CHUNK_NONE
+        if (!use_opts->decompress
             || (seed->part_count != 0U && seed->part_count != 1U)) {
             res.status = OMC_PAY_UNSUPPORTED;
             return res;
         }
-        if (!omc_pay_inflate_zlib_range(file_bytes, file_size, seed->data_offset,
-                                        seed->data_size, out_payload, out_cap,
-                                        use_opts->limits.max_output_bytes,
-                                        &res)) {
+        if (seed->compression == OMC_BLK_COMP_DEFLATE) {
+            if (seed->chunking != OMC_BLK_CHUNK_NONE) {
+                res.status = OMC_PAY_UNSUPPORTED;
+                return res;
+            }
+            if (!omc_pay_inflate_zlib_range(file_bytes, file_size,
+                                            seed->data_offset, seed->data_size,
+                                            out_payload, out_cap,
+                                            use_opts->limits.max_output_bytes,
+                                            &res)) {
+                return res;
+            }
             return res;
         }
-        return res;
-#else
+#endif
+#if OMC_HAVE_BROTLI
+        if (seed->compression == OMC_BLK_COMP_BROTLI) {
+            if (seed->chunking != OMC_BLK_CHUNK_NONE
+                && seed->chunking != OMC_BLK_CHUNK_BROB_REALTYPE) {
+                res.status = OMC_PAY_UNSUPPORTED;
+                return res;
+            }
+            if (!use_opts->decompress
+                || !omc_pay_brotli_range(file_bytes, file_size,
+                                         seed->data_offset, seed->data_size,
+                                         out_payload, out_cap,
+                                         use_opts->limits.max_output_bytes,
+                                         &res)) {
+                if (res.status == OMC_PAY_OK) {
+                    res.status = OMC_PAY_UNSUPPORTED;
+                }
+                return res;
+            }
+            return res;
+        }
+#endif
         (void)use_opts;
         res.status = OMC_PAY_UNSUPPORTED;
         return res;
-#endif
     }
 
     if (seed->chunking == OMC_BLK_CHUNK_NONE
@@ -285,7 +411,8 @@ omc_pay_ext(const omc_u8* file_bytes, omc_size file_size,
     }
 
     if (seed->chunking != OMC_BLK_CHUNK_NONE
-        && seed->chunking != OMC_BLK_CHUNK_JPEG_APP2_SEQ) {
+        && seed->chunking != OMC_BLK_CHUNK_JPEG_APP2_SEQ
+        && seed->chunking != OMC_BLK_CHUNK_JPEG_APP11_SEQ) {
         res.status = OMC_PAY_UNSUPPORTED;
         return res;
     }

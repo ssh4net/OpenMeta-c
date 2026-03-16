@@ -53,12 +53,13 @@ typedef enum omc_blk_comp {
 typedef enum omc_blk_chunk {
     OMC_BLK_CHUNK_NONE = 0,
     OMC_BLK_CHUNK_JPEG_APP2_SEQ = 1,
-    OMC_BLK_CHUNK_JPEG_XMP_EXT = 2,
-    OMC_BLK_CHUNK_GIF_SUB = 3,
-    OMC_BLK_CHUNK_BMFF_EXIF_OFF = 4,
-    OMC_BLK_CHUNK_BROB_REALTYPE = 5,
-    OMC_BLK_CHUNK_JP2_UUID = 6,
-    OMC_BLK_CHUNK_PS_IRB_8BIM = 7
+    OMC_BLK_CHUNK_JPEG_APP11_SEQ = 2,
+    OMC_BLK_CHUNK_JPEG_XMP_EXT = 3,
+    OMC_BLK_CHUNK_GIF_SUB = 4,
+    OMC_BLK_CHUNK_BMFF_EXIF_OFF = 5,
+    OMC_BLK_CHUNK_BROB_REALTYPE = 6,
+    OMC_BLK_CHUNK_JP2_UUID = 7,
+    OMC_BLK_CHUNK_PS_IRB_8BIM = 8
 } omc_blk_chunk;
 
 typedef struct omc_blk_ref {

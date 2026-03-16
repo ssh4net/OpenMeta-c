@@ -145,10 +145,94 @@ test_pay_deflate_measure_and_truncation(void)
 #endif
 }
 
+static void
+test_pay_brotli_extract(void)
+{
+    static const omc_u8 payload_bytes[] = {
+        'A', 'B', 'C', 'D', '1', '2', '3', '4'
+    };
+    static const omc_u8 file_bytes[] = {
+        0x8BU, 0x03U, 0x80U, 0x41U, 0x42U, 0x43U,
+        0x44U, 0x31U, 0x32U, 0x33U, 0x34U, 0x03U
+    };
+    omc_blk_ref block;
+    omc_u8 out_payload[16];
+    omc_pay_res res;
+
+    memset(&block, 0, sizeof(block));
+    block.kind = OMC_BLK_JUMBF;
+    block.compression = OMC_BLK_COMP_BROTLI;
+    block.data_size = (omc_u64)sizeof(file_bytes);
+
+    res = omc_pay_ext(file_bytes, sizeof(file_bytes), &block, 1U, 0U,
+                      out_payload, sizeof(out_payload), (omc_u32*)0, 0U,
+                      (const omc_pay_opts*)0);
+
+#if OMC_HAVE_BROTLI
+    assert(res.status == OMC_PAY_OK);
+    assert(res.written == sizeof(payload_bytes));
+    assert(res.needed == sizeof(payload_bytes));
+    assert(memcmp(out_payload, payload_bytes, sizeof(payload_bytes)) == 0);
+#else
+    assert(res.status == OMC_PAY_UNSUPPORTED);
+    assert(res.written == 0U);
+    assert(res.needed == 0U);
+#endif
+}
+
+static void
+test_pay_brotli_measure_and_truncation(void)
+{
+    static const omc_u8 payload_bytes[] = {
+        'A', 'B', 'C', 'D', '1', '2', '3', '4'
+    };
+    static const omc_u8 file_bytes[] = {
+        0x8BU, 0x03U, 0x80U, 0x41U, 0x42U, 0x43U,
+        0x44U, 0x31U, 0x32U, 0x33U, 0x34U, 0x03U
+    };
+    omc_blk_ref block;
+    omc_u8 out_payload[4];
+    omc_pay_res res;
+
+    memset(&block, 0, sizeof(block));
+    block.kind = OMC_BLK_XMP;
+    block.compression = OMC_BLK_COMP_BROTLI;
+    block.data_size = (omc_u64)sizeof(file_bytes);
+
+    res = omc_pay_ext(file_bytes, sizeof(file_bytes), &block, 1U, 0U,
+                      out_payload, sizeof(out_payload), (omc_u32*)0, 0U,
+                      (const omc_pay_opts*)0);
+
+#if OMC_HAVE_BROTLI
+    assert(res.status == OMC_PAY_TRUNCATED);
+    assert(res.written == sizeof(out_payload));
+    assert(res.needed == sizeof(payload_bytes));
+    assert(memcmp(out_payload, payload_bytes, sizeof(out_payload)) == 0);
+
+    res = omc_pay_meas(file_bytes, sizeof(file_bytes), &block, 1U, 0U,
+                       (omc_u32*)0, 0U, (const omc_pay_opts*)0);
+    assert(res.status == OMC_PAY_OK);
+    assert(res.written == 0U);
+    assert(res.needed == sizeof(payload_bytes));
+#else
+    assert(res.status == OMC_PAY_UNSUPPORTED);
+    assert(res.written == 0U);
+    assert(res.needed == 0U);
+
+    res = omc_pay_meas(file_bytes, sizeof(file_bytes), &block, 1U, 0U,
+                       (omc_u32*)0, 0U, (const omc_pay_opts*)0);
+    assert(res.status == OMC_PAY_UNSUPPORTED);
+    assert(res.written == 0U);
+    assert(res.needed == 0U);
+#endif
+}
+
 int
 main(void)
 {
     test_pay_deflate_extract();
     test_pay_deflate_measure_and_truncation();
+    test_pay_brotli_extract();
+    test_pay_brotli_measure_and_truncation();
     return 0;
 }

@@ -76,6 +76,70 @@ make_test_tiff_le(omc_u8* out)
 }
 
 static void
+append_jpeg_segment(omc_u8* out, omc_size* io_size, omc_u16 marker,
+                    const omc_u8* payload, omc_size payload_size)
+{
+    append_u8(out, io_size, 0xFFU);
+    append_u8(out, io_size, (omc_u8)(marker & 0xFFU));
+    append_u16be(out, io_size, (omc_u16)(payload_size + 2U));
+    if (payload_size != 0U) {
+        append_bytes(out, io_size, payload, payload_size);
+    }
+}
+
+static omc_size
+make_test_jpeg_app11_jumbf_scan(omc_u8* out, int header_only_first,
+                                int out_of_order)
+{
+    static const omc_u8 jumb_box[] = {
+        0x00U, 0x00U, 0x00U, 0x21U, 'j', 'u', 'm', 'b',
+        0x00U, 0x00U, 0x00U, 0x0DU, 'j', 'u', 'm', 'd',
+        'c', '2', 'p', 'a', 0x00U,
+        0x00U, 0x00U, 0x00U, 0x0CU, 'c', 'b', 'o', 'r',
+        0xA1U, 0x61U, 0x61U, 0x01U
+    };
+    omc_u8 seg1[64];
+    omc_u8 seg2[64];
+    omc_size seg1_size;
+    omc_size seg2_size;
+    omc_size split;
+    omc_size size;
+
+    split = header_only_first ? 0U : 12U;
+
+    seg1_size = 0U;
+    append_text(seg1, &seg1_size, "JP");
+    append_u8(seg1, &seg1_size, 0U);
+    append_u8(seg1, &seg1_size, 0U);
+    append_u32be(seg1, &seg1_size, 1U);
+    append_bytes(seg1, &seg1_size, jumb_box, 8U);
+    append_bytes(seg1, &seg1_size, jumb_box + 8U, split);
+
+    seg2_size = 0U;
+    append_text(seg2, &seg2_size, "JP");
+    append_u8(seg2, &seg2_size, 0U);
+    append_u8(seg2, &seg2_size, 0U);
+    append_u32be(seg2, &seg2_size, 2U);
+    append_bytes(seg2, &seg2_size, jumb_box, 8U);
+    append_bytes(seg2, &seg2_size, jumb_box + 8U + split,
+                 sizeof(jumb_box) - 8U - split);
+
+    size = 0U;
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 0xD8U);
+    if (out_of_order) {
+        append_jpeg_segment(out, &size, 0xFFEBU, seg2, seg2_size);
+        append_jpeg_segment(out, &size, 0xFFEBU, seg1, seg1_size);
+    } else {
+        append_jpeg_segment(out, &size, 0xFFEBU, seg1, seg1_size);
+        append_jpeg_segment(out, &size, 0xFFEBU, seg2, seg2_size);
+    }
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 0xD9U);
+    return size;
+}
+
+static void
 append_png_chunk(omc_u8* out, omc_size* io_size, const char* type,
                  const omc_u8* payload, omc_size payload_size)
 {
@@ -680,6 +744,101 @@ make_test_bmff_iref_scan(omc_u8* out, omc_u32 major_brand,
     return size;
 }
 
+static omc_size
+make_test_bmff_external_dref_scan(omc_u8* out, omc_u32 major_brand)
+{
+    static const char xmp_payload[] = "<xmp/>";
+    omc_u8 infe_xmp[96];
+    omc_u8 iinf_payload[160];
+    omc_u8 iloc_payload[96];
+    omc_u8 idat_box[64];
+    omc_u8 url_payload[8];
+    omc_u8 dref_payload[32];
+    omc_u8 dinf_payload[48];
+    omc_u8 meta_payload[512];
+    omc_u8 ftyp_payload[16];
+    omc_size infe_xmp_size;
+    omc_size iinf_size;
+    omc_size iloc_size;
+    omc_size idat_box_size;
+    omc_size url_size;
+    omc_size dref_size;
+    omc_size dinf_size;
+    omc_size meta_size;
+    omc_size ftyp_size;
+    omc_size size;
+
+    infe_xmp_size = 0U;
+    append_fullbox_header(infe_xmp, &infe_xmp_size, 2U);
+    append_u16be(infe_xmp, &infe_xmp_size, 1U);
+    append_u16be(infe_xmp, &infe_xmp_size, 0U);
+    append_u32be(infe_xmp, &infe_xmp_size, fourcc('m', 'i', 'm', 'e'));
+    append_text(infe_xmp, &infe_xmp_size, "XMP");
+    append_u8(infe_xmp, &infe_xmp_size, 0U);
+    append_text(infe_xmp, &infe_xmp_size, "application/xmp+xml");
+    append_u8(infe_xmp, &infe_xmp_size, 0U);
+    append_u8(infe_xmp, &infe_xmp_size, 0U);
+
+    iinf_size = 0U;
+    append_fullbox_header(iinf_payload, &iinf_size, 2U);
+    append_u32be(iinf_payload, &iinf_size, 1U);
+    append_bmff_box(iinf_payload, &iinf_size, fourcc('i', 'n', 'f', 'e'),
+                    infe_xmp, infe_xmp_size);
+
+    iloc_size = 0U;
+    append_fullbox_header(iloc_payload, &iloc_size, 1U);
+    append_u8(iloc_payload, &iloc_size, 0x44U);
+    append_u8(iloc_payload, &iloc_size, 0x40U);
+    append_u16be(iloc_payload, &iloc_size, 1U);
+    append_u16be(iloc_payload, &iloc_size, 1U);
+    append_u16be(iloc_payload, &iloc_size, 0U);
+    append_u16be(iloc_payload, &iloc_size, 1U);
+    append_u32be(iloc_payload, &iloc_size, 0U);
+    append_u16be(iloc_payload, &iloc_size, 1U);
+    append_u32be(iloc_payload, &iloc_size, 0U);
+    append_u32be(iloc_payload, &iloc_size,
+                 (omc_u32)(sizeof(xmp_payload) - 1U));
+
+    idat_box_size = 0U;
+    append_bmff_box(idat_box, &idat_box_size, fourcc('i', 'd', 'a', 't'),
+                    (const omc_u8*)xmp_payload, sizeof(xmp_payload) - 1U);
+
+    url_size = 0U;
+    append_fullbox_header(url_payload, &url_size, 0U);
+
+    dref_size = 0U;
+    append_fullbox_header(dref_payload, &dref_size, 0U);
+    append_u32be(dref_payload, &dref_size, 1U);
+    append_bmff_box(dref_payload, &dref_size, fourcc('u', 'r', 'l', ' '),
+                    url_payload, url_size);
+
+    dinf_size = 0U;
+    append_bmff_box(dinf_payload, &dinf_size, fourcc('d', 'r', 'e', 'f'),
+                    dref_payload, dref_size);
+
+    meta_size = 0U;
+    append_fullbox_header(meta_payload, &meta_size, 0U);
+    append_bmff_box(meta_payload, &meta_size, fourcc('i', 'i', 'n', 'f'),
+                    iinf_payload, iinf_size);
+    append_bmff_box(meta_payload, &meta_size, fourcc('i', 'l', 'o', 'c'),
+                    iloc_payload, iloc_size);
+    append_bmff_box(meta_payload, &meta_size, fourcc('d', 'i', 'n', 'f'),
+                    dinf_payload, dinf_size);
+    append_bytes(meta_payload, &meta_size, idat_box, idat_box_size);
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload, &ftyp_size, major_brand);
+    append_u32be(ftyp_payload, &ftyp_size, 0U);
+    append_u32be(ftyp_payload, &ftyp_size, fourcc('m', 'i', 'f', '1'));
+
+    size = 0U;
+    append_bmff_box(out, &size, fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload, ftyp_size);
+    append_bmff_box(out, &size, fourcc('m', 'e', 't', 'a'),
+                    meta_payload, meta_size);
+    return size;
+}
+
 static void
 test_scan_jpeg(void)
 {
@@ -736,6 +895,39 @@ test_scan_jpeg(void)
 
     assert(blocks[4].kind == OMC_BLK_COMMENT);
     assert(blocks[4].data_size == 2U);
+}
+
+static void
+test_scan_jpeg_app11_jumbf(void)
+{
+    omc_u8 jpeg_bytes[256];
+    omc_size jpeg_size;
+    omc_blk_ref blocks[4];
+    omc_scan_res res;
+
+    jpeg_size = make_test_jpeg_app11_jumbf_scan(jpeg_bytes, 1, 0);
+    memset(blocks, 0, sizeof(blocks));
+    res = omc_scan_auto(jpeg_bytes, jpeg_size, blocks, 4U);
+
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 2U);
+    assert(res.needed == 2U);
+
+    assert(blocks[0].format == OMC_SCAN_FMT_JPEG);
+    assert(blocks[0].kind == OMC_BLK_JUMBF);
+    assert(blocks[0].chunking == OMC_BLK_CHUNK_JPEG_APP11_SEQ);
+    assert(blocks[0].part_index == 0U);
+    assert(blocks[0].part_count == 2U);
+    assert(blocks[0].data_size == 8U);
+    assert(blocks[0].aux_u32 == fourcc('j', 'u', 'm', 'b'));
+
+    assert(blocks[1].format == OMC_SCAN_FMT_JPEG);
+    assert(blocks[1].kind == OMC_BLK_JUMBF);
+    assert(blocks[1].chunking == OMC_BLK_CHUNK_JPEG_APP11_SEQ);
+    assert(blocks[1].part_index == 1U);
+    assert(blocks[1].part_count == 2U);
+    assert(blocks[1].data_size == 25U);
+    assert(blocks[1].group == blocks[0].group);
 }
 
 static void
@@ -945,6 +1137,24 @@ test_scan_bmff_iref_reference_order(void)
 }
 
 static void
+test_scan_bmff_external_dref_is_skipped(void)
+{
+    omc_u8 file_bytes[768];
+    omc_size file_size;
+    omc_blk_ref blocks[2];
+    omc_scan_res res;
+
+    file_size = make_test_bmff_external_dref_scan(
+        file_bytes, fourcc('h', 'e', 'i', 'c'));
+    memset(blocks, 0, sizeof(blocks));
+    res = omc_scan_auto(file_bytes, file_size, blocks, 2U);
+
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 0U);
+    assert(res.needed == 0U);
+}
+
+static void
 test_scan_jp2_and_jxl(void)
 {
     omc_u8 file_bytes[512];
@@ -1029,6 +1239,7 @@ int
 main(void)
 {
     test_scan_jpeg();
+    test_scan_jpeg_app11_jumbf();
     test_scan_png();
     test_scan_webp();
     test_scan_tiff();
@@ -1036,6 +1247,7 @@ main(void)
     test_scan_bmff_cr3();
     test_scan_bmff_iref_v1_and_v0();
     test_scan_bmff_iref_reference_order();
+    test_scan_bmff_external_dref_is_skipped();
     test_scan_jp2_and_jxl();
     test_scan_bmff_jp2_brand();
     test_scan_measure_and_truncation();
