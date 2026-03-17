@@ -9,9 +9,13 @@ include(GNUInstallDirs)
 option(OMC_BUILD_STATIC "Build static library" ON)
 option(OMC_BUILD_SHARED "Build shared library" OFF)
 option(OMC_BUILD_TESTS "Build tests" ON)
+option(OMC_BUILD_PARITY_TESTS
+  "Build optional parity tests against the C++ OpenMeta library" OFF)
 option(OMC_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(OMC_USE_ZLIB "Enable zlib-backed deflate payload extraction" ON)
 option(OMC_USE_BROTLI "Enable Brotli-backed metadata payload extraction" ON)
+set(OMC_OPENMETA_DIR "" CACHE PATH
+  "Path to an OpenMeta CMake package directory for parity tests")
 
 if(NOT OMC_BUILD_STATIC AND NOT OMC_BUILD_SHARED)
   message(FATAL_ERROR "Enable at least one of OMC_BUILD_STATIC or OMC_BUILD_SHARED.")
@@ -61,6 +65,10 @@ if(OMC_USE_BROTLI)
   if(OMC_BROTLI_INCLUDE_DIR AND OMC_BROTLI_DEC_LIB)
     set(OMC_HAVE_BROTLI 1)
   endif()
+endif()
+
+if(OMC_BUILD_PARITY_TESTS)
+  enable_language(CXX)
 endif()
 
 add_subdirectory(src)

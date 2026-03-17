@@ -45,6 +45,22 @@ append_u32le(omc_u8* out, omc_size* io_size, omc_u32 value)
 }
 
 static void
+write_u16le_at(omc_u8* out, omc_u32 off, omc_u16 value)
+{
+    out[off + 0U] = (omc_u8)((value >> 0) & 0xFFU);
+    out[off + 1U] = (omc_u8)((value >> 8) & 0xFFU);
+}
+
+static void
+write_u32le_at(omc_u8* out, omc_u32 off, omc_u32 value)
+{
+    out[off + 0U] = (omc_u8)((value >> 0) & 0xFFU);
+    out[off + 1U] = (omc_u8)((value >> 8) & 0xFFU);
+    out[off + 2U] = (omc_u8)((value >> 16) & 0xFFU);
+    out[off + 3U] = (omc_u8)((value >> 24) & 0xFFU);
+}
+
+static void
 append_u16be(omc_u8* out, omc_size* io_size, omc_u16 value)
 {
     append_u8(out, io_size, (omc_u8)((value >> 8) & 0xFFU));
@@ -268,6 +284,57 @@ make_test_tiff_with_make_and_makernote_count(omc_u8* out, const char* make,
 }
 
 static omc_size
+make_test_tiff_with_make_model_and_makernote_count(omc_u8* out,
+                                                   const char* make,
+                                                   const char* model,
+                                                   const omc_u8* makernote,
+                                                   omc_size makernote_size,
+                                                   omc_u32 makernote_count)
+{
+    omc_size size;
+    omc_size make_size;
+    omc_size model_size;
+    omc_u32 make_off;
+    omc_u32 model_off;
+    omc_u32 maker_off;
+
+    make_size = strlen(make) + 1U;
+    model_size = strlen(model) + 1U;
+    make_off = 50U;
+    model_off = make_off + (omc_u32)make_size;
+    maker_off = model_off + (omc_u32)model_size;
+
+    size = 0U;
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 3U);
+
+    append_u16le(out, &size, 0x010FU);
+    append_u16le(out, &size, 2U);
+    append_u32le(out, &size, (omc_u32)make_size);
+    append_u32le(out, &size, make_off);
+
+    append_u16le(out, &size, 0x0110U);
+    append_u16le(out, &size, 2U);
+    append_u32le(out, &size, (omc_u32)model_size);
+    append_u32le(out, &size, model_off);
+
+    append_u16le(out, &size, 0x927CU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, makernote_count);
+    append_u32le(out, &size, maker_off);
+
+    append_u32le(out, &size, 0U);
+    append_bytes(out, &size, make);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, model);
+    append_u8(out, &size, 0U);
+    append_raw(out, &size, makernote, makernote_size);
+    return size;
+}
+
+static omc_size
 make_fuji_makernote(omc_u8* out)
 {
     omc_size size;
@@ -440,6 +507,749 @@ make_nikon_makernote(omc_u8* out)
     append_u8(out, &size, 0U);
     append_u8(out, &size, 2U);
     append_u8(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_binary_subdirs(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 off_vr_pos;
+    omc_u32 off_dist_pos;
+    omc_u32 off_flash_pos;
+    omc_u32 off_multi_pos;
+    omc_u32 off_afinfo_pos;
+    omc_u32 off_file_pos;
+    omc_u32 off_retouch_pos;
+    omc_u32 off_payload;
+
+    size = 0U;
+    append_raw(out, &size, "Nikon\0", 6U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 8U);
+
+    append_u16le(out, &size, 0x0001U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0x01020304U);
+
+    append_u16le(out, &size, 0x001FU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 8U);
+    off_vr_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x002BU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 5U);
+    off_dist_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x00A8U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 10U);
+    off_flash_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x00B0U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 16U);
+    off_multi_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x00B7U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 29U);
+    off_afinfo_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x00B8U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 8U);
+    off_file_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x00BBU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 6U);
+    off_retouch_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u32le(out, &size, 0U);
+
+    off_payload = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_vr_pos, off_payload);
+    append_bytes(out, &size, "0101");
+    append_u8(out, &size, 1U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+
+    off_payload = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_dist_pos, off_payload);
+    append_bytes(out, &size, "0100");
+    append_u8(out, &size, 1U);
+
+    off_payload = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_flash_pos, off_payload);
+    append_bytes(out, &size, "0106");
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0xAAU);
+    append_u8(out, &size, 0xBBU);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+
+    off_payload = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_multi_pos, off_payload);
+    append_bytes(out, &size, "0100");
+    append_u32le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+    append_u32le(out, &size, 3U);
+
+    off_payload = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_afinfo_pos, off_payload);
+    append_bytes(out, &size, "0100");
+    append_u32le(out, &size, 0U);
+    append_u8(out, &size, 0xAAU);
+    append_u8(out, &size, 0xBBU);
+    append_u8(out, &size, 0xCCU);
+    append_u8(out, &size, 0xDDU);
+    append_u8(out, &size, 0xEEU);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 1U);
+
+    off_payload = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_file_pos, off_payload);
+    append_bytes(out, &size, "0100");
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u16le(out, &size, 99U);
+
+    off_payload = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_retouch_pos, off_payload);
+    append_bytes(out, &size, "0100");
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0xFFU);
+
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_info_blocks(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 off_pc_pos;
+    omc_u32 off_iso_pos;
+    omc_u32 off_hdr_pos;
+    omc_u32 off_loc_pos;
+    omc_u32 off_payload;
+    omc_u32 i;
+
+    size = 0U;
+    append_raw(out, &size, "Nikon\0", 6U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 6U);
+
+    append_u16le(out, &size, 0x0001U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0x01020304U);
+
+    append_u16le(out, &size, 0x0023U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 66U);
+    off_pc_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0024U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 4U);
+    append_u32le(out, &size, 0x0201FDE4U);
+
+    append_u16le(out, &size, 0x0025U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 10U);
+    off_iso_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0035U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 8U);
+    off_hdr_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0039U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 17U);
+    off_loc_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u32le(out, &size, 0U);
+
+    off_payload = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_pc_pos, off_payload);
+    append_bytes(out, &size, "0200");
+    append_bytes(out, &size, "NEUTRAL");
+    for (i = 0U; i < 13U; ++i) {
+        append_u8(out, &size, 0U);
+    }
+    append_bytes(out, &size, "STANDARD");
+    for (i = 0U; i < 12U; ++i) {
+        append_u8(out, &size, 0U);
+    }
+    for (i = 0U; i < 21U; ++i) {
+        append_u8(out, &size, 0U);
+    }
+    append_u8(out, &size, 15U);
+
+    off_payload = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_iso_pos, off_payload);
+    append_bytes(out, &size, "0100");
+    append_u32le(out, &size, 0U);
+    append_u16le(out, &size, 400U);
+
+    off_payload = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_hdr_pos, off_payload);
+    append_bytes(out, &size, "0100");
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 4U);
+
+    off_payload = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_loc_pos, off_payload);
+    append_bytes(out, &size, "0100");
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "TOKYO-JP");
+
+    return size;
+}
+
+static omc_size
+make_canon_custom_functions2_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0099U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 8U);
+    append_u32le(out, &size, 18U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 32U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 20U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0x0101U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_canon_afinfo2_makernote(omc_u8* out)
+{
+    static const omc_s16 x_pos[9] = { 0, -649, 649, -1034, 0,
+                                      1034, -649, 649, 0 };
+    static const omc_s16 y_pos[9] = { 562, 298, 298, 0, 0,
+                                      0, -298, -298, -562 };
+    omc_size size;
+    omc_u32 i;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0026U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 48U);
+    append_u32le(out, &size, 18U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 96U);
+    append_u16le(out, &size, 2U);
+    append_u16le(out, &size, 9U);
+    append_u16le(out, &size, 9U);
+    append_u16le(out, &size, 3888U);
+    append_u16le(out, &size, 2592U);
+    append_u16le(out, &size, 3888U);
+    append_u16le(out, &size, 2592U);
+
+    for (i = 0U; i < 9U; ++i) {
+        append_u16le(out, &size, 97U);
+    }
+    for (i = 0U; i < 9U; ++i) {
+        append_u16le(out, &size, 98U);
+    }
+    for (i = 0U; i < 9U; ++i) {
+        append_u16le(out, &size, (omc_u16)x_pos[i]);
+    }
+    for (i = 0U; i < 9U; ++i) {
+        append_u16le(out, &size, (omc_u16)y_pos[i]);
+    }
+
+    append_u16le(out, &size, 4U);
+    append_u16le(out, &size, 4U);
+    append_u16le(out, &size, 0U);
+    append_u16le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_preview_settings_and_aftune(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 off_preview_pos;
+    omc_u32 off_settings_pos;
+    omc_u32 rel_off;
+
+    size = 0U;
+    append_raw(out, &size, "Nikon\0", 6U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 4U);
+
+    append_u16le(out, &size, 0x0001U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0x01020304U);
+
+    append_u16le(out, &size, 0x0011U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    off_preview_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x004EU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 48U);
+    off_settings_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x00B9U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 4U);
+    append_u8(out, &size, 1U);
+    append_u8(out, &size, 4U);
+    append_u8(out, &size, 0xFDU);
+    append_u8(out, &size, 5U);
+
+    append_u32le(out, &size, 0U);
+
+    rel_off = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_settings_pos, rel_off);
+    memset(out + size, 0, 48U);
+    write_u32le_at(out, (omc_u32)size + 20U, 3U);
+    out[size + 24U + 0U] = 0x01U;
+    out[size + 24U + 1U] = 0x00U;
+    out[size + 24U + 2U] = 0x00U;
+    out[size + 24U + 3U] = 0x04U;
+    write_u32le_at(out, (omc_u32)size + 24U + 4U, 6400U);
+    out[size + 32U + 0U] = 0x46U;
+    out[size + 32U + 1U] = 0x00U;
+    out[size + 32U + 2U] = 0x00U;
+    out[size + 32U + 3U] = 0x01U;
+    write_u32le_at(out, (omc_u32)size + 32U + 4U, 1U);
+    out[size + 40U + 0U] = 0x63U;
+    out[size + 40U + 1U] = 0x00U;
+    out[size + 40U + 2U] = 0x00U;
+    out[size + 40U + 3U] = 0x03U;
+    write_u32le_at(out, (omc_u32)size + 40U + 4U, 9U);
+    size += 48U;
+
+    rel_off = (omc_u32)(size - 10U);
+    write_u32le_at(out, off_preview_pos, rel_off);
+    append_u16le(out, &size, 4U);
+
+    append_u16le(out, &size, 0x0103U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 6U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0201U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0x0200U);
+
+    append_u16le(out, &size, 0x0202U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0x1234U);
+
+    append_u16le(out, &size, 0x0213U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 2U);
+    append_u16le(out, &size, 0U);
+
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_canon_filterinfo_makernote(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 filter_size;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x4024U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 12U);
+    append_u32le(out, &size, 18U);
+    append_u32le(out, &size, 0U);
+
+    filter_size = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+    append_u32le(out, &size, 4U);
+    append_u32le(out, &size, 36U);
+    append_u32le(out, &size, 2U);
+
+    append_u32le(out, &size, 0x0402U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 2U);
+
+    append_u32le(out, &size, 0x0403U);
+    append_u32le(out, &size, 2U);
+    append_u32le(out, &size, 300U);
+    append_u32le(out, &size, 700U);
+
+    write_u32le_at(out, filter_size, (omc_u32)(size - filter_size));
+    return size;
+}
+
+static omc_size
+make_canon_timeinfo_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0035U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 4U);
+    append_u32le(out, &size, 18U);
+    append_u32le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+    append_u32le(out, &size, 540U);
+    append_u32le(out, &size, 1234U);
+    append_u32le(out, &size, 1U);
+    return size;
+}
+
+static omc_size
+make_canon_camera_info_psinfo_makernote(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 cam_off;
+    omc_u32 cam_bytes;
+
+    size = 0U;
+    cam_bytes = 0x025BU + 0x00DEU;
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x000DU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, cam_bytes);
+    append_u32le(out, &size, 18U);
+    append_u32le(out, &size, 0U);
+
+    cam_off = (omc_u32)size;
+    memset(out + size, 0, cam_bytes);
+    write_u16le_at(out, cam_off + 0U, 1U);
+    write_u16le_at(out, cam_off + 2U, 0x0003U);
+    write_u16le_at(out, cam_off + 4U, 3U);
+    write_u32le_at(out, cam_off + 6U, 1U);
+    write_u16le_at(out, cam_off + 10U, 42U);
+    write_u32le_at(out, cam_off + 14U, 0U);
+    write_u32le_at(out, cam_off + 0x025BU + 0x0004U, 3U);
+    write_u16le_at(out, cam_off + 0x025BU + 0x00D8U, 129U);
+    size += cam_bytes;
+
+    return size;
+}
+
+static omc_size
+make_canon_camera_info_psinfo2_makernote(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 cam_off;
+    omc_u32 cam_bytes;
+
+    size = 0U;
+    cam_bytes = 0x025BU + 0x00F6U;
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x000DU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, cam_bytes);
+    append_u32le(out, &size, 18U);
+    append_u32le(out, &size, 0U);
+
+    cam_off = (omc_u32)size;
+    memset(out + size, 0, cam_bytes);
+    write_u16le_at(out, cam_off + 0U, 1U);
+    write_u16le_at(out, cam_off + 2U, 0x0003U);
+    write_u16le_at(out, cam_off + 4U, 3U);
+    write_u32le_at(out, cam_off + 6U, 1U);
+    write_u16le_at(out, cam_off + 10U, 42U);
+    write_u32le_at(out, cam_off + 14U, 0U);
+    write_u32le_at(out, cam_off + 0x025BU + 0x0004U, 3U);
+    write_u32le_at(out, cam_off + 0x025BU + 0x0090U, 7U);
+    write_u32le_at(out, cam_off + 0x025BU + 0x00E4U, 2U);
+    write_u16le_at(out, cam_off + 0x025BU + 0x00F0U, 129U);
+    size += cam_bytes;
+
+    return size;
+}
+
+static omc_size
+make_canon_camera_info_blob_makernote(omc_u8* out, const omc_u8* cam,
+                                      omc_size cam_size)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x000DU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, (omc_u32)cam_size);
+    append_u32le(out, &size, 18U);
+    append_u32le(out, &size, 0U);
+    append_raw(out, &size, cam, cam_size);
+    return size;
+}
+
+static omc_size
+make_canon_camera_info_blob_with_ascii(omc_u8* out, omc_u16 tag,
+                                       const char* text, omc_size width)
+{
+    omc_size size;
+    omc_size text_size;
+
+    text_size = strlen(text);
+    assert(text_size <= width);
+    size = (omc_size)tag + width;
+    memset(out, 0, size);
+    memcpy(out + tag, text, text_size);
+    return size;
+}
+
+static omc_size
+make_canon_camera_info_blob_with_u16(omc_u8* out, omc_u16 tag, omc_u16 value)
+{
+    omc_size size;
+
+    size = (omc_size)tag + 2U;
+    memset(out, 0, size);
+    write_u16le_at(out, tag, value);
+    return size;
+}
+
+static omc_size
+make_canon_camera_info_blob_with_u32(omc_u8* out, omc_u16 tag, omc_u32 value)
+{
+    omc_size size;
+
+    size = (omc_size)tag + 4U;
+    memset(out, 0, size);
+    write_u32le_at(out, tag, value);
+    return size;
+}
+
+static omc_size
+make_canon_camera_info_blob_with_ifd_ascii(omc_u8* out, omc_u16 tag,
+                                           const char* text, omc_size width)
+{
+    omc_size size;
+    omc_size text_size;
+
+    text_size = strlen(text);
+    assert(width > 4U);
+    assert(text_size <= width);
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, tag);
+    append_u16le(out, &size, 2U);
+    append_u32le(out, &size, (omc_u32)width);
+    append_u32le(out, &size, 18U);
+    append_u32le(out, &size, 0U);
+    memset(out + size, 0, width);
+    memcpy(out + size, text, text_size);
+    size += width;
+    return size;
+}
+
+static omc_size
+make_canon_camera_info_u32_table_makernote(omc_u8* out, omc_u32 count,
+                                           omc_u16 tag, omc_u32 value)
+{
+    omc_size size;
+    omc_u32 words_off;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x000DU);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, count);
+    append_u32le(out, &size, 18U);
+    append_u32le(out, &size, 0U);
+
+    words_off = (omc_u32)size;
+    memset(out + size, 0, count * 4U);
+    write_u32le_at(out, words_off + ((omc_u32)tag * 4U), value);
+    size += (omc_size)count * 4U;
+    return size;
+}
+
+static omc_size
+make_canon_colordata8_makernote(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 color_off;
+    omc_u32 color_count;
+    omc_u32 color_bytes;
+
+    size = 0U;
+    color_count = 1353U;
+    color_bytes = color_count * 2U;
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x4001U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, color_count);
+    append_u32le(out, &size, 18U);
+    append_u32le(out, &size, 0U);
+
+    color_off = (omc_u32)size;
+    memset(out + size, 0, color_bytes);
+    write_u16le_at(out, color_off + (0x0000U * 2U), 14U);
+    write_u16le_at(out, color_off + (0x003FU * 2U), 777U);
+    write_u16le_at(out, color_off + (0x0043U * 2U), 6100U);
+    write_u16le_at(out, color_off + (0x0107U * 2U), 100U);
+    write_u16le_at(out, color_off + (0x0108U * 2U),
+                   (omc_u16)(0xFFFFU - 24U));
+    write_u16le_at(out, color_off + (0x0109U * 2U), 300U);
+    write_u16le_at(out, color_off + (0x010AU * 2U), 5200U);
+    write_u16le_at(out, color_off + (0x010BU * 2U),
+                   (omc_u16)(0xFFFFU - 9U));
+    write_u16le_at(out, color_off + (0x010CU * 2U), 20U);
+    write_u16le_at(out, color_off + (0x010DU * 2U),
+                   (omc_u16)(0xFFFFU - 29U));
+    write_u16le_at(out, color_off + (0x010EU * 2U), 40U);
+    size += color_bytes;
+
+    return size;
+}
+
+static omc_size
+make_canon_colordata_counted_makernote(omc_u8* out, omc_u32 count,
+                                       omc_u16 version)
+{
+    omc_size size;
+    omc_u32 color_off;
+    omc_u32 color_bytes;
+
+    size = 0U;
+    color_bytes = count * 2U;
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x4001U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, count);
+    append_u32le(out, &size, 18U);
+    append_u32le(out, &size, 0U);
+
+    color_off = (omc_u32)size;
+    memset(out + size, 0, color_bytes);
+    write_u16le_at(out, color_off + (0x0000U * 2U), version);
+
+    if (count > 0x0061U) {
+        write_u16le_at(out, color_off + (0x0061U * 2U),
+                       (omc_u16)(6200U + version));
+    }
+    if (count > 0x00E0U) {
+        write_u16le_at(out, color_off + (0x00E0U * 2U), 150U);
+        write_u16le_at(out, color_off + (0x00E1U * 2U), 250U);
+        write_u16le_at(out, color_off + (0x00E2U * 2U), 350U);
+        write_u16le_at(out, color_off + (0x00E3U * 2U), 4500U);
+    }
+    if (count > 0x0042U) {
+        write_u16le_at(out, color_off + (0x003FU * 2U),
+                       (omc_u16)(1700U + version));
+        write_u16le_at(out, color_off + (0x0040U * 2U),
+                       (omc_u16)(1800U + version));
+        write_u16le_at(out, color_off + (0x0041U * 2U),
+                       (omc_u16)(1900U + version));
+        write_u16le_at(out, color_off + (0x0042U * 2U),
+                       (omc_u16)(2000U + version));
+    }
+    if (count > 0x010DU) {
+        write_u16le_at(out, color_off + (0x010DU * 2U), 410U);
+        write_u16le_at(out, color_off + (0x010EU * 2U), 510U);
+        write_u16le_at(out, color_off + (0x010FU * 2U), 610U);
+        write_u16le_at(out, color_off + (0x0110U * 2U), 5200U);
+    }
+    if (count > 0x0076U) {
+        write_u16le_at(out, color_off + (0x0073U * 2U),
+                       (omc_u16)(2700U + version));
+        write_u16le_at(out, color_off + (0x0074U * 2U),
+                       (omc_u16)(2800U + version));
+        write_u16le_at(out, color_off + (0x0075U * 2U),
+                       (omc_u16)(2900U + version));
+        write_u16le_at(out, color_off + (0x0076U * 2U),
+                       (omc_u16)(3000U + version));
+    }
+    if (count > 0x017BU) {
+        write_u16le_at(out, color_off + (0x0178U * 2U), 710U);
+        write_u16le_at(out, color_off + (0x0179U * 2U), 810U);
+        write_u16le_at(out, color_off + (0x017AU * 2U), 910U);
+        write_u16le_at(out, color_off + (0x017BU * 2U), 6100U);
+    }
+
+    size += color_bytes;
     return size;
 }
 
@@ -860,6 +1670,926 @@ test_nikon_makernote_root_and_vrinfo(void)
     omc_store_fini(&store);
 }
 
+static void
+test_nikon_makernote_binary_subdirs(void)
+{
+    omc_u8 makernote[512];
+    omc_u8 tiff[768];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    makernote_size = make_nikon_makernote_with_binary_subdirs(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Nikon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_nikon_distortinfo_0", 0x0004U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_DERIVED) != 0U);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 1U);
+
+    entry = find_exif_entry(&store, "mk_nikon_flashinfo0106_0", 0x0006U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.count == 2U);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 2U);
+    assert(view.data[0] == 0xAAU);
+    assert(view.data[1] == 0xBBU);
+
+    entry = find_exif_entry(&store, "mk_nikon_multiexposure_0", 0x0003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 3U);
+
+    entry = find_exif_entry(&store, "mk_nikon_afinfo2v0100_0", 0x0008U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_BYTES);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(view.data[0] == 0xAAU);
+    assert(view.data[1] == 0xBBU);
+    assert(view.data[2] == 0xCCU);
+    assert(view.data[3] == 0xDDU);
+    assert(view.data[4] == 0xEEU);
+
+    entry = find_exif_entry(&store, "mk_nikon_afinfo2v0100_0", 0x001CU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 1U);
+
+    entry = find_exif_entry(&store, "mk_nikon_fileinfo_0", 0x0003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 99U);
+
+    entry = find_exif_entry(&store, "mk_nikon_retouchinfo_0", 0x0005U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_I8);
+    assert(entry->value.u.i64 == -1);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_nikon_makernote_info_blocks(void)
+{
+    omc_u8 makernote[512];
+    omc_u8 tiff[768];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    makernote_size = make_nikon_makernote_with_info_blocks(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Nikon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_nikon_picturecontrol2_0", 0x0004U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 7U);
+    assert(memcmp(view.data, "NEUTRAL", 7U) == 0);
+
+    entry = find_exif_entry(&store, "mk_nikon_picturecontrol2_0", 0x0041U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 15U);
+
+    entry = find_exif_entry(&store, "mk_nikon_worldtime_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_I16);
+    assert(entry->value.u.i64 == -540);
+
+    entry = find_exif_entry(&store, "mk_nikon_isoinfo_0", 0x0004U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 400U);
+
+    entry = find_exif_entry(&store, "mk_nikon_hdrinfo_0", 0x0007U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 4U);
+
+    entry = find_exif_entry(&store, "mk_nikon_locationinfo_0", 0x0009U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_BYTES);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 8U);
+    assert(memcmp(view.data, "TOKYO-JP", 8U) == 0);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_canon_custom_functions2_makernote(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_canon_custom_functions2_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_canoncustom_functions2_0", 0x0101U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_DERIVED) != 0U);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 0U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_canon_afinfo2_makernote(void)
+{
+    omc_u8 makernote[256];
+    omc_u8 tiff[512];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_canon_afinfo2_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_canon_afinfo2_0", 0x0002U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_DERIVED) != 0U);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 9U);
+
+    entry = find_exif_entry(&store, "mk_canon_afinfo2_0", 0x0008U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.count == 9U);
+
+    entry = find_exif_entry(&store, "mk_canon_afinfo2_0", 0x260AU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_I16);
+    assert(entry->value.count == 9U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_nikon_preview_settings_and_aftune_makernote(void)
+{
+    omc_u8 makernote[512];
+    omc_u8 tiff[768];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_nikon_makernote_with_preview_settings_and_aftune(
+        makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Nikon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_nikon_preview_0", 0x0103U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_DERIVED) != 0U);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 6U);
+
+    entry = find_exif_entry(&store, "mk_nikon_preview_0", 0x0202U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 0x1234U);
+
+    entry = find_exif_entry(&store, "mk_nikonsettings_main_0", 0x0001U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 6400U);
+
+    entry = find_exif_entry(&store, "mk_nikonsettings_main_0", 0x0046U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 1U);
+
+    entry = find_exif_entry(&store, "mk_nikon_aftune_0", 0x0002U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_I8);
+    assert(entry->value.u.i64 == -3);
+
+    entry = find_exif_entry(&store, "mk_nikon_aftune_0", 0x0003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_I8);
+    assert(entry->value.u.i64 == 5);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_canon_filterinfo_makernote(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+    omc_u32 vals[2];
+
+    makernote_size = make_canon_filterinfo_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_canon_filterinfo_0", 0x0402U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 2U);
+
+    entry = find_exif_entry(&store, "mk_canon_filterinfo_0", 0x0403U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.count == 2U);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size >= 8U);
+    memcpy(vals, view.data, sizeof(vals));
+    assert(vals[0] == 300U);
+    assert(vals[1] == 700U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_canon_timeinfo_makernote(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_canon_timeinfo_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_canon_timeinfo_0", 0x0001U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 540U);
+
+    entry = find_exif_entry(&store, "mk_canon_timeinfo_0", 0x0002U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 1234U);
+
+    entry = find_exif_entry(&store, "mk_canon_timeinfo_0", 0x0003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 1U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_canon_camera_info_psinfo_makernote(void)
+{
+    omc_u8 makernote[2048];
+    omc_u8 tiff[4096];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_ifd_ref ifds[8];
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_canon_camera_info_psinfo_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_canon_camerainfo_0", 0x0003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 42U);
+
+    entry = find_exif_entry(&store, "mk_canon_psinfo_0", 0x0004U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_I32);
+    assert(entry->value.u.i64 == 3);
+
+    entry = find_exif_entry(&store, "mk_canon_psinfo_0", 0x00D8U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 129U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_canon_colordata8_makernote(void)
+{
+    omc_u8 makernote[4096];
+    omc_u8 tiff[8192];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_ifd_ref ifds[8];
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_canon_colordata8_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_canon_colordata8_0", 0x0043U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 6100U);
+
+    entry = find_exif_entry(&store, "mk_canon_colorcalib_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 100U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_canon_camera_info_model_and_psinfo2_makernote(void)
+{
+    omc_u8 cam[1024];
+    omc_u8 makernote[2048];
+    omc_u8 tiff[4096];
+    omc_size cam_size;
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_ifd_ref ifds[8];
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    cam_size = make_canon_camera_info_blob_with_ascii(cam, 0x0107U, "1.2.3",
+                                                      6U);
+    makernote_size = make_canon_camera_info_blob_makernote(makernote, cam,
+                                                           cam_size);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Canon", "Canon EOS 450D", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_canon_camerainfo450d_0", 0x0107U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "1.2.3", 5U) == 0);
+    omc_store_fini(&store);
+
+    cam_size = make_canon_camera_info_blob_with_ifd_ascii(cam, 0x0256U,
+                                                          "1.1.2", 6U);
+    makernote_size = make_canon_camera_info_blob_makernote(makernote, cam,
+                                                           cam_size);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_canon_camerainfo6d_0", 0x0256U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "1.1.2", 5U) == 0);
+    omc_store_fini(&store);
+
+    makernote_size = make_canon_camera_info_psinfo2_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_canon_psinfo2_0", 0x0090U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_I32);
+    assert(entry->value.u.i64 == 7);
+
+    entry = find_exif_entry(&store, "mk_canon_psinfo2_0", 0x00F0U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 129U);
+    omc_store_fini(&store);
+
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Canon", "Canon EOS 1000D", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_canon_psinfo_0", 0x0090U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_I32);
+    assert(entry->value.u.i64 == 7);
+    entry = find_exif_entry(&store, "mk_canon_psinfo2_0", 0x0090U);
+    assert(entry == (const omc_entry*)0);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_canon_camera_info_additional_cohorts_makernote(void)
+{
+    omc_u8 cam[2048];
+    omc_u8 makernote[4096];
+    omc_u8 tiff[8192];
+    omc_size cam_size;
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_ifd_ref ifds[8];
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    cam_size = make_canon_camera_info_blob_with_ascii(cam, 0x019BU, "1.0.1",
+                                                      6U);
+    makernote_size = make_canon_camera_info_blob_makernote(makernote, cam,
+                                                           cam_size);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Canon", "Canon EOS 1100D", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    assert(find_exif_entry(&store, "mk_canon_camerainfo_0", 0x019BU)
+           == (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_canon_camerainfo1100d_0", 0x019BU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "1.0.1", 5U) == 0);
+    omc_store_fini(&store);
+
+    cam_size = make_canon_camera_info_blob_with_ascii(cam, 0x019BU, "1.0.9",
+                                                      6U);
+    makernote_size = make_canon_camera_info_blob_makernote(makernote, cam,
+                                                           cam_size);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Canon", "Canon EOS Kiss X70", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    assert(find_exif_entry(&store, "mk_canon_camerainfo650d_0", 0x019BU)
+           == (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_canon_camerainfo600d_0", 0x019BU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "1.0.9", 5U) == 0);
+    omc_store_fini(&store);
+
+    cam_size = make_canon_camera_info_blob_with_ascii(cam, 0x01ACU, "1.2.0",
+                                                      6U);
+    makernote_size = make_canon_camera_info_blob_makernote(makernote, cam,
+                                                           cam_size);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Canon", "Canon EOS 7D", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    assert(find_exif_entry(&store, "mk_canon_camerainfo_0", 0x01ACU)
+           == (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_canon_camerainfo7d_0", 0x01ACU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "1.2.0", 5U) == 0);
+    omc_store_fini(&store);
+
+    cam_size = make_canon_camera_info_blob_with_ifd_ascii(cam, 0x01ACU,
+                                                          "1.0.7", 6U);
+    makernote_size = make_canon_camera_info_blob_makernote(makernote, cam,
+                                                           cam_size);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    assert(find_exif_entry(&store, "mk_canon_camerainfo_0", 0x01ACU)
+           == (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_canon_camerainfo7d_0", 0x01ACU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "1.0.7", 5U) == 0);
+    omc_store_fini(&store);
+}
+
+static void
+test_canon_colordata_counted_families_makernote(void)
+{
+    omc_u8 makernote[8192];
+    omc_u8 tiff[16384];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_ifd_ref ifds[8];
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_canon_colordata_counted_makernote(makernote, 1338U,
+                                                            7U);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_canon_colorcoefs_0", 0x0022U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 6207U);
+    omc_store_fini(&store);
+
+    makernote_size = make_canon_colordata_counted_makernote(makernote, 1312U,
+                                                            10U);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_canon_colordata7_0", 0x003FU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 1710U);
+    entry = find_exif_entry(&store, "mk_canon_colorcalib_0", 0x0038U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 410U);
+    omc_store_fini(&store);
+
+    makernote_size = make_canon_colordata_counted_makernote(makernote, 3778U,
+                                                            65U);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_canon_colordata12_0", 0x0073U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 2765U);
+    entry = find_exif_entry(&store, "mk_canon_colorcalib_0", 0x0038U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 710U);
+    omc_store_fini(&store);
+}
+
+static void
+test_canon_camera_info_extended_fixed_fields_makernote(void)
+{
+    omc_u8 cam[2048];
+    omc_u8 makernote[2048];
+    omc_u8 tiff[4096];
+    omc_size cam_size;
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_ifd_ref ifds[8];
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    cam_size = make_canon_camera_info_blob_with_u16(cam, 0x0048U, 5300U);
+    makernote_size = make_canon_camera_info_blob_makernote(makernote, cam,
+                                                           cam_size);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Canon", "Canon EOS-1DS", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_canon_camerainfo1d_0", 0x0048U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 5300U);
+    omc_store_fini(&store);
+
+    cam_size = make_canon_camera_info_blob_with_ascii(cam, 0x016BU,
+                                                      "1234567890ABCDEF", 16U);
+    makernote_size = make_canon_camera_info_blob_makernote(makernote, cam,
+                                                           cam_size);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Canon", "Canon EOS 5DS", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_canon_camerainfounknown_0", 0x016BU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 16U);
+    assert(memcmp(view.data, "1234567890ABCDEF", 16U) == 0);
+    omc_store_fini(&store);
+
+    cam_size = make_canon_camera_info_blob_with_ascii(cam, 0x05C1U, "1.0.0",
+                                                      6U);
+    makernote_size = make_canon_camera_info_blob_makernote(makernote, cam,
+                                                           cam_size);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Canon", "Canon EOS R1", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_canon_camerainfounknown_0", 0x05C1U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "1.0.0", 5U) == 0);
+    omc_store_fini(&store);
+
+    makernote_size = make_canon_camera_info_u32_table_makernote(
+        makernote, 0x0048U, 0x0047U, 19U);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Canon", "Canon PowerShot S1 IS", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_canon_camerainfounknown32_0", 0x0047U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 19U);
+    omc_store_fini(&store);
+
+    memset(cam, 0, sizeof(cam));
+    cam_size = 0x0075U + 4U;
+    cam[0x0066U] = 7U;
+    memcpy(cam + 0x0075U, "0400", 4U);
+    makernote_size = make_canon_camera_info_blob_makernote(makernote, cam,
+                                                           cam_size);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Canon", "Canon EOS-1D Mark II", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_canon_camerainfo1dmkii_0", 0x0066U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 7U);
+    entry = find_exif_entry(&store, "mk_canon_camerainfo1dmkii_0", 0x0075U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 4U);
+    assert(memcmp(view.data, "0400", 4U) == 0);
+    omc_store_fini(&store);
+
+    memset(cam, 0, sizeof(cam));
+    cam_size = 0x0079U + 4U;
+    cam[0x0074U] = 3U;
+    memcpy(cam + 0x0079U, "0800", 4U);
+    makernote_size = make_canon_camera_info_blob_makernote(makernote, cam,
+                                                           cam_size);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Canon", "Canon EOS-1D Mark II N", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_canon_camerainfo1dmkiin_0", 0x0074U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 3U);
+    entry = find_exif_entry(&store, "mk_canon_camerainfo1dmkiin_0", 0x0079U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 4U);
+    assert(memcmp(view.data, "0800", 4U) == 0);
+    omc_store_fini(&store);
+
+    cam_size = make_canon_camera_info_blob_with_u32(cam, 0x011CU, 0x01020304U);
+    makernote_size = make_canon_camera_info_blob_makernote(makernote, cam,
+                                                           cam_size);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Canon", "Canon EOS 5D", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_canon_camerainfo5d_0", 0x011CU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 0x01020304U);
+    omc_store_fini(&store);
+}
+
 int
 main(void)
 {
@@ -873,5 +2603,18 @@ main(void)
     test_canon_makernote_root();
     test_canon_camera_settings_makernote();
     test_nikon_makernote_root_and_vrinfo();
+    test_nikon_makernote_binary_subdirs();
+    test_nikon_makernote_info_blocks();
+    test_canon_custom_functions2_makernote();
+    test_canon_afinfo2_makernote();
+    test_nikon_preview_settings_and_aftune_makernote();
+    test_canon_filterinfo_makernote();
+    test_canon_timeinfo_makernote();
+    test_canon_camera_info_psinfo_makernote();
+    test_canon_colordata8_makernote();
+    test_canon_colordata_counted_families_makernote();
+    test_canon_camera_info_model_and_psinfo2_makernote();
+    test_canon_camera_info_additional_cohorts_makernote();
+    test_canon_camera_info_extended_fixed_fields_makernote();
     return 0;
 }
