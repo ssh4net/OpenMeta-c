@@ -103,6 +103,12 @@ OMC_API void
 omc_key_make_photoshop_irb(omc_key* key, omc_u16 resource_id);
 
 OMC_API void
+omc_key_make_geotiff_key(omc_key* key, omc_u16 key_id);
+
+OMC_API void
+omc_key_make_printim_field(omc_key* key, omc_byte_ref field);
+
+OMC_API void
 omc_key_make_bmff_field(omc_key* key, omc_byte_ref field);
 
 OMC_API void

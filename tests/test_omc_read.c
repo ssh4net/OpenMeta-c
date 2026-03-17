@@ -251,6 +251,222 @@ make_test_tiff_le(omc_u8* out)
     return size;
 }
 
+static omc_size
+make_test_tiff_geotiff(omc_u8* out)
+{
+    static const omc_u8 geodouble_bits[8] = {
+        0x00U, 0x00U, 0x00U, 0x40U, 0xA6U, 0x54U, 0x58U, 0x41U
+    };
+    omc_size size;
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 3U);
+
+    append_u16le(out, &size, 0x87AFU);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 16U);
+    append_u32le(out, &size, 50U);
+
+    append_u16le(out, &size, 0x87B0U);
+    append_u16le(out, &size, 12U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 82U);
+
+    append_u16le(out, &size, 0x87B1U);
+    append_u16le(out, &size, 2U);
+    append_u32le(out, &size, 13U);
+    append_u32le(out, &size, 90U);
+
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0U);
+    append_u16le(out, &size, 3U);
+
+    append_u16le(out, &size, 1024U);
+    append_u16le(out, &size, 0U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 2U);
+
+    append_u16le(out, &size, 1026U);
+    append_u16le(out, &size, 0x87B1U);
+    append_u16le(out, &size, 13U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 2057U);
+    append_u16le(out, &size, 0x87B0U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0U);
+
+    append_bytes(out, &size, geodouble_bits, sizeof(geodouble_bits));
+    append_text(out, &size, "TestCitation|");
+    return size;
+}
+
+static omc_size
+make_test_tiff_printim(omc_u8* out)
+{
+    static const omc_u8 printim_magic[8] = {
+        'P', 'r', 'i', 'n', 't', 'I', 'M', 0
+    };
+    omc_size size;
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 1U);
+
+    append_u16le(out, &size, 0xC4A5U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 22U);
+    append_u32le(out, &size, 26U);
+
+    append_u32le(out, &size, 0U);
+    append_bytes(out, &size, printim_magic, sizeof(printim_magic));
+    append_text(out, &size, "0300");
+    append_u16le(out, &size, 0U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0001U);
+    append_u32le(out, &size, 0x00160016U);
+    return size;
+}
+
+static omc_size
+make_test_tiff_with_makernote_count(omc_u8* out, const omc_u8* makernote,
+                                    omc_size makernote_size,
+                                    omc_u32 makernote_count)
+{
+    omc_size size;
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x927CU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, makernote_count);
+    append_u32le(out, &size, 26U);
+    append_u32le(out, &size, 0U);
+    append_bytes(out, &size, makernote, makernote_size);
+    return size;
+}
+
+static omc_size
+make_test_tiff_with_makernote(omc_u8* out, const omc_u8* makernote,
+                              omc_size makernote_size)
+{
+    return make_test_tiff_with_makernote_count(out, makernote, makernote_size,
+                                               (omc_u32)makernote_size);
+}
+
+static omc_size
+make_test_tiff_with_make_and_makernote_count(omc_u8* out, const char* make,
+                                             const omc_u8* makernote,
+                                             omc_size makernote_size,
+                                             omc_u32 makernote_count)
+{
+    omc_size size;
+    omc_size make_size;
+    omc_u32 make_off;
+    omc_u32 maker_off;
+
+    make_size = strlen(make) + 1U;
+    make_off = 38U;
+    maker_off = make_off + (omc_u32)make_size;
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 2U);
+
+    append_u16le(out, &size, 0x010FU);
+    append_u16le(out, &size, 2U);
+    append_u32le(out, &size, (omc_u32)make_size);
+    append_u32le(out, &size, make_off);
+
+    append_u16le(out, &size, 0x927CU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, makernote_count);
+    append_u32le(out, &size, maker_off);
+
+    append_u32le(out, &size, 0U);
+    append_text(out, &size, make);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, makernote, makernote_size);
+    return size;
+}
+
+static omc_size
+make_fuji_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_bytes(out, &size, "FUJIFILM", 8U);
+    append_u32le(out, &size, 12U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0001U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0x00000042U);
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_canon_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0001U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0x12345678U);
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_nikon_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_bytes(out, &size, "Nikon\0", 6U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_text(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 2U);
+    append_u16le(out, &size, 0x0001U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0x01020304U);
+    append_u16le(out, &size, 0x001FU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 8U);
+    append_u32le(out, &size, 38U);
+    append_u32le(out, &size, 0U);
+    append_text(out, &size, "0101");
+    append_u8(out, &size, 1U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    return size;
+}
+
 static void
 build_test_icc(omc_u8* out, omc_size size)
 {
@@ -623,6 +839,135 @@ make_test_x3f_all(omc_u8* out)
     append_u8(out, &size, 0U);
     append_u8(out, &size, 0U);
     append_bytes(out, &size, tiff, tiff_size);
+    return size;
+}
+
+typedef struct omc_ciff_val_ent {
+    omc_u16 tag;
+    const omc_u8* value;
+    omc_size value_size;
+} omc_ciff_val_ent;
+
+static omc_size
+make_ciff_directory(omc_u8* out, const omc_ciff_val_ent* entries,
+                    omc_size entry_count)
+{
+    omc_size size;
+    omc_u32 data_off;
+    omc_size i;
+
+    size = 0U;
+    append_u16le(out, &size, (omc_u16)entry_count);
+    data_off = 2U + (omc_u32)(entry_count * 10U);
+
+    for (i = 0U; i < entry_count; ++i) {
+        append_u16le(out, &size, entries[i].tag);
+        append_u32le(out, &size, (omc_u32)entries[i].value_size);
+        append_u32le(out, &size, data_off);
+        data_off += (omc_u32)entries[i].value_size;
+    }
+
+    for (i = 0U; i < entry_count; ++i) {
+        append_bytes(out, &size, entries[i].value, entries[i].value_size);
+    }
+
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_test_crw_minimal(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u32le(out, &size, 14U);
+    append_text(out, &size, "HEAPCCDR");
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x4801U);
+    append_text(out, &size, "CIFFTEST");
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_test_crw_derived(omc_u8* out)
+{
+    omc_u8 make_model[64];
+    omc_size make_model_size;
+    omc_u8 subject_distance[8];
+    omc_size subject_distance_size;
+    omc_u8 datetime_original[8];
+    omc_size datetime_original_size;
+    omc_u8 dimensions_orientation[32];
+    omc_size dimensions_orientation_size;
+    omc_u8 dir2807[128];
+    omc_u8 dir3002[64];
+    omc_u8 dir300a[128];
+    omc_u8 root[384];
+    omc_size dir2807_size;
+    omc_size dir3002_size;
+    omc_size dir300a_size;
+    omc_size root_size;
+    omc_ciff_val_ent dir2807_entries[1];
+    omc_ciff_val_ent dir3002_entries[1];
+    omc_ciff_val_ent dir300a_entries[2];
+    omc_ciff_val_ent root_entries[3];
+    omc_size size;
+
+    make_model_size = 0U;
+    append_text(make_model, &make_model_size, "Canon");
+    append_u8(make_model, &make_model_size, 0U);
+    append_text(make_model, &make_model_size, "PowerShot Pro70");
+    append_u8(make_model, &make_model_size, 0U);
+
+    subject_distance_size = 0U;
+    append_u32le(subject_distance, &subject_distance_size, 123U);
+
+    datetime_original_size = 0U;
+    append_u32le(datetime_original, &datetime_original_size, 1700000000U);
+
+    dimensions_orientation_size = 0U;
+    append_u32le(dimensions_orientation, &dimensions_orientation_size, 1536U);
+    append_u32le(dimensions_orientation, &dimensions_orientation_size, 1024U);
+    append_u32le(dimensions_orientation, &dimensions_orientation_size, 0U);
+    append_u32le(dimensions_orientation, &dimensions_orientation_size, 90U);
+
+    dir2807_entries[0].tag = 0x080AU;
+    dir2807_entries[0].value = make_model;
+    dir2807_entries[0].value_size = make_model_size;
+    dir2807_size = make_ciff_directory(dir2807, dir2807_entries, 1U);
+
+    dir3002_entries[0].tag = 0x1807U;
+    dir3002_entries[0].value = subject_distance;
+    dir3002_entries[0].value_size = subject_distance_size;
+    dir3002_size = make_ciff_directory(dir3002, dir3002_entries, 1U);
+
+    dir300a_entries[0].tag = 0x180EU;
+    dir300a_entries[0].value = datetime_original;
+    dir300a_entries[0].value_size = datetime_original_size;
+    dir300a_entries[1].tag = 0x1810U;
+    dir300a_entries[1].value = dimensions_orientation;
+    dir300a_entries[1].value_size = dimensions_orientation_size;
+    dir300a_size = make_ciff_directory(dir300a, dir300a_entries, 2U);
+
+    root_entries[0].tag = 0x2807U;
+    root_entries[0].value = dir2807;
+    root_entries[0].value_size = dir2807_size;
+    root_entries[1].tag = 0x3002U;
+    root_entries[1].value = dir3002;
+    root_entries[1].value_size = dir3002_size;
+    root_entries[2].tag = 0x300AU;
+    root_entries[2].value = dir300a;
+    root_entries[2].value_size = dir300a_size;
+    root_size = make_ciff_directory(root, root_entries, 3U);
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u32le(out, &size, 14U);
+    append_text(out, &size, "HEAPCCDR");
+    append_bytes(out, &size, root, root_size);
     return size;
 }
 
@@ -1746,6 +2091,46 @@ find_png_text_entry(const omc_store* store, const char* keyword,
     return (const omc_entry*)0;
 }
 
+static const omc_entry*
+find_geotiff_key(const omc_store* store, omc_u16 key_id)
+{
+    omc_size i;
+
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+
+        entry = &store->entries[i];
+        if (entry->key.kind == OMC_KEY_GEOTIFF_KEY
+            && entry->key.u.geotiff_key.key_id == key_id) {
+            return entry;
+        }
+    }
+    return (const omc_entry*)0;
+}
+
+static const omc_entry*
+find_printim_field(const omc_store* store, const char* field)
+{
+    omc_size i;
+
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes field_view;
+
+        entry = &store->entries[i];
+        if (entry->key.kind != OMC_KEY_PRINTIM_FIELD) {
+            continue;
+        }
+        field_view = omc_arena_view(&store->arena,
+                                    entry->key.u.printim_field.field);
+        if (field_view.size == strlen(field)
+            && memcmp(field_view.data, field, field_view.size) == 0) {
+            return entry;
+        }
+    }
+    return (const omc_entry*)0;
+}
+
 static omc_size
 count_bmff_field(const omc_store* store, const char* field)
 {
@@ -2359,6 +2744,323 @@ test_read_x3f_exif(void)
 }
 
 static void
+test_read_tiff_geotiff(void)
+{
+    omc_u8 tiff[256];
+    omc_size tiff_size;
+    omc_store store;
+    omc_blk_ref blocks[4];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload[64];
+    omc_u32 payload_parts[8];
+    omc_read_res res;
+    const omc_entry* model_type;
+    const omc_entry* citation;
+    const omc_entry* semi_major;
+    const omc_block_info* block;
+    omc_const_bytes value_view;
+
+    tiff_size = make_test_tiff_geotiff(tiff);
+    omc_store_init(&store);
+
+    res = omc_read_simple(tiff, tiff_size, &store, blocks, 4U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    assert(store.block_count == 1U);
+
+    model_type = find_geotiff_key(&store, 1024U);
+    assert(model_type != (const omc_entry*)0);
+    assert((model_type->flags & OMC_ENTRY_FLAG_DERIVED) != 0U);
+    assert(model_type->value.kind == OMC_VAL_SCALAR);
+    assert(model_type->value.elem_type == OMC_ELEM_U16);
+    assert(model_type->value.u.u64 == 2U);
+
+    citation = find_geotiff_key(&store, 1026U);
+    assert(citation != (const omc_entry*)0);
+    assert(citation->value.kind == OMC_VAL_TEXT);
+    assert(citation->value.text_encoding == OMC_TEXT_ASCII);
+    value_view = omc_arena_view(&store.arena, citation->value.u.ref);
+    assert(value_view.size == 12U);
+    assert(memcmp(value_view.data, "TestCitation", value_view.size) == 0);
+
+    semi_major = find_geotiff_key(&store, 2057U);
+    assert(semi_major != (const omc_entry*)0);
+    assert(semi_major->value.kind == OMC_VAL_SCALAR);
+    assert(semi_major->value.elem_type == OMC_ELEM_F64_BITS);
+    assert(semi_major->value.u.f64_bits
+           == ((((omc_u64)0x415854A6U) << 32) | (omc_u64)0x40000000U));
+
+    block = omc_store_block(&store, semi_major->origin.block);
+    assert(block != (const omc_block_info*)0);
+    assert(block->format == OMC_SCAN_FMT_TIFF);
+    assert(block->kind == OMC_BLK_EXIF);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_tiff_printim(void)
+{
+    omc_u8 tiff[128];
+    omc_size tiff_size;
+    omc_store store;
+    omc_blk_ref blocks[4];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload[64];
+    omc_u32 payload_parts[8];
+    omc_read_res res;
+    const omc_entry* version;
+    const omc_entry* field_0001;
+    const omc_block_info* block;
+    omc_const_bytes value_view;
+
+    tiff_size = make_test_tiff_printim(tiff);
+    omc_store_init(&store);
+
+    res = omc_read_simple(tiff, tiff_size, &store, blocks, 4U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    assert(store.block_count == 1U);
+
+    version = find_printim_field(&store, "version");
+    assert(version != (const omc_entry*)0);
+    assert((version->flags & OMC_ENTRY_FLAG_DERIVED) != 0U);
+    assert(version->value.kind == OMC_VAL_TEXT);
+    assert(version->value.text_encoding == OMC_TEXT_ASCII);
+    value_view = omc_arena_view(&store.arena, version->value.u.ref);
+    assert(value_view.size == 4U);
+    assert(memcmp(value_view.data, "0300", value_view.size) == 0);
+
+    field_0001 = find_printim_field(&store, "0x0001");
+    assert(field_0001 != (const omc_entry*)0);
+    assert(field_0001->value.kind == OMC_VAL_SCALAR);
+    assert(field_0001->value.elem_type == OMC_ELEM_U32);
+    assert(field_0001->value.u.u64 == 0x00160016U);
+
+    block = omc_store_block(&store, field_0001->origin.block);
+    assert(block != (const omc_block_info*)0);
+    assert(block->format == OMC_SCAN_FMT_TIFF);
+    assert(block->kind == OMC_BLK_EXIF);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_tiff_fuji_makernote(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_blk_ref blocks[4];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload[64];
+    omc_u32 payload_parts[8];
+    omc_read_opts opts;
+    omc_read_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_fuji_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_read_opts_init(&opts);
+    opts.exif.decode_makernote = 1;
+
+    res = omc_read_simple(tiff, tiff_size, &store, blocks, 4U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 8U, &opts);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_fuji0", 0x0001U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 0x42U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_tiff_canon_makernote(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_blk_ref blocks[4];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload[64];
+    omc_u32 payload_parts[8];
+    omc_read_opts opts;
+    omc_read_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_canon_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_read_opts_init(&opts);
+    opts.exif.decode_makernote = 1;
+
+    res = omc_read_simple(tiff, tiff_size, &store, blocks, 4U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 8U, &opts);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_canon0", 0x0001U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 0x12345678U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_tiff_nikon_makernote(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_blk_ref blocks[4];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload[64];
+    omc_u32 payload_parts[8];
+    omc_read_opts opts;
+    omc_read_res res;
+    const omc_entry* root;
+    const omc_entry* vr_mode;
+
+    makernote_size = make_nikon_makernote(makernote);
+    tiff_size = make_test_tiff_with_makernote(tiff, makernote, makernote_size);
+    omc_store_init(&store);
+    omc_read_opts_init(&opts);
+    opts.exif.decode_makernote = 1;
+
+    res = omc_read_simple(tiff, tiff_size, &store, blocks, 4U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 8U, &opts);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    root = find_exif_entry(&store, "mk_nikon0", 0x0001U);
+    assert(root != (const omc_entry*)0);
+    assert(root->value.kind == OMC_VAL_SCALAR);
+    assert(root->value.elem_type == OMC_ELEM_U32);
+    assert(root->value.u.u64 == 0x01020304U);
+    vr_mode = find_exif_entry(&store, "mk_nikon_vrinfo_0", 0x0006U);
+    assert(vr_mode != (const omc_entry*)0);
+    assert(vr_mode->value.kind == OMC_VAL_SCALAR);
+    assert(vr_mode->value.elem_type == OMC_ELEM_U8);
+    assert(vr_mode->value.u.u64 == 2U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_crw_minimal_ciff(void)
+{
+    omc_u8 crw[256];
+    omc_size crw_size;
+    omc_store store;
+    omc_blk_ref blocks[4];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload[64];
+    omc_u32 payload_parts[8];
+    omc_read_res res;
+    const omc_entry* entry;
+    const omc_block_info* block;
+    omc_const_bytes value_view;
+
+    crw_size = make_test_crw_minimal(crw);
+    omc_store_init(&store);
+
+    res = omc_read_simple(crw, crw_size, &store, blocks, 4U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "ciff_root", 0x0801U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    assert(entry->value.text_encoding == OMC_TEXT_ASCII);
+    value_view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(value_view.size == 8U);
+    assert(memcmp(value_view.data, "CIFFTEST", value_view.size) == 0);
+
+    block = omc_store_block(&store, entry->origin.block);
+    assert(block != (const omc_block_info*)0);
+    assert(block->format == OMC_SCAN_FMT_CRW);
+    assert(block->kind == OMC_BLK_CIFF);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_crw_derived_exif(void)
+{
+    omc_u8 crw[1024];
+    omc_size crw_size;
+    omc_store store;
+    omc_blk_ref blocks[8];
+    omc_exif_ifd_ref ifds[16];
+    omc_u8 payload[128];
+    omc_u32 payload_parts[8];
+    omc_read_res res;
+    const omc_entry* entry;
+
+    crw_size = make_test_crw_derived(crw);
+    omc_store_init(&store);
+
+    res = omc_read_simple(crw, crw_size, &store, blocks, 8U, ifds, 16U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "ifd0", 0x010FU);
+    assert(entry != (const omc_entry*)0);
+    entry = find_exif_entry(&store, "ifd0", 0x0110U);
+    assert(entry != (const omc_entry*)0);
+    entry = find_exif_entry(&store, "ifd0", 0x0112U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.u.u64 == 6U);
+
+    entry = find_exif_entry(&store, "exififd", 0x9003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+
+    entry = find_exif_entry(&store, "exififd", 0x9206U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.u.u64 == 123U);
+
+    entry = find_exif_entry(&store, "exififd", 0xA002U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 1536U);
+
+    entry = find_exif_entry(&store, "exififd", 0xA003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 1024U);
+
+    omc_store_fini(&store);
+}
+
+static void
 test_read_bmff_heif_all(void)
 {
     omc_u8 file_bytes[2048];
@@ -2923,6 +3625,13 @@ main(void)
     test_read_gif_all();
     test_read_raf_all();
     test_read_x3f_exif();
+    test_read_tiff_geotiff();
+    test_read_tiff_printim();
+    test_read_tiff_fuji_makernote();
+    test_read_tiff_canon_makernote();
+    test_read_tiff_nikon_makernote();
+    test_read_crw_minimal_ciff();
+    test_read_crw_derived_exif();
     test_read_bmff_fields();
     test_read_bmff_heif_all();
     test_read_bmff_avif_all();

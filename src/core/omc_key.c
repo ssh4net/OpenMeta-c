@@ -102,6 +102,30 @@ omc_key_make_photoshop_irb(omc_key* key, omc_u16 resource_id)
 }
 
 void
+omc_key_make_geotiff_key(omc_key* key, omc_u16 key_id)
+{
+    omc_key_init(key);
+    if (key == NULL) {
+        return;
+    }
+
+    key->kind = OMC_KEY_GEOTIFF_KEY;
+    key->u.geotiff_key.key_id = key_id;
+}
+
+void
+omc_key_make_printim_field(omc_key* key, omc_byte_ref field)
+{
+    omc_key_init(key);
+    if (key == NULL) {
+        return;
+    }
+
+    key->kind = OMC_KEY_PRINTIM_FIELD;
+    key->u.printim_field.field = field;
+}
+
+void
 omc_key_make_bmff_field(omc_key* key, omc_byte_ref field)
 {
     omc_key_init(key);

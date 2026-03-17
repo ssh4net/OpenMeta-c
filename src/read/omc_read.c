@@ -1,5 +1,7 @@
 #include "omc/omc_read.h"
 
+#include "read/omc_ciff.h"
+
 #include <string.h>
 
 static void
@@ -908,6 +910,12 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                         &use_opts->exif);
                 omc_read_merge_exif(&res.exif, exif_res);
             }
+        } else if (block->kind == OMC_BLK_CIFF) {
+            omc_exif_res ciff_res;
+
+            ciff_res = omc_ciff_dec(file_bytes, file_size, store, block_id,
+                                    &use_opts->exif);
+            omc_read_merge_exif(&res.exif, ciff_res);
         } else if (block->kind == OMC_BLK_XMP) {
             omc_const_bytes block_view;
             omc_pay_res pay_res;
