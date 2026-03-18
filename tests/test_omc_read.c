@@ -5679,6 +5679,167 @@ test_read_jxl_brob_xmp(void)
     omc_store_fini(&store);
 }
 
+static omc_size
+make_apple_makernote_extended(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 array_off;
+    omc_u32 text_off;
+
+    size = 0U;
+    append_text(out, &size, "Apple iOS");
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 1U);
+    append_text(out, &size, "MM");
+
+    array_off = 14U + 2U + (4U * 12U) + 4U;
+    text_off = array_off + 6U;
+
+    append_u16be(out, &size, 4U);
+
+    append_u16be(out, &size, 0x0001U);
+    append_u16be(out, &size, 4U);
+    append_u32be(out, &size, 1U);
+    append_u32be(out, &size, 17U);
+
+    append_u16be(out, &size, 0x0004U);
+    append_u16be(out, &size, 3U);
+    append_u32be(out, &size, 1U);
+    append_u16be(out, &size, 2U);
+    append_u16be(out, &size, 0U);
+
+    append_u16be(out, &size, 0x0007U);
+    append_u16be(out, &size, 3U);
+    append_u32be(out, &size, 3U);
+    append_u32be(out, &size, array_off);
+
+    append_u16be(out, &size, 0x0008U);
+    append_u16be(out, &size, 2U);
+    append_u32be(out, &size, 6U);
+    append_u32be(out, &size, text_off);
+
+    append_u32be(out, &size, 0U);
+    append_u16be(out, &size, 1U);
+    append_u16be(out, &size, 2U);
+    append_u16be(out, &size, 3U);
+    append_text(out, &size, "HELLO");
+    append_u8(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_nintendo_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x1101U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 0x34U);
+    append_u32le(out, &size, 18U);
+    append_u32le(out, &size, 0U);
+
+    assert(size == 18U);
+    memset(out + size, 0, 0x34U);
+    memcpy(out + size + 0U, "3DS1", 4U);
+    write_u32le_at(out, 18U + 0x08U, 0x12345678U);
+    out[18U + 0x18U] = 0xAAU;
+    out[18U + 0x19U] = 0xBBU;
+    out[18U + 0x1AU] = 0xCCU;
+    out[18U + 0x1BU] = 0xDDU;
+    write_u32le_at(out, 18U + 0x28U, 0x3FC00000U);
+    write_u16le_at(out, 18U + 0x30U, 5U);
+    return size + 0x34U;
+}
+
+static omc_size
+make_hp_type6_makernote(omc_u8* out)
+{
+    memset(out, 0, 0x80U);
+    out[0U] = (omc_u8)'I';
+    out[1U] = (omc_u8)'I';
+    out[2U] = (omc_u8)'I';
+    out[3U] = (omc_u8)'I';
+    out[4U] = 0x06U;
+    out[5U] = 0U;
+
+    write_u16le_at(out, 0x000CU, 28U);
+    write_u32le_at(out, 0x0010U, 50000U);
+    memcpy(out + 0x0014U, "2025:03:16 12:34:56", 19U);
+    write_u16le_at(out, 0x0034U, 200U);
+    memcpy(out + 0x0058U, "SERIAL NUMBER:HP-12345", 22U);
+    return 0x80U;
+}
+
+static void
+test_read_tiff_small_vendor_makernotes(void)
+{
+    omc_u8 tiff[2048];
+    omc_u8 makernote[512];
+    omc_size tiff_size;
+    omc_size makernote_size;
+    omc_store store;
+    omc_blk_ref blocks[8];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload[1024];
+    omc_u32 payload_parts[32];
+    omc_read_opts opts;
+    omc_read_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    makernote_size = make_apple_makernote_extended(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Apple", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_read_opts_init(&opts);
+    opts.exif.decode_makernote = 1;
+    res = omc_read_simple(tiff, tiff_size, &store, blocks, 8U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 32U, &opts);
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_apple0", 0x0008U);
+    assert(entry != (const omc_entry*)0);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "HELLO", 5U) == 0);
+    omc_store_fini(&store);
+
+    makernote_size = make_nintendo_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Nintendo", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_read_opts_init(&opts);
+    opts.exif.decode_makernote = 1;
+    res = omc_read_simple(tiff, tiff_size, &store, blocks, 8U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 32U, &opts);
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    entry = find_exif_entry_typed(&store, "mk_nintendo_camerainfo_0", 0x0030U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 5U);
+    omc_store_fini(&store);
+
+    makernote_size = make_hp_type6_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "HP", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_read_opts_init(&opts);
+    opts.exif.decode_makernote = 1;
+    res = omc_read_simple(tiff, tiff_size, &store, blocks, 8U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 32U, &opts);
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    entry = find_exif_entry_typed(&store, "mk_hp_type6_0", 0x0034U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 200U);
+    omc_store_fini(&store);
+}
+
 int
 main(void)
 {
@@ -5709,6 +5870,7 @@ main(void)
     test_read_tiff_canon_camera_info_model_and_psinfo2_makernote();
     test_read_tiff_canon_camera_info_additional_cohorts_makernote();
     test_read_tiff_canon_camera_info_extended_fixed_fields_makernote();
+    test_read_tiff_small_vendor_makernotes();
     test_read_crw_minimal_ciff();
     test_read_crw_derived_exif();
     test_read_bmff_fields();

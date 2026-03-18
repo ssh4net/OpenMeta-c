@@ -1037,6 +1037,50 @@ build_tiff_sony_tag9405a_fixture()
 }
 
 static ByteVec
+build_tiff_sony_tag940e_fixture()
+{
+    std::array<unsigned char, 0x1A14> plain {};
+    std::uint32_t i;
+
+    plain[0x1A06U] = 2U;
+    plain[0x1A07U] = 3U;
+    for (i = 0U; i < 12U; ++i) {
+        plain[0x1A08U + i] = (unsigned char)(0xA0U + i);
+    }
+
+    return build_tiff_sony_ciphered_model_fixture("ILCE-7M3", 0x940EU,
+                                                  plain.data(), plain.size());
+}
+
+static ByteVec
+build_tiff_sony_tag940e_afinfo_fixture()
+{
+    std::array<unsigned char, 0x0180> plain {};
+    std::uint32_t i;
+
+    plain[0x0002U] = 2U;
+    plain[0x0004U] = 5U;
+    plain[0x0007U] = 6U;
+    plain[0x0008U] = 7U;
+    plain[0x0009U] = 8U;
+    plain[0x000AU] = 9U;
+    plain[0x000BU] = 10U;
+    for (i = 0U; i < 30U; ++i) {
+        write_u16le_at(plain.data(), 0x0011U + (i * 2U),
+                       (std::uint16_t)(100U + i));
+    }
+    plain[0x016EU] = 0x78U;
+    plain[0x016FU] = 0x56U;
+    plain[0x0170U] = 0x34U;
+    plain[0x0171U] = 0x12U;
+    plain[0x017DU] = 0xFEU;
+    plain[0x017EU] = 4U;
+
+    return build_tiff_sony_ciphered_model_fixture("SLT-A99", 0x940EU,
+                                                  plain.data(), plain.size());
+}
+
+static ByteVec
 build_tiff_sony_shotinfo_fixture()
 {
     std::array<unsigned char, 0x44> blob {};
@@ -1067,6 +1111,73 @@ build_tiff_sony_shotinfo_fixture()
                                                   size);
     patch_sony_makernote_value_offset_in_tiff(&tiff);
     return tiff;
+}
+
+static ByteVec
+build_tiff_flir_makernote_fixture()
+{
+    unsigned char makernote[32];
+    std::size_t size = 0U;
+
+    append_u16le(makernote, &size, 1U);
+    append_u16le(makernote, &size, 0x0001U);
+    append_u16le(makernote, &size, 4U);
+    append_u32le(makernote, &size, 1U);
+    append_u32le(makernote, &size, 99U);
+    append_u32le(makernote, &size, 0U);
+
+    return build_tiff_with_make_makernote_fixture("FLIR", makernote, size);
+}
+
+static ByteVec
+build_tiff_nintendo_makernote_fixture()
+{
+    unsigned char makernote[96];
+    std::size_t size = 0U;
+
+    append_u16le(makernote, &size, 1U);
+    append_u16le(makernote, &size, 0x1101U);
+    append_u16le(makernote, &size, 7U);
+    append_u32le(makernote, &size, 0x34U);
+    append_u32le(makernote, &size, 18U);
+    append_u32le(makernote, &size, 0U);
+
+    std::memset(makernote + size, 0, 0x34U);
+    std::memcpy(makernote + size + 0U, "3DS1", 4U);
+    write_u32le_at(makernote, 18U + 0x08U, 0x12345678U);
+    makernote[18U + 0x18U] = 0xAAU;
+    makernote[18U + 0x19U] = 0xBBU;
+    makernote[18U + 0x1AU] = 0xCCU;
+    makernote[18U + 0x1BU] = 0xDDU;
+    write_u32le_at(makernote, 18U + 0x28U, 0x3FC00000U);
+    write_u16le_at(makernote, 18U + 0x30U, 5U);
+    size += 0x34U;
+
+    return build_tiff_with_make_makernote_fixture("Nintendo", makernote,
+                                                  size);
+}
+
+static ByteVec
+build_tiff_hp_type6_makernote_fixture()
+{
+    unsigned char makernote[128];
+
+    std::memset(makernote, 0, sizeof(makernote));
+    makernote[0U] = (unsigned char)'I';
+    makernote[1U] = (unsigned char)'I';
+    makernote[2U] = (unsigned char)'I';
+    makernote[3U] = (unsigned char)'I';
+    makernote[4U] = 0x06U;
+    makernote[5U] = 0U;
+
+    write_u16le_at(makernote, 0x000CU, 28U);
+    write_u32le_at(makernote, 0x0010U, 50000U);
+    std::memcpy(makernote + 0x0014U, "2025:03:16 12:34:56", 19U);
+    write_u16le_at(makernote, 0x0034U, 200U);
+    std::memcpy(makernote + 0x0058U, "SERIAL NUMBER:HP-12345", 22U);
+
+    return build_tiff_with_make_makernote_fixture("HP", makernote,
+                                                  sizeof(makernote));
 }
 
 static ByteVec
@@ -2730,6 +2841,15 @@ main()
     ok = run_case("tiff_fuji_makernote",
                   build_tiff_fuji_makernote_fixture(), true)
          && ok;
+    ok = run_case("tiff_flir_makernote",
+                  build_tiff_flir_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_nintendo_makernote",
+                  build_tiff_nintendo_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_hp_type6_makernote",
+                  build_tiff_hp_type6_makernote_fixture(), true)
+         && ok;
     ok = run_case("tiff_sony_makernote",
                   build_tiff_sony_makernote_fixture(), true)
          && ok;
@@ -2771,6 +2891,12 @@ main()
          && ok;
     ok = run_case("tiff_sony_tag9405a_makernote",
                   build_tiff_sony_tag9405a_fixture(), true)
+         && ok;
+    ok = run_case("tiff_sony_tag940e_makernote",
+                  build_tiff_sony_tag940e_fixture(), true)
+         && ok;
+    ok = run_case("tiff_sony_tag940e_afinfo_makernote",
+                  build_tiff_sony_tag940e_afinfo_fixture(), true)
          && ok;
     ok = run_case("tiff_canon_makernote",
                   build_tiff_canon_makernote_fixture(), true)
