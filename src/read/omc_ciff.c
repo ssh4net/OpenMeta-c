@@ -297,6 +297,32 @@ omc_ciff_make_child_token(char* out_name, omc_size out_cap, omc_u16 tag_id,
 }
 
 static int
+omc_ciff_make_suffix_token(char* out_name, omc_size out_cap,
+                           const char* parent_ifd, omc_size parent_ifd_size,
+                           const char* suffix, omc_size suffix_size,
+                           omc_size* out_size)
+{
+    omc_size needed;
+
+    if (out_name == (char*)0 || parent_ifd == (const char*)0
+        || suffix == (const char*)0 || out_size == (omc_size*)0) {
+        return 0;
+    }
+
+    needed = parent_ifd_size + 1U + suffix_size;
+    if (needed + 1U > out_cap) {
+        return 0;
+    }
+
+    memcpy(out_name, parent_ifd, parent_ifd_size);
+    out_name[parent_ifd_size] = '_';
+    memcpy(out_name + parent_ifd_size + 1U, suffix, suffix_size);
+    out_name[needed] = '\0';
+    *out_size = needed;
+    return 1;
+}
+
+static int
 omc_ciff_make_ifd0_token(const omc_exif_opts* opts, char* out_name,
                          omc_size out_cap, omc_size* out_size)
 {
@@ -353,6 +379,72 @@ omc_ciff_format_datetime(omc_u32 unix_seconds, char out_text[20])
 
     written = strftime(out_text, 20U, "%Y:%m:%d %H:%M:%S", tm_parts);
     return written == 19U;
+}
+
+static int
+omc_ciff_tag_is_padded_ascii_text(omc_u16 dir_id, omc_u16 tag_id)
+{
+    switch (dir_id) {
+    case 0x2804U: return tag_id == 0x0805U || tag_id == 0x0815U;
+    case 0x2807U: return tag_id == 0x0810U;
+    case 0x3004U:
+        return tag_id == 0x080BU || tag_id == 0x080CU || tag_id == 0x080DU;
+    case 0x300AU: return tag_id == 0x0816U || tag_id == 0x0817U;
+    default: return 0;
+    }
+}
+
+static int
+omc_ciff_trailing_zero_bytes(const omc_u8* raw, omc_size raw_size,
+                             omc_size offset)
+{
+    omc_size i;
+
+    if (raw == (const omc_u8*)0 || offset > raw_size) {
+        return 0;
+    }
+
+    for (i = offset; i < raw_size; ++i) {
+        if (raw[i] != 0U) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+omc_ciff_extract_padded_ascii_text(const omc_u8* raw, omc_size raw_size,
+                                   const char** out_text,
+                                   omc_size* out_text_size)
+{
+    omc_size end;
+    omc_size i;
+
+    if (raw == (const omc_u8*)0 || out_text == (const char**)0
+        || out_text_size == (omc_size*)0) {
+        return 0;
+    }
+
+    *out_text = (const char*)raw;
+    *out_text_size = 0U;
+    if (raw_size == 0U) {
+        return 1;
+    }
+
+    end = 0U;
+    while (end < raw_size && raw[end] != 0U) {
+        end += 1U;
+    }
+    if (end < raw_size) {
+        for (i = end + 1U; i < raw_size; ++i) {
+            if (raw[i] != 0U) {
+                return 0;
+            }
+        }
+    }
+
+    *out_text_size = end;
+    return 1;
 }
 
 static int
@@ -447,6 +539,53 @@ omc_ciff_emit_scalar_u16(omc_store* store, omc_block_id block_id,
 }
 
 static int
+omc_ciff_emit_scalar_i16(omc_store* store, omc_block_id block_id,
+                         const char* ifd_name, omc_size ifd_size, omc_u16 tag,
+                         omc_u32 order_in_block, omc_u16 wire_code,
+                         omc_entry_flags flags, omc_s16 value16,
+                         omc_exif_res* res)
+{
+    omc_val value;
+
+    omc_val_make_i64(&value, value16);
+    value.elem_type = OMC_ELEM_I16;
+    return omc_ciff_add_entry(store, block_id, ifd_name, ifd_size, tag,
+                              order_in_block, wire_code, 1U, flags, &value,
+                              res);
+}
+
+static int
+omc_ciff_emit_scalar_i32(omc_store* store, omc_block_id block_id,
+                         const char* ifd_name, omc_size ifd_size, omc_u16 tag,
+                         omc_u32 order_in_block, omc_u16 wire_code,
+                         omc_entry_flags flags, omc_s32 value32,
+                         omc_exif_res* res)
+{
+    omc_val value;
+
+    omc_val_make_i64(&value, value32);
+    value.elem_type = OMC_ELEM_I32;
+    return omc_ciff_add_entry(store, block_id, ifd_name, ifd_size, tag,
+                              order_in_block, wire_code, 1U, flags, &value,
+                              res);
+}
+
+static int
+omc_ciff_emit_scalar_f32_bits(omc_store* store, omc_block_id block_id,
+                              const char* ifd_name, omc_size ifd_size,
+                              omc_u16 tag, omc_u32 order_in_block,
+                              omc_u16 wire_code, omc_entry_flags flags,
+                              omc_u32 bits, omc_exif_res* res)
+{
+    omc_val value;
+
+    omc_val_make_f32_bits(&value, bits);
+    return omc_ciff_add_entry(store, block_id, ifd_name, ifd_size, tag,
+                              order_in_block, wire_code, 1U, flags, &value,
+                              res);
+}
+
+static int
 omc_ciff_emit_text(omc_store* store, omc_block_id block_id, const char* ifd_name,
                    omc_size ifd_size, omc_u16 tag, omc_u32 order_in_block,
                    omc_u16 wire_code, omc_entry_flags flags,
@@ -467,6 +606,150 @@ omc_ciff_emit_text(omc_store* store, omc_block_id block_id, const char* ifd_name
     return omc_ciff_add_entry(store, block_id, ifd_name, ifd_size, tag,
                               order_in_block, wire_code, (omc_u32)text_size,
                               flags, &value, res);
+}
+
+static int
+omc_ciff_emit_suffix_scalar_u16(omc_store* store, omc_block_id block_id,
+                                const char* parent_ifd,
+                                omc_size parent_ifd_size,
+                                const char* suffix, omc_size suffix_size,
+                                omc_u16 tag, omc_u32 order_in_block,
+                                omc_u16 wire_code, omc_entry_flags flags,
+                                omc_u16 value16, omc_exif_res* res)
+{
+    char ifd_name[64];
+    omc_size ifd_size;
+
+    if (!omc_ciff_make_suffix_token(ifd_name, sizeof(ifd_name), parent_ifd,
+                                    parent_ifd_size, suffix, suffix_size,
+                                    &ifd_size)) {
+        omc_ciff_set_limit(res, OMC_EXIF_LIM_MAX_ENTRIES_TOTAL, wire_code);
+        return 0;
+    }
+
+    return omc_ciff_emit_scalar_u16(store, block_id, ifd_name, ifd_size, tag,
+                                    order_in_block, wire_code, flags, value16,
+                                    res);
+}
+
+static int
+omc_ciff_emit_suffix_scalar_u32(omc_store* store, omc_block_id block_id,
+                                const char* parent_ifd,
+                                omc_size parent_ifd_size,
+                                const char* suffix, omc_size suffix_size,
+                                omc_u16 tag, omc_u32 order_in_block,
+                                omc_u16 wire_code, omc_entry_flags flags,
+                                omc_u32 value32, omc_exif_res* res)
+{
+    char ifd_name[64];
+    omc_size ifd_size;
+
+    if (!omc_ciff_make_suffix_token(ifd_name, sizeof(ifd_name), parent_ifd,
+                                    parent_ifd_size, suffix, suffix_size,
+                                    &ifd_size)) {
+        omc_ciff_set_limit(res, OMC_EXIF_LIM_MAX_ENTRIES_TOTAL, wire_code);
+        return 0;
+    }
+
+    return omc_ciff_emit_scalar_u32(store, block_id, ifd_name, ifd_size, tag,
+                                    order_in_block, wire_code, flags, value32,
+                                    res);
+}
+
+static int
+omc_ciff_emit_suffix_scalar_i16(omc_store* store, omc_block_id block_id,
+                                const char* parent_ifd,
+                                omc_size parent_ifd_size,
+                                const char* suffix, omc_size suffix_size,
+                                omc_u16 tag, omc_u32 order_in_block,
+                                omc_u16 wire_code, omc_entry_flags flags,
+                                omc_s16 value16, omc_exif_res* res)
+{
+    char ifd_name[64];
+    omc_size ifd_size;
+
+    if (!omc_ciff_make_suffix_token(ifd_name, sizeof(ifd_name), parent_ifd,
+                                    parent_ifd_size, suffix, suffix_size,
+                                    &ifd_size)) {
+        omc_ciff_set_limit(res, OMC_EXIF_LIM_MAX_ENTRIES_TOTAL, wire_code);
+        return 0;
+    }
+
+    return omc_ciff_emit_scalar_i16(store, block_id, ifd_name, ifd_size, tag,
+                                    order_in_block, wire_code, flags, value16,
+                                    res);
+}
+
+static int
+omc_ciff_emit_suffix_scalar_i32(omc_store* store, omc_block_id block_id,
+                                const char* parent_ifd,
+                                omc_size parent_ifd_size,
+                                const char* suffix, omc_size suffix_size,
+                                omc_u16 tag, omc_u32 order_in_block,
+                                omc_u16 wire_code, omc_entry_flags flags,
+                                omc_s32 value32, omc_exif_res* res)
+{
+    char ifd_name[64];
+    omc_size ifd_size;
+
+    if (!omc_ciff_make_suffix_token(ifd_name, sizeof(ifd_name), parent_ifd,
+                                    parent_ifd_size, suffix, suffix_size,
+                                    &ifd_size)) {
+        omc_ciff_set_limit(res, OMC_EXIF_LIM_MAX_ENTRIES_TOTAL, wire_code);
+        return 0;
+    }
+
+    return omc_ciff_emit_scalar_i32(store, block_id, ifd_name, ifd_size, tag,
+                                    order_in_block, wire_code, flags, value32,
+                                    res);
+}
+
+static int
+omc_ciff_emit_suffix_scalar_f32_bits(omc_store* store, omc_block_id block_id,
+                                     const char* parent_ifd,
+                                     omc_size parent_ifd_size,
+                                     const char* suffix, omc_size suffix_size,
+                                     omc_u16 tag, omc_u32 order_in_block,
+                                     omc_u16 wire_code, omc_entry_flags flags,
+                                     omc_u32 bits, omc_exif_res* res)
+{
+    char ifd_name[64];
+    omc_size ifd_size;
+
+    if (!omc_ciff_make_suffix_token(ifd_name, sizeof(ifd_name), parent_ifd,
+                                    parent_ifd_size, suffix, suffix_size,
+                                    &ifd_size)) {
+        omc_ciff_set_limit(res, OMC_EXIF_LIM_MAX_ENTRIES_TOTAL, wire_code);
+        return 0;
+    }
+
+    return omc_ciff_emit_scalar_f32_bits(store, block_id, ifd_name, ifd_size,
+                                         tag, order_in_block, wire_code,
+                                         flags, bits, res);
+}
+
+static int
+omc_ciff_emit_suffix_text(omc_store* store, omc_block_id block_id,
+                          const char* parent_ifd, omc_size parent_ifd_size,
+                          const char* suffix, omc_size suffix_size,
+                          omc_u16 tag, omc_u32 order_in_block,
+                          omc_u16 wire_code, omc_entry_flags flags,
+                          const char* text, omc_size text_size,
+                          omc_exif_res* res)
+{
+    char ifd_name[64];
+    omc_size ifd_size;
+
+    if (!omc_ciff_make_suffix_token(ifd_name, sizeof(ifd_name), parent_ifd,
+                                    parent_ifd_size, suffix, suffix_size,
+                                    &ifd_size)) {
+        omc_ciff_set_limit(res, OMC_EXIF_LIM_MAX_ENTRIES_TOTAL, wire_code);
+        return 0;
+    }
+
+    return omc_ciff_emit_text(store, block_id, ifd_name, ifd_size, tag,
+                              order_in_block, wire_code, flags, text,
+                              text_size, res);
 }
 
 static int
@@ -496,12 +779,15 @@ omc_ciff_add_raw_entry(omc_ciff_cfg cfg, const omc_exif_opts* opts,
     const omc_u8* raw;
     omc_size raw_size;
     omc_u16 type_bits;
+    omc_u16 dir_id;
+    int have_dir_id;
 
     (void)opts;
 
     raw = dir_bytes + (omc_size)value_off;
     raw_size = (omc_size)value_bytes;
     type_bits = omc_ciff_type_bits(raw_tag);
+    have_dir_id = omc_ciff_parse_dir_id(ifd_name, ifd_size, &dir_id);
     omc_val_init(&value);
 
     if (value_bytes > opts->limits.max_value_bytes) {
@@ -538,6 +824,25 @@ omc_ciff_add_raw_entry(omc_ciff_cfg cfg, const omc_exif_opts* opts,
 
     if (type_bits == 0x0800U) {
         omc_size trimmed;
+        const char* padded_text;
+        omc_size padded_text_size;
+
+        if (have_dir_id && omc_ciff_tag_is_padded_ascii_text(dir_id, tag_id)
+            && omc_ciff_extract_padded_ascii_text(raw, raw_size, &padded_text,
+                                                  &padded_text_size)) {
+            if (!omc_ciff_store_bytes(store, padded_text, padded_text_size,
+                                      &ref)) {
+                omc_ciff_update_status(res, OMC_EXIF_NOMEM);
+                return 0;
+            }
+            omc_val_make_text(&value, ref, OMC_TEXT_ASCII);
+            return omc_ciff_add_entry(store, block_id, ifd_name, ifd_size,
+                                      tag_id, order_in_block, raw_tag,
+                                      (raw_size > (omc_size)~(omc_u32)0)
+                                          ? ~(omc_u32)0
+                                          : (omc_u32)raw_size,
+                                      OMC_ENTRY_FLAG_NONE, &value, res);
+        }
 
         trimmed = raw_size;
         if (trimmed > 0U && raw[trimmed - 1U] == 0U) {
@@ -564,6 +869,34 @@ omc_ciff_add_raw_entry(omc_ciff_cfg cfg, const omc_exif_opts* opts,
                                   OMC_ENTRY_FLAG_NONE, &value, res);
     }
 
+    if (have_dir_id && type_bits == 0x1000U && raw_size >= 2U
+        && omc_ciff_trailing_zero_bytes(raw, raw_size, 2U)) {
+        omc_u16 value16;
+        int matched;
+
+        matched = 0;
+        switch (dir_id) {
+        case 0x3002U:
+            matched = (tag_id == 0x1010U || tag_id == 0x1011U
+                       || tag_id == 0x1016U);
+            break;
+        case 0x3004U: matched = (tag_id == 0x101CU); break;
+        case 0x300AU: matched = (tag_id == 0x100AU); break;
+        default: break;
+        }
+
+        if (matched) {
+            if (!omc_ciff_read_u16(cfg, raw, raw_size, 0U, &value16)) {
+                omc_ciff_update_status(res, OMC_EXIF_MALFORMED);
+                return 0;
+            }
+            return omc_ciff_emit_scalar_u16(store, block_id, ifd_name,
+                                            ifd_size, tag_id, order_in_block,
+                                            raw_tag, OMC_ENTRY_FLAG_NONE,
+                                            value16, res);
+        }
+    }
+
     if (type_bits == 0x1000U && raw_size == 2U) {
         omc_u16 value16;
 
@@ -574,6 +907,55 @@ omc_ciff_add_raw_entry(omc_ciff_cfg cfg, const omc_exif_opts* opts,
         return omc_ciff_emit_scalar_u16(store, block_id, ifd_name, ifd_size,
                                         tag_id, order_in_block, raw_tag,
                                         OMC_ENTRY_FLAG_NONE, value16, res);
+    }
+
+    if (have_dir_id && type_bits == 0x1800U && raw_size >= 4U
+        && omc_ciff_trailing_zero_bytes(raw, raw_size, 4U)) {
+        omc_u32 value32;
+        int matched;
+        int emit_f32;
+
+        matched = 0;
+        emit_f32 = 0;
+        switch (dir_id) {
+        case 0x3002U:
+            if (tag_id == 0x1807U) {
+                matched = 1;
+                emit_f32 = 1;
+            }
+            break;
+        case 0x3003U:
+            if (tag_id == 0x1814U) {
+                matched = 1;
+                emit_f32 = 1;
+            }
+            break;
+        case 0x3004U:
+            matched = (tag_id == 0x1834U || tag_id == 0x183BU);
+            break;
+        case 0x300AU:
+            matched = (tag_id == 0x1804U || tag_id == 0x1806U
+                       || tag_id == 0x1817U);
+            break;
+        default: break;
+        }
+
+        if (matched) {
+            if (!omc_ciff_read_u32(cfg, raw, raw_size, 0U, &value32)) {
+                omc_ciff_update_status(res, OMC_EXIF_MALFORMED);
+                return 0;
+            }
+            if (emit_f32) {
+                return omc_ciff_emit_scalar_f32_bits(
+                    store, block_id, ifd_name, ifd_size, tag_id,
+                    order_in_block, raw_tag, OMC_ENTRY_FLAG_NONE, value32,
+                    res);
+            }
+            return omc_ciff_emit_scalar_u32(store, block_id, ifd_name,
+                                            ifd_size, tag_id, order_in_block,
+                                            raw_tag, OMC_ENTRY_FLAG_NONE,
+                                            value32, res);
+        }
     }
 
     if (type_bits == 0x1800U && raw_size == 4U) {
@@ -629,6 +1011,13 @@ omc_ciff_add_derived_entries(omc_ciff_cfg cfg, const omc_exif_opts* opts,
     const char* exif_ifd;
     omc_size exif_ifd_size;
     omc_u32 next_order;
+    const char* text;
+    omc_size text_size;
+    omc_u32 u32v;
+    omc_s32 i32v;
+    omc_u16 u16v;
+    omc_u16 i;
+    char datetime_text[20];
 
     if (!omc_ciff_parse_dir_id(ifd_name, ifd_size, &dir_id)) {
         return;
@@ -643,6 +1032,11 @@ omc_ciff_add_derived_entries(omc_ciff_cfg cfg, const omc_exif_opts* opts,
                    : "exififd";
     exif_ifd_size = strlen(exif_ifd);
     next_order = order_in_block + 1U;
+    text = (const char*)0;
+    text_size = 0U;
+    u32v = 0U;
+    i32v = 0;
+    u16v = 0U;
 
     if (dir_id == 0x2807U && tag_id == 0x080AU) {
         omc_size make_end;
@@ -654,9 +1048,13 @@ omc_ciff_add_derived_entries(omc_ciff_cfg cfg, const omc_exif_opts* opts,
             make_end += 1U;
         }
         if (make_end > 0U) {
+            (void)omc_ciff_emit_suffix_text(
+                store, block_id, ifd_name, ifd_size, "makemodel", 9U, 0x0000U,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE,
+                (const char*)raw, make_end, res);
             (void)omc_ciff_emit_text(store, block_id, ifd0, ifd0_size, 0x010FU,
                                      next_order++, tag_id,
-                                     OMC_ENTRY_FLAG_DERIVED,
+                                     OMC_ENTRY_FLAG_NONE,
                                      (const char*)raw, make_end, res);
         }
 
@@ -669,70 +1067,275 @@ omc_ciff_add_derived_entries(omc_ciff_cfg cfg, const omc_exif_opts* opts,
             model_end += 1U;
         }
         if (model_end > model_begin) {
+            (void)omc_ciff_emit_suffix_text(
+                store, block_id, ifd_name, ifd_size, "makemodel", 9U, 0x0006U,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE,
+                (const char*)(raw + model_begin), model_end - model_begin,
+                res);
             (void)omc_ciff_emit_text(store, block_id, ifd0, ifd0_size, 0x0110U,
                                      next_order++, tag_id,
-                                     OMC_ENTRY_FLAG_DERIVED,
+                                     OMC_ENTRY_FLAG_NONE,
                                      (const char*)(raw + model_begin),
                                      model_end - model_begin, res);
         }
         return;
     }
 
-    if (dir_id == 0x300AU && tag_id == 0x180EU && raw_size >= 4U) {
-        omc_u32 unix_seconds;
-        char datetime_text[20];
+    if (dir_id == 0x2804U && tag_id == 0x0805U) {
+        if (omc_ciff_extract_padded_ascii_text(raw, raw_size, &text,
+                                               &text_size)
+            && text_size != 0U) {
+            (void)omc_ciff_emit_text(store, block_id, ifd0, ifd0_size, 0x010EU,
+                                     next_order++, tag_id,
+                                     OMC_ENTRY_FLAG_NONE, text, text_size,
+                                     res);
+        }
+        return;
+    }
 
-        if (omc_ciff_read_u32(cfg, raw, raw_size, 0U, &unix_seconds)
-            && omc_ciff_format_datetime(unix_seconds, datetime_text)) {
+    if (dir_id == 0x2807U && tag_id == 0x0810U) {
+        if (omc_ciff_extract_padded_ascii_text(raw, raw_size, &text,
+                                               &text_size)
+            && text_size != 0U) {
             (void)omc_ciff_emit_text(store, block_id, exif_ifd, exif_ifd_size,
-                                     0x9003U, next_order++, tag_id,
-                                     OMC_ENTRY_FLAG_DERIVED, datetime_text,
-                                     19U, res);
+                                     0xA430U, next_order++, tag_id,
+                                     OMC_ENTRY_FLAG_NONE, text, text_size,
+                                     res);
+        }
+        return;
+    }
+
+    if (dir_id == 0x300AU && tag_id == 0x180EU && raw_size >= 4U) {
+        if (omc_ciff_read_u32(cfg, raw, raw_size, 0U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_u32(
+                store, block_id, ifd_name, ifd_size, "timestamp", 9U, 0x0000U,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v, res);
+            if (omc_ciff_format_datetime(u32v, datetime_text)) {
+                (void)omc_ciff_emit_text(
+                    store, block_id, exif_ifd, exif_ifd_size, 0x9003U,
+                    next_order++, tag_id, OMC_ENTRY_FLAG_NONE,
+                    datetime_text, 19U, res);
+            }
+        }
+        if (raw_size >= 8U
+            && omc_ciff_read_i32(cfg, raw, raw_size, 4U, &i32v)) {
+            (void)omc_ciff_emit_suffix_scalar_i32(
+                store, block_id, ifd_name, ifd_size, "timestamp", 9U, 0x0001U,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, i32v, res);
+        }
+        if (raw_size >= 12U
+            && omc_ciff_read_u32(cfg, raw, raw_size, 8U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_u32(
+                store, block_id, ifd_name, ifd_size, "timestamp", 9U, 0x0002U,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v, res);
         }
         return;
     }
 
     if (dir_id == 0x300AU && tag_id == 0x1810U) {
-        omc_u32 width;
-        omc_u32 height;
-        omc_s32 rotation;
-
         if (raw_size >= 4U
-            && omc_ciff_read_u32(cfg, raw, raw_size, 0U, &width)) {
+            && omc_ciff_read_u32(cfg, raw, raw_size, 0U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_u32(
+                store, block_id, ifd_name, ifd_size, "imageinfo", 9U, 0x0000U,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v, res);
             (void)omc_ciff_emit_scalar_u32(store, block_id, exif_ifd,
                                            exif_ifd_size, 0xA002U,
                                            next_order++, tag_id,
-                                           OMC_ENTRY_FLAG_DERIVED, width, res);
+                                           OMC_ENTRY_FLAG_NONE, u32v, res);
         }
         if (raw_size >= 8U
-            && omc_ciff_read_u32(cfg, raw, raw_size, 4U, &height)) {
+            && omc_ciff_read_u32(cfg, raw, raw_size, 4U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_u32(
+                store, block_id, ifd_name, ifd_size, "imageinfo", 9U, 0x0001U,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v, res);
             (void)omc_ciff_emit_scalar_u32(store, block_id, exif_ifd,
                                            exif_ifd_size, 0xA003U,
                                            next_order++, tag_id,
-                                           OMC_ENTRY_FLAG_DERIVED, height,
-                                           res);
+                                           OMC_ENTRY_FLAG_NONE, u32v, res);
+        }
+        if (raw_size >= 12U
+            && omc_ciff_read_u32(cfg, raw, raw_size, 8U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_f32_bits(
+                store, block_id, ifd_name, ifd_size, "imageinfo", 9U, 0x0002U,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v, res);
         }
         if (raw_size >= 16U
-            && omc_ciff_read_i32(cfg, raw, raw_size, 12U, &rotation)) {
+            && omc_ciff_read_i32(cfg, raw, raw_size, 12U, &i32v)) {
+            (void)omc_ciff_emit_suffix_scalar_i32(
+                store, block_id, ifd_name, ifd_size, "imageinfo", 9U, 0x0003U,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, i32v, res);
             (void)omc_ciff_emit_scalar_u16(store, block_id, ifd0, ifd0_size,
                                            0x0112U, next_order++, tag_id,
-                                           OMC_ENTRY_FLAG_DERIVED,
+                                           OMC_ENTRY_FLAG_NONE,
                                            omc_ciff_rotation_to_orientation(
-                                               rotation),
+                                               i32v),
                                            res);
+        }
+        if (raw_size >= 20U
+            && omc_ciff_read_u32(cfg, raw, raw_size, 16U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_u32(
+                store, block_id, ifd_name, ifd_size, "imageinfo", 9U, 0x0004U,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v, res);
+        }
+        if (raw_size >= 24U
+            && omc_ciff_read_u32(cfg, raw, raw_size, 20U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_u32(
+                store, block_id, ifd_name, ifd_size, "imageinfo", 9U, 0x0005U,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v, res);
+        }
+        if (raw_size >= 28U
+            && omc_ciff_read_u32(cfg, raw, raw_size, 24U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_u32(
+                store, block_id, ifd_name, ifd_size, "imageinfo", 9U, 0x0006U,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v, res);
+        }
+        return;
+    }
+
+    if (dir_id == 0x300AU && tag_id == 0x1803U && raw_size >= 4U) {
+        if (omc_ciff_read_u32(cfg, raw, raw_size, 0U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_u32(
+                store, block_id, ifd_name, ifd_size, "imageformat", 11U,
+                0x0000U, next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v,
+                res);
+        }
+        if (raw_size >= 8U
+            && omc_ciff_read_u32(cfg, raw, raw_size, 4U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_f32_bits(
+                store, block_id, ifd_name, ifd_size, "imageformat", 11U,
+                0x0001U, next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v,
+                res);
         }
         return;
     }
 
     if (dir_id == 0x3002U && tag_id == 0x1807U && raw_size >= 4U) {
-        omc_u32 distance;
-
-        if (omc_ciff_read_u32(cfg, raw, raw_size, 0U, &distance)) {
+        if (omc_ciff_read_u32(cfg, raw, raw_size, 0U, &u32v)) {
             (void)omc_ciff_emit_scalar_u32(store, block_id, exif_ifd,
                                            exif_ifd_size, 0x9206U,
                                            next_order++, tag_id,
-                                           OMC_ENTRY_FLAG_DERIVED, distance,
-                                           res);
+                                           OMC_ENTRY_FLAG_NONE, u32v, res);
+        }
+        return;
+    }
+
+    if (dir_id == 0x3002U && tag_id == 0x1818U && raw_size >= 4U) {
+        for (i = 0U; i < 3U; ++i) {
+            if (((omc_u64)i * 4U) + 4U > (omc_u64)raw_size) {
+                break;
+            }
+            if (!omc_ciff_read_u32(cfg, raw, raw_size, (omc_u64)i * 4U,
+                                   &u32v)) {
+                break;
+            }
+            (void)omc_ciff_emit_suffix_scalar_f32_bits(
+                store, block_id, ifd_name, ifd_size, "exposureinfo", 12U, i,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v, res);
+        }
+        return;
+    }
+
+    if (dir_id == 0x3002U && tag_id == 0x1813U && raw_size >= 4U) {
+        for (i = 0U; i < 2U; ++i) {
+            if (((omc_u64)i * 4U) + 4U > (omc_u64)raw_size) {
+                break;
+            }
+            if (!omc_ciff_read_u32(cfg, raw, raw_size, (omc_u64)i * 4U,
+                                   &u32v)) {
+                break;
+            }
+            (void)omc_ciff_emit_suffix_scalar_f32_bits(
+                store, block_id, ifd_name, ifd_size, "flashinfo", 9U, i,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v, res);
+        }
+        return;
+    }
+
+    if (dir_id == 0x3004U && tag_id == 0x1835U && raw_size >= 4U) {
+        if (omc_ciff_read_u32(cfg, raw, raw_size, 0U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_u32(
+                store, block_id, ifd_name, ifd_size, "decodertable", 12U,
+                0x0000U, next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v,
+                res);
+        }
+        if (raw_size >= 12U
+            && omc_ciff_read_u32(cfg, raw, raw_size, 8U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_u32(
+                store, block_id, ifd_name, ifd_size, "decodertable", 12U,
+                0x0002U, next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v,
+                res);
+        }
+        if (raw_size >= 16U
+            && omc_ciff_read_u32(cfg, raw, raw_size, 12U, &u32v)) {
+            (void)omc_ciff_emit_suffix_scalar_u32(
+                store, block_id, ifd_name, ifd_size, "decodertable", 12U,
+                0x0003U, next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u32v,
+                res);
+        }
+        return;
+    }
+
+    if (dir_id == 0x300BU && tag_id == 0x1029U && raw_size >= 2U) {
+        for (i = 0U; i < 4U; ++i) {
+            if (((omc_u64)i * 2U) + 2U > (omc_u64)raw_size) {
+                break;
+            }
+            if (!omc_ciff_read_u16(cfg, raw, raw_size, (omc_u64)i * 2U,
+                                   &u16v)) {
+                break;
+            }
+            (void)omc_ciff_emit_suffix_scalar_u16(
+                store, block_id, ifd_name, ifd_size, "focallength", 11U, i,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u16v, res);
+        }
+        return;
+    }
+
+    if (dir_id == 0x300BU && tag_id == 0x102AU && raw_size >= 2U) {
+        for (i = 1U; i <= 10U; ++i) {
+            if (((omc_u64)(i - 1U) * 2U) + 2U > (omc_u64)raw_size) {
+                break;
+            }
+            if (!omc_ciff_read_u16(cfg, raw, raw_size,
+                                   (omc_u64)(i - 1U) * 2U, &u16v)) {
+                break;
+            }
+            (void)omc_ciff_emit_suffix_scalar_i16(
+                store, block_id, ifd_name, ifd_size, "shotinfo", 8U, i,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, (omc_s16)u16v,
+                res);
+        }
+        return;
+    }
+
+    if (dir_id == 0x300BU && tag_id == 0x10B5U && raw_size >= 10U) {
+        for (i = 1U; i <= 4U; ++i) {
+            if (((omc_u64)i * 2U) + 2U > (omc_u64)raw_size) {
+                break;
+            }
+            if (!omc_ciff_read_u16(cfg, raw, raw_size, (omc_u64)i * 2U,
+                                   &u16v)) {
+                break;
+            }
+            (void)omc_ciff_emit_suffix_scalar_u16(
+                store, block_id, ifd_name, ifd_size, "rawjpginfo", 10U, i,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u16v, res);
+        }
+        return;
+    }
+
+    if (dir_id == 0x300BU && tag_id == 0x1030U && raw_size >= 12U) {
+        for (i = 1U; i <= 5U; ++i) {
+            if (((omc_u64)i * 2U) + 2U > (omc_u64)raw_size) {
+                break;
+            }
+            if (!omc_ciff_read_u16(cfg, raw, raw_size, (omc_u64)i * 2U,
+                                   &u16v)) {
+                break;
+            }
+            (void)omc_ciff_emit_suffix_scalar_u16(
+                store, block_id, ifd_name, ifd_size, "whitesample", 11U, i,
+                next_order++, tag_id, OMC_ENTRY_FLAG_NONE, u16v, res);
         }
     }
 }

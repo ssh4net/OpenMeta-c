@@ -62,6 +62,16 @@ append_u32be(omc_u8* out, omc_size* io_size, omc_u32 value)
     append_u8(out, io_size, (omc_u8)((value >> 0) & 0xFFU));
 }
 
+static omc_u32
+f32_bits(float value)
+{
+    omc_u32 bits;
+
+    bits = 0U;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
 static void
 append_jpeg_segment(omc_u8* out, omc_size* io_size, omc_u16 marker,
                     const omc_u8* payload, omc_size payload_size)
@@ -1675,6 +1685,33 @@ make_ciff_directory(omc_u8* out, const omc_ciff_val_ent* entries,
 }
 
 static omc_size
+make_ciff_inline_directory(omc_u8* out, const omc_ciff_val_ent* entries,
+                           omc_size entry_count)
+{
+    omc_size size;
+    omc_size i;
+    omc_u8 tmp[8];
+
+    size = 0U;
+    append_u16le(out, &size, (omc_u16)entry_count);
+
+    for (i = 0U; i < entry_count; ++i) {
+        append_u16le(out, &size, entries[i].tag);
+        memset(tmp, 0, sizeof(tmp));
+        if (entries[i].value_size != 0U) {
+            memcpy(tmp, entries[i].value,
+                   entries[i].value_size < sizeof(tmp)
+                       ? entries[i].value_size
+                       : sizeof(tmp));
+        }
+        append_bytes(out, &size, tmp, sizeof(tmp));
+    }
+
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
 make_test_crw_minimal(omc_u8* out)
 {
     omc_size size;
@@ -1761,6 +1798,498 @@ make_test_crw_derived(omc_u8* out)
     root_entries[2].value = dir300a;
     root_entries[2].value_size = dir300a_size;
     root_size = make_ciff_directory(root, root_entries, 3U);
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u32le(out, &size, 14U);
+    append_text(out, &size, "HEAPCCDR");
+    append_bytes(out, &size, root, root_size);
+    return size;
+}
+
+static omc_size
+make_padded_ascii(omc_u8* out, const char* text, omc_size width)
+{
+    omc_size text_size;
+
+    memset(out, 0, width);
+    text_size = strlen(text);
+    if (text_size > width) {
+        text_size = width;
+    }
+    memcpy(out, text, text_size);
+    return width;
+}
+
+static omc_size
+make_padded_u16_scalar(omc_u8* out, omc_u16 value)
+{
+    memset(out, 0, 8U);
+    write_u16le_at(out, 0U, value);
+    return 8U;
+}
+
+static omc_size
+make_padded_u32_scalar(omc_u8* out, omc_u32 value)
+{
+    memset(out, 0, 8U);
+    write_u32le_at(out, 0U, value);
+    return 8U;
+}
+
+static omc_size
+make_padded_f32_scalar(omc_u8* out, float value)
+{
+    return make_padded_u32_scalar(out, f32_bits(value));
+}
+
+static omc_size
+make_u32_pair(omc_u8* out, omc_u32 first, omc_u32 second)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u32le(out, &size, first);
+    append_u32le(out, &size, second);
+    return size;
+}
+
+static omc_size
+make_test_crw_textual_ciff(omc_u8* out)
+{
+    omc_u8 text0[32];
+    omc_u8 text1[32];
+    omc_u8 text2[32];
+    omc_u8 text3[32];
+    omc_u8 dir2804[128];
+    omc_u8 dir2807[128];
+    omc_u8 dir3004[128];
+    omc_u8 dir300a[128];
+    omc_u8 root[512];
+    omc_size dir2804_size;
+    omc_size dir2807_size;
+    omc_size dir3004_size;
+    omc_size dir300a_size;
+    omc_size root_size;
+    omc_ciff_val_ent dir2804_entries[1];
+    omc_ciff_val_ent dir2807_entries[1];
+    omc_ciff_val_ent dir3004_entries[1];
+    omc_ciff_val_ent dir300a_entries[1];
+    omc_ciff_val_ent root_entries[4];
+    omc_size size;
+
+    make_padded_ascii(text0, "High definition camera", 32U);
+    make_padded_ascii(text1, "Alice", 32U);
+    make_padded_ascii(text2, "Ver 2.10", 32U);
+    make_padded_ascii(text3, "IMG_0001.CRW", 32U);
+
+    dir2804_entries[0].tag = 0x0805U;
+    dir2804_entries[0].value = text0;
+    dir2804_entries[0].value_size = 32U;
+    dir2804_size = make_ciff_directory(dir2804, dir2804_entries, 1U);
+
+    dir2807_entries[0].tag = 0x0810U;
+    dir2807_entries[0].value = text1;
+    dir2807_entries[0].value_size = 32U;
+    dir2807_size = make_ciff_directory(dir2807, dir2807_entries, 1U);
+
+    dir3004_entries[0].tag = 0x080CU;
+    dir3004_entries[0].value = text2;
+    dir3004_entries[0].value_size = 32U;
+    dir3004_size = make_ciff_directory(dir3004, dir3004_entries, 1U);
+
+    dir300a_entries[0].tag = 0x0816U;
+    dir300a_entries[0].value = text3;
+    dir300a_entries[0].value_size = 32U;
+    dir300a_size = make_ciff_directory(dir300a, dir300a_entries, 1U);
+
+    root_entries[0].tag = 0x2804U;
+    root_entries[0].value = dir2804;
+    root_entries[0].value_size = dir2804_size;
+    root_entries[1].tag = 0x2807U;
+    root_entries[1].value = dir2807;
+    root_entries[1].value_size = dir2807_size;
+    root_entries[2].tag = 0x3004U;
+    root_entries[2].value = dir3004;
+    root_entries[2].value_size = dir3004_size;
+    root_entries[3].tag = 0x300AU;
+    root_entries[3].value = dir300a;
+    root_entries[3].value_size = dir300a_size;
+    root_size = make_ciff_directory(root, root_entries, 4U);
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u32le(out, &size, 14U);
+    append_text(out, &size, "HEAPCCDR");
+    append_bytes(out, &size, root, root_size);
+    return size;
+}
+
+static omc_size
+make_test_crw_native_projection(omc_u8* out)
+{
+    omc_u8 make_model[64];
+    omc_u8 subject_distance[8];
+    omc_u8 image_format[16];
+    omc_u8 exposure_info[16];
+    omc_u8 flash_info[16];
+    omc_u8 focal_length[8];
+    omc_u8 datetime_original[16];
+    omc_u8 dimensions_orientation[32];
+    omc_u8 dir2807[128];
+    omc_u8 dir3002[256];
+    omc_u8 dir300a[256];
+    omc_u8 dir300b[128];
+    omc_u8 root[1024];
+    omc_size make_model_size;
+    omc_size subject_distance_size;
+    omc_size image_format_size;
+    omc_size exposure_info_size;
+    omc_size flash_info_size;
+    omc_size focal_length_size;
+    omc_size datetime_original_size;
+    omc_size dimensions_orientation_size;
+    omc_size dir2807_size;
+    omc_size dir3002_size;
+    omc_size dir300a_size;
+    omc_size dir300b_size;
+    omc_size root_size;
+    omc_ciff_val_ent dir2807_entries[1];
+    omc_ciff_val_ent dir3002_entries[3];
+    omc_ciff_val_ent dir300a_entries[3];
+    omc_ciff_val_ent dir300b_entries[2];
+    omc_ciff_val_ent root_entries[4];
+    omc_size size;
+
+    make_model_size = 0U;
+    append_text(make_model, &make_model_size, "Canon");
+    append_u8(make_model, &make_model_size, 0U);
+    append_text(make_model, &make_model_size, "PowerShot Pro70");
+    append_u8(make_model, &make_model_size, 0U);
+
+    subject_distance_size = 0U;
+    append_u32le(subject_distance, &subject_distance_size, 123U);
+
+    image_format_size = 0U;
+    append_u32le(image_format, &image_format_size, 0x00020001U);
+    append_u32le(image_format, &image_format_size, f32_bits(10.0f));
+
+    exposure_info_size = 0U;
+    append_u32le(exposure_info, &exposure_info_size, f32_bits(0.33333334f));
+    append_u32le(exposure_info, &exposure_info_size, f32_bits(6.875f));
+    append_u32le(exposure_info, &exposure_info_size, f32_bits(3.0f));
+
+    flash_info_size = make_u32_pair(flash_info, f32_bits(0.0f),
+                                    f32_bits(0.0f));
+
+    focal_length_size = 0U;
+    append_u16le(focal_length, &focal_length_size, 2U);
+    append_u16le(focal_length, &focal_length_size, 473U);
+    append_u16le(focal_length, &focal_length_size, 309U);
+    append_u16le(focal_length, &focal_length_size, 206U);
+
+    datetime_original_size = 0U;
+    append_u32le(datetime_original, &datetime_original_size, 1700000000U);
+    append_u32le(datetime_original, &datetime_original_size, 0xFFFFFFFDU);
+    append_u32le(datetime_original, &datetime_original_size, 0x0000007BU);
+
+    dimensions_orientation_size = 0U;
+    append_u32le(dimensions_orientation, &dimensions_orientation_size, 1536U);
+    append_u32le(dimensions_orientation, &dimensions_orientation_size, 1024U);
+    append_u32le(dimensions_orientation, &dimensions_orientation_size,
+                 f32_bits(1.0f));
+    append_u32le(dimensions_orientation, &dimensions_orientation_size, 90U);
+
+    dir2807_entries[0].tag = 0x080AU;
+    dir2807_entries[0].value = make_model;
+    dir2807_entries[0].value_size = make_model_size;
+    dir2807_size = make_ciff_directory(dir2807, dir2807_entries, 1U);
+
+    dir3002_entries[0].tag = 0x1813U;
+    dir3002_entries[0].value = flash_info;
+    dir3002_entries[0].value_size = flash_info_size;
+    dir3002_entries[1].tag = 0x1807U;
+    dir3002_entries[1].value = subject_distance;
+    dir3002_entries[1].value_size = subject_distance_size;
+    dir3002_entries[2].tag = 0x1818U;
+    dir3002_entries[2].value = exposure_info;
+    dir3002_entries[2].value_size = exposure_info_size;
+    dir3002_size = make_ciff_directory(dir3002, dir3002_entries, 3U);
+
+    dir300a_entries[0].tag = 0x1803U;
+    dir300a_entries[0].value = image_format;
+    dir300a_entries[0].value_size = image_format_size;
+    dir300a_entries[1].tag = 0x180EU;
+    dir300a_entries[1].value = datetime_original;
+    dir300a_entries[1].value_size = datetime_original_size;
+    dir300a_entries[2].tag = 0x1810U;
+    dir300a_entries[2].value = dimensions_orientation;
+    dir300a_entries[2].value_size = dimensions_orientation_size;
+    dir300a_size = make_ciff_directory(dir300a, dir300a_entries, 3U);
+
+    dir300b_entries[0].tag = 0x1028U;
+    dir300b_entries[0].value = flash_info;
+    dir300b_entries[0].value_size = flash_info_size;
+    dir300b_entries[1].tag = 0x1029U;
+    dir300b_entries[1].value = focal_length;
+    dir300b_entries[1].value_size = focal_length_size;
+    dir300b_size = make_ciff_directory(dir300b, dir300b_entries, 2U);
+
+    root_entries[0].tag = 0x2807U;
+    root_entries[0].value = dir2807;
+    root_entries[0].value_size = dir2807_size;
+    root_entries[1].tag = 0x3002U;
+    root_entries[1].value = dir3002;
+    root_entries[1].value_size = dir3002_size;
+    root_entries[2].tag = 0x300AU;
+    root_entries[2].value = dir300a;
+    root_entries[2].value_size = dir300a_size;
+    root_entries[3].tag = 0x300BU;
+    root_entries[3].value = dir300b;
+    root_entries[3].value_size = dir300b_size;
+    root_size = make_ciff_directory(root, root_entries, 4U);
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u32le(out, &size, 14U);
+    append_text(out, &size, "HEAPCCDR");
+    append_bytes(out, &size, root, root_size);
+    return size;
+}
+
+static omc_size
+make_test_crw_semantic_native_scalars(omc_u8* out)
+{
+    omc_u8 s3002_1010[8];
+    omc_u8 s3002_1011[8];
+    omc_u8 s3002_1016[8];
+    omc_u8 s3002_1807[8];
+    omc_u8 s3003_1814[8];
+    omc_u8 s3004_101c[8];
+    omc_u8 s3004_1834[8];
+    omc_u8 s3004_183b[8];
+    omc_u8 s300a_100a[8];
+    omc_u8 s300a_1804[8];
+    omc_u8 s300a_1806[8];
+    omc_u8 s300a_1817[8];
+    omc_u8 dir3002[128];
+    omc_u8 dir3003[64];
+    omc_u8 dir3004[128];
+    omc_u8 dir300a[128];
+    omc_u8 root[640];
+    omc_size dir3002_size;
+    omc_size dir3003_size;
+    omc_size dir3004_size;
+    omc_size dir300a_size;
+    omc_size root_size;
+    omc_ciff_val_ent dir3002_entries[4];
+    omc_ciff_val_ent dir3003_entries[1];
+    omc_ciff_val_ent dir3004_entries[3];
+    omc_ciff_val_ent dir300a_entries[4];
+    omc_ciff_val_ent root_entries[4];
+    omc_size size;
+
+    make_padded_u16_scalar(s3002_1010, 2U);
+    make_padded_u16_scalar(s3002_1011, 1U);
+    make_padded_u16_scalar(s3002_1016, 3U);
+    make_padded_f32_scalar(s3002_1807, 12.5f);
+    make_padded_f32_scalar(s3003_1814, 9.5f);
+    make_padded_u16_scalar(s3004_101c, 100U);
+    make_padded_u32_scalar(s3004_1834, 0x80000169U);
+    make_padded_u32_scalar(s3004_183b, 2U);
+    make_padded_u16_scalar(s300a_100a, 7U);
+    make_padded_u32_scalar(s300a_1804, 42U);
+    make_padded_u32_scalar(s300a_1806, 1000U);
+    make_padded_u32_scalar(s300a_1817, 162U);
+
+    dir3002_entries[0].tag = 0x5010U;
+    dir3002_entries[0].value = s3002_1010;
+    dir3002_entries[0].value_size = 8U;
+    dir3002_entries[1].tag = 0x5011U;
+    dir3002_entries[1].value = s3002_1011;
+    dir3002_entries[1].value_size = 8U;
+    dir3002_entries[2].tag = 0x5016U;
+    dir3002_entries[2].value = s3002_1016;
+    dir3002_entries[2].value_size = 8U;
+    dir3002_entries[3].tag = 0x5807U;
+    dir3002_entries[3].value = s3002_1807;
+    dir3002_entries[3].value_size = 8U;
+    dir3002_size = make_ciff_inline_directory(dir3002, dir3002_entries, 4U);
+
+    dir3003_entries[0].tag = 0x5814U;
+    dir3003_entries[0].value = s3003_1814;
+    dir3003_entries[0].value_size = 8U;
+    dir3003_size = make_ciff_inline_directory(dir3003, dir3003_entries, 1U);
+
+    dir3004_entries[0].tag = 0x501CU;
+    dir3004_entries[0].value = s3004_101c;
+    dir3004_entries[0].value_size = 8U;
+    dir3004_entries[1].tag = 0x5834U;
+    dir3004_entries[1].value = s3004_1834;
+    dir3004_entries[1].value_size = 8U;
+    dir3004_entries[2].tag = 0x583BU;
+    dir3004_entries[2].value = s3004_183b;
+    dir3004_entries[2].value_size = 8U;
+    dir3004_size = make_ciff_inline_directory(dir3004, dir3004_entries, 3U);
+
+    dir300a_entries[0].tag = 0x500AU;
+    dir300a_entries[0].value = s300a_100a;
+    dir300a_entries[0].value_size = 8U;
+    dir300a_entries[1].tag = 0x5804U;
+    dir300a_entries[1].value = s300a_1804;
+    dir300a_entries[1].value_size = 8U;
+    dir300a_entries[2].tag = 0x5806U;
+    dir300a_entries[2].value = s300a_1806;
+    dir300a_entries[2].value_size = 8U;
+    dir300a_entries[3].tag = 0x5817U;
+    dir300a_entries[3].value = s300a_1817;
+    dir300a_entries[3].value_size = 8U;
+    dir300a_size = make_ciff_inline_directory(dir300a, dir300a_entries, 4U);
+
+    root_entries[0].tag = 0x3002U;
+    root_entries[0].value = dir3002;
+    root_entries[0].value_size = dir3002_size;
+    root_entries[1].tag = 0x3003U;
+    root_entries[1].value = dir3003;
+    root_entries[1].value_size = dir3003_size;
+    root_entries[2].tag = 0x3004U;
+    root_entries[2].value = dir3004;
+    root_entries[2].value_size = dir3004_size;
+    root_entries[3].tag = 0x300AU;
+    root_entries[3].value = dir300a;
+    root_entries[3].value_size = dir300a_size;
+    root_size = make_ciff_directory(root, root_entries, 4U);
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u32le(out, &size, 14U);
+    append_text(out, &size, "HEAPCCDR");
+    append_bytes(out, &size, root, root_size);
+    return size;
+}
+
+static omc_size
+make_test_crw_decoder_table(omc_u8* out)
+{
+    omc_u8 decoder_table[16];
+    omc_u8 dir3004[64];
+    omc_u8 root[128];
+    omc_size decoder_table_size;
+    omc_size dir3004_size;
+    omc_size root_size;
+    omc_ciff_val_ent dir3004_entries[1];
+    omc_ciff_val_ent root_entries[1];
+    omc_size size;
+
+    decoder_table_size = 0U;
+    append_u32le(decoder_table, &decoder_table_size, 7U);
+    append_u32le(decoder_table, &decoder_table_size, 0U);
+    append_u32le(decoder_table, &decoder_table_size, 4096U);
+    append_u32le(decoder_table, &decoder_table_size, 8192U);
+
+    dir3004_entries[0].tag = 0x1835U;
+    dir3004_entries[0].value = decoder_table;
+    dir3004_entries[0].value_size = decoder_table_size;
+    dir3004_size = make_ciff_directory(dir3004, dir3004_entries, 1U);
+
+    root_entries[0].tag = 0x3004U;
+    root_entries[0].value = dir3004;
+    root_entries[0].value_size = dir3004_size;
+    root_size = make_ciff_directory(root, root_entries, 1U);
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u32le(out, &size, 14U);
+    append_text(out, &size, "HEAPCCDR");
+    append_bytes(out, &size, root, root_size);
+    return size;
+}
+
+static omc_size
+make_test_crw_rawjpginfo_and_whitesample(omc_u8* out)
+{
+    omc_u8 raw_jpg_info[16];
+    omc_u8 white_sample[16];
+    omc_u8 dir300b[96];
+    omc_u8 root[160];
+    omc_size raw_jpg_info_size;
+    omc_size white_sample_size;
+    omc_size dir300b_size;
+    omc_size root_size;
+    omc_ciff_val_ent dir300b_entries[2];
+    omc_ciff_val_ent root_entries[1];
+    omc_size size;
+
+    raw_jpg_info_size = 0U;
+    append_u16le(raw_jpg_info, &raw_jpg_info_size, 0U);
+    append_u16le(raw_jpg_info, &raw_jpg_info_size, 3U);
+    append_u16le(raw_jpg_info, &raw_jpg_info_size, 2U);
+    append_u16le(raw_jpg_info, &raw_jpg_info_size, 2048U);
+    append_u16le(raw_jpg_info, &raw_jpg_info_size, 1536U);
+
+    white_sample_size = 0U;
+    append_u16le(white_sample, &white_sample_size, 0U);
+    append_u16le(white_sample, &white_sample_size, 64U);
+    append_u16le(white_sample, &white_sample_size, 48U);
+    append_u16le(white_sample, &white_sample_size, 4U);
+    append_u16le(white_sample, &white_sample_size, 2U);
+    append_u16le(white_sample, &white_sample_size, 10U);
+
+    dir300b_entries[0].tag = 0x1030U;
+    dir300b_entries[0].value = white_sample;
+    dir300b_entries[0].value_size = white_sample_size;
+    dir300b_entries[1].tag = 0x10B5U;
+    dir300b_entries[1].value = raw_jpg_info;
+    dir300b_entries[1].value_size = raw_jpg_info_size;
+    dir300b_size = make_ciff_directory(dir300b, dir300b_entries, 2U);
+
+    root_entries[0].tag = 0x300BU;
+    root_entries[0].value = dir300b;
+    root_entries[0].value_size = dir300b_size;
+    root_size = make_ciff_directory(root, root_entries, 1U);
+
+    size = 0U;
+    append_text(out, &size, "II");
+    append_u32le(out, &size, 14U);
+    append_text(out, &size, "HEAPCCDR");
+    append_bytes(out, &size, root, root_size);
+    return size;
+}
+
+static omc_size
+make_test_crw_shotinfo(omc_u8* out)
+{
+    omc_u8 shot_info[32];
+    omc_u8 dir300b[96];
+    omc_u8 root[160];
+    omc_size shot_info_size;
+    omc_size dir300b_size;
+    omc_size root_size;
+    omc_ciff_val_ent dir300b_entries[1];
+    omc_ciff_val_ent root_entries[1];
+    omc_size size;
+
+    shot_info_size = 0U;
+    append_u16le(shot_info, &shot_info_size, 100U);
+    append_u16le(shot_info, &shot_info_size, 200U);
+    append_u16le(shot_info, &shot_info_size, 300U);
+    append_u16le(shot_info, &shot_info_size, 400U);
+    append_u16le(shot_info, &shot_info_size, (omc_u16)-64);
+    append_u16le(shot_info, &shot_info_size, 3U);
+    append_u16le(shot_info, &shot_info_size, 1U);
+    append_u16le(shot_info, &shot_info_size, 2U);
+    append_u16le(shot_info, &shot_info_size, 9U);
+    append_u16le(shot_info, &shot_info_size, 6U);
+
+    dir300b_entries[0].tag = 0x102AU;
+    dir300b_entries[0].value = shot_info;
+    dir300b_entries[0].value_size = shot_info_size;
+    dir300b_size = make_ciff_directory(dir300b, dir300b_entries, 1U);
+
+    root_entries[0].tag = 0x300BU;
+    root_entries[0].value = dir300b;
+    root_entries[0].value_size = dir300b_size;
+    root_size = make_ciff_directory(root, root_entries, 1U);
 
     size = 0U;
     append_text(out, &size, "II");
@@ -5129,6 +5658,262 @@ test_read_crw_derived_exif(void)
 }
 
 static void
+test_read_crw_textual_ciff(void)
+{
+    omc_u8 crw[1024];
+    omc_size crw_size;
+    omc_store store;
+    omc_blk_ref blocks[8];
+    omc_exif_ifd_ref ifds[16];
+    omc_u8 payload[128];
+    omc_u32 payload_parts[8];
+    omc_read_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    crw_size = make_test_crw_textual_ciff(crw);
+    omc_store_init(&store);
+
+    res = omc_read_simple(crw, crw_size, &store, blocks, 8U, ifds, 16U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "ciff_2804_0", 0x0805U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 22U);
+    assert(memcmp(view.data, "High definition camera", 22U) == 0);
+
+    entry = find_exif_entry(&store, "ciff_2807_1", 0x0810U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "Alice", 5U) == 0);
+
+    entry = find_exif_entry(&store, "ciff_3004_2", 0x080CU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 8U);
+    assert(memcmp(view.data, "Ver 2.10", 8U) == 0);
+
+    entry = find_exif_entry(&store, "ciff_300A_3", 0x0816U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 12U);
+    assert(memcmp(view.data, "IMG_0001.CRW", 12U) == 0);
+
+    entry = find_exif_entry(&store, "ifd0", 0x010EU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+
+    entry = find_exif_entry(&store, "exififd", 0xA430U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_crw_native_projection(void)
+{
+    omc_u8 crw[2048];
+    omc_size crw_size;
+    omc_store store;
+    omc_blk_ref blocks[8];
+    omc_exif_ifd_ref ifds[24];
+    omc_u8 payload[256];
+    omc_u32 payload_parts[8];
+    omc_read_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    crw_size = make_test_crw_native_projection(crw);
+    omc_store_init(&store);
+
+    res = omc_read_simple(crw, crw_size, &store, blocks, 8U, ifds, 24U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry_typed(&store, "ciff_2807_0_makemodel", 0x0000U,
+                                  OMC_VAL_TEXT, OMC_ELEM_U8);
+    assert(entry != (const omc_entry*)0);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "Canon", 5U) == 0);
+
+    entry = find_exif_entry(&store, "ciff_2807_0_makemodel", 0x0006U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 15U);
+    assert(memcmp(view.data, "PowerShot Pro70", 15U) == 0);
+
+    entry = find_exif_entry_typed(&store, "ciff_300A_2_imageformat",
+                                  0x0001U, OMC_VAL_SCALAR,
+                                  OMC_ELEM_F32_BITS);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.f32_bits == f32_bits(10.0f));
+
+    entry = find_exif_entry_typed(&store, "ciff_300A_2_timestamp", 0x0001U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_I32);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.i64 == -3);
+
+    entry = find_exif_entry_typed(&store, "ciff_300A_2_imageinfo", 0x0003U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_I32);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.i64 == 90);
+
+    entry = find_exif_entry_typed(&store, "ciff_3002_1_exposureinfo",
+                                  0x0002U, OMC_VAL_SCALAR,
+                                  OMC_ELEM_F32_BITS);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.f32_bits == f32_bits(3.0f));
+
+    entry = find_exif_entry_typed(&store, "ciff_3002_1_flashinfo", 0x0001U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_F32_BITS);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.f32_bits == f32_bits(0.0f));
+
+    entry = find_exif_entry_typed(&store, "ciff_300B_3_focallength",
+                                  0x0003U, OMC_VAL_SCALAR, OMC_ELEM_U16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 206U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_crw_semantic_native_scalars(void)
+{
+    omc_u8 crw[1024];
+    omc_size crw_size;
+    omc_store store;
+    omc_blk_ref blocks[8];
+    omc_exif_ifd_ref ifds[16];
+    omc_u8 payload[128];
+    omc_u32 payload_parts[8];
+    omc_read_res res;
+    const omc_entry* entry;
+
+    crw_size = make_test_crw_semantic_native_scalars(crw);
+    omc_store_init(&store);
+
+    res = omc_read_simple(crw, crw_size, &store, blocks, 8U, ifds, 16U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry_typed(&store, "ciff_3002_0", 0x1010U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 2U);
+
+    entry = find_exif_entry_typed(&store, "ciff_3002_0", 0x1807U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_F32_BITS);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.f32_bits == f32_bits(12.5f));
+
+    entry = find_exif_entry_typed(&store, "ciff_3003_1", 0x1814U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_F32_BITS);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.f32_bits == f32_bits(9.5f));
+
+    entry = find_exif_entry_typed(&store, "ciff_3004_2", 0x1834U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U32);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 0x80000169U);
+
+    entry = find_exif_entry_typed(&store, "ciff_300A_3", 0x1817U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U32);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 162U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_crw_native_tables(void)
+{
+    omc_u8 crw[1024];
+    omc_size crw_size;
+    omc_store store;
+    omc_blk_ref blocks[8];
+    omc_exif_ifd_ref ifds[16];
+    omc_u8 payload[128];
+    omc_u32 payload_parts[8];
+    omc_read_res res;
+    const omc_entry* entry;
+
+    crw_size = make_test_crw_decoder_table(crw);
+    omc_store_init(&store);
+    res = omc_read_simple(crw, crw_size, &store, blocks, 8U, ifds, 16U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    entry = find_exif_entry_typed(&store, "ciff_3004_0", 0x1835U,
+                                  OMC_VAL_ARRAY, OMC_ELEM_U32);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.count == 4U);
+    entry = find_exif_entry_typed(&store, "ciff_3004_0_decodertable",
+                                  0x0003U, OMC_VAL_SCALAR, OMC_ELEM_U32);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 8192U);
+    omc_store_fini(&store);
+
+    crw_size = make_test_crw_rawjpginfo_and_whitesample(crw);
+    omc_store_init(&store);
+    res = omc_read_simple(crw, crw_size, &store, blocks, 8U, ifds, 16U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    entry = find_exif_entry_typed(&store, "ciff_300B_0", 0x10B5U,
+                                  OMC_VAL_ARRAY, OMC_ELEM_U16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.count == 5U);
+    entry = find_exif_entry_typed(&store, "ciff_300B_0_rawjpginfo", 0x0004U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 1536U);
+    entry = find_exif_entry_typed(&store, "ciff_300B_0_whitesample", 0x0005U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 10U);
+    omc_store_fini(&store);
+
+    crw_size = make_test_crw_shotinfo(crw);
+    omc_store_init(&store);
+    res = omc_read_simple(crw, crw_size, &store, blocks, 8U, ifds, 16U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.exif.status == OMC_EXIF_OK);
+    entry = find_exif_entry_typed(&store, "ciff_300B_0_shotinfo", 0x0005U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_I16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.i64 == -64);
+    entry = find_exif_entry_typed(&store, "ciff_300B_0_shotinfo", 0x000AU,
+                                  OMC_VAL_SCALAR, OMC_ELEM_I16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.i64 == 6);
+    omc_store_fini(&store);
+}
+
+static void
 test_read_bmff_heif_all(void)
 {
     omc_u8 file_bytes[2048];
@@ -5873,6 +6658,10 @@ main(void)
     test_read_tiff_small_vendor_makernotes();
     test_read_crw_minimal_ciff();
     test_read_crw_derived_exif();
+    test_read_crw_textual_ciff();
+    test_read_crw_native_projection();
+    test_read_crw_semantic_native_scalars();
+    test_read_crw_native_tables();
     test_read_bmff_fields();
     test_read_bmff_heif_all();
     test_read_bmff_avif_all();

@@ -80,6 +80,14 @@ append_u32be(unsigned char* out, std::size_t* io_size, std::uint32_t value)
     append_u8(out, io_size, (unsigned char)(value & 0xFFU));
 }
 
+static std::uint32_t
+f32_bits(float value)
+{
+    std::uint32_t bits = 0U;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
 static void
 write_u16be_at(unsigned char* out, std::uint32_t off, std::uint16_t value)
 {
@@ -423,6 +431,396 @@ build_tiff_fuji_makernote_fixture()
     append_bytes(file.data(), &size, makernote.data(), maker_size);
 
     return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+struct CiffValueEntry final {
+    std::uint16_t tag = 0U;
+    ByteVec value;
+};
+
+static void
+append_u8_vec(ByteVec* out, std::uint8_t value)
+{
+    out->push_back(value);
+}
+
+static void
+append_u16le_vec(ByteVec* out, std::uint16_t value)
+{
+    append_u8_vec(out, (std::uint8_t)(value & 0xFFU));
+    append_u8_vec(out, (std::uint8_t)((value >> 8) & 0xFFU));
+}
+
+static void
+append_u32le_vec(ByteVec* out, std::uint32_t value)
+{
+    append_u8_vec(out, (std::uint8_t)(value & 0xFFU));
+    append_u8_vec(out, (std::uint8_t)((value >> 8) & 0xFFU));
+    append_u8_vec(out, (std::uint8_t)((value >> 16) & 0xFFU));
+    append_u8_vec(out, (std::uint8_t)((value >> 24) & 0xFFU));
+}
+
+static void
+append_bytes_vec(ByteVec* out, const ByteVec& bytes)
+{
+    out->insert(out->end(), bytes.begin(), bytes.end());
+}
+
+static ByteVec
+make_ciff_directory(const std::vector<CiffValueEntry>& entries)
+{
+    ByteVec out;
+    std::uint32_t data_off;
+    std::size_t i;
+
+    out.reserve(2U + entries.size() * 10U + 256U);
+    append_u16le_vec(&out, (std::uint16_t)entries.size());
+    data_off = 2U + (std::uint32_t)(entries.size() * 10U);
+
+    for (i = 0U; i < entries.size(); ++i) {
+        append_u16le_vec(&out, entries[i].tag);
+        append_u32le_vec(&out, (std::uint32_t)entries[i].value.size());
+        append_u32le_vec(&out, data_off);
+        data_off += (std::uint32_t)entries[i].value.size();
+    }
+
+    for (i = 0U; i < entries.size(); ++i) {
+        append_bytes_vec(&out, entries[i].value);
+    }
+
+    append_u32le_vec(&out, 0U);
+    return out;
+}
+
+static ByteVec
+make_ciff_inline_directory(const std::vector<CiffValueEntry>& entries)
+{
+    ByteVec out;
+    std::size_t i;
+    std::size_t j;
+
+    out.reserve(2U + entries.size() * 10U + 4U);
+    append_u16le_vec(&out, (std::uint16_t)entries.size());
+    for (i = 0U; i < entries.size(); ++i) {
+        append_u16le_vec(&out, entries[i].tag);
+        for (j = 0U; j < 8U; ++j) {
+            const std::uint8_t b = (j < entries[i].value.size())
+                                       ? entries[i].value[j]
+                                       : 0U;
+            append_u8_vec(&out, b);
+        }
+    }
+    append_u32le_vec(&out, 0U);
+    return out;
+}
+
+static ByteVec
+make_padded_ascii(std::string_view text, std::size_t width)
+{
+    ByteVec out(width, 0U);
+    const std::size_t n = (text.size() < width) ? text.size() : width;
+    if (n != 0U) {
+        std::memcpy(out.data(), text.data(), n);
+    }
+    return out;
+}
+
+static ByteVec
+make_padded_u16_scalar(std::uint16_t value)
+{
+    ByteVec out(8U, 0U);
+    out[0] = (std::uint8_t)(value & 0xFFU);
+    out[1] = (std::uint8_t)((value >> 8) & 0xFFU);
+    return out;
+}
+
+static ByteVec
+make_padded_u32_scalar(std::uint32_t value)
+{
+    ByteVec out(8U, 0U);
+    out[0] = (std::uint8_t)(value & 0xFFU);
+    out[1] = (std::uint8_t)((value >> 8) & 0xFFU);
+    out[2] = (std::uint8_t)((value >> 16) & 0xFFU);
+    out[3] = (std::uint8_t)((value >> 24) & 0xFFU);
+    return out;
+}
+
+static ByteVec
+make_padded_f32_scalar(float value)
+{
+    return make_padded_u32_scalar(f32_bits(value));
+}
+
+static ByteVec
+make_u32_pair(std::uint32_t first, std::uint32_t second)
+{
+    ByteVec out;
+    out.reserve(8U);
+    append_u32le_vec(&out, first);
+    append_u32le_vec(&out, second);
+    return out;
+}
+
+static ByteVec
+build_crw_textual_ciff_fixture()
+{
+    const ByteVec dir2804 = make_ciff_directory(
+        std::vector<CiffValueEntry> {
+            { 0x0805U, make_padded_ascii("High definition camera", 32U) },
+        });
+    const ByteVec dir2807 = make_ciff_directory(
+        std::vector<CiffValueEntry> {
+            { 0x0810U, make_padded_ascii("Alice", 32U) },
+        });
+    const ByteVec dir3004 = make_ciff_directory(
+        std::vector<CiffValueEntry> {
+            { 0x080CU, make_padded_ascii("Ver 2.10", 32U) },
+        });
+    const ByteVec dir300a = make_ciff_directory(
+        std::vector<CiffValueEntry> {
+            { 0x0816U, make_padded_ascii("IMG_0001.CRW", 32U) },
+        });
+    const ByteVec root = make_ciff_directory(
+        std::vector<CiffValueEntry> {
+            { 0x2804U, dir2804 },
+            { 0x2807U, dir2807 },
+            { 0x3004U, dir3004 },
+            { 0x300AU, dir300a },
+        });
+    ByteVec file;
+
+    file.reserve(14U + root.size());
+    file.push_back((unsigned char)'I');
+    file.push_back((unsigned char)'I');
+    append_u32le_vec(&file, 14U);
+    file.insert(file.end(), { 'H', 'E', 'A', 'P', 'C', 'C', 'D', 'R' });
+    append_bytes_vec(&file, root);
+    return file;
+}
+
+static ByteVec
+build_crw_native_projection_fixture()
+{
+    ByteVec make_model;
+    ByteVec subject_distance;
+    ByteVec image_format;
+    ByteVec exposure_info;
+    ByteVec flash_info;
+    ByteVec focal_length;
+    ByteVec datetime_original;
+    ByteVec dimensions_orientation;
+
+    make_model.insert(make_model.end(), { 'C', 'a', 'n', 'o', 'n', 0U });
+    make_model.insert(make_model.end(),
+                      { 'P', 'o', 'w', 'e', 'r', 'S', 'h', 'o', 't', ' ',
+                        'P', 'r', 'o', '7', '0', 0U });
+
+    append_u32le_vec(&subject_distance, 123U);
+
+    append_u32le_vec(&image_format, 0x00020001U);
+    append_u32le_vec(&image_format, f32_bits(10.0f));
+
+    append_u32le_vec(&exposure_info, f32_bits(0.33333334f));
+    append_u32le_vec(&exposure_info, f32_bits(6.875f));
+    append_u32le_vec(&exposure_info, f32_bits(3.0f));
+
+    flash_info = make_u32_pair(f32_bits(0.0f), f32_bits(0.0f));
+
+    append_u16le_vec(&focal_length, 2U);
+    append_u16le_vec(&focal_length, 473U);
+    append_u16le_vec(&focal_length, 309U);
+    append_u16le_vec(&focal_length, 206U);
+
+    append_u32le_vec(&datetime_original, 1700000000U);
+    append_u32le_vec(&datetime_original, 0xFFFFFFFDU);
+    append_u32le_vec(&datetime_original, 0x0000007BU);
+
+    append_u32le_vec(&dimensions_orientation, 1536U);
+    append_u32le_vec(&dimensions_orientation, 1024U);
+    append_u32le_vec(&dimensions_orientation, f32_bits(1.0f));
+    append_u32le_vec(&dimensions_orientation, 90U);
+
+    const ByteVec dir2807 = make_ciff_directory(
+        std::vector<CiffValueEntry> { { 0x080AU, make_model } });
+    const ByteVec dir3002 = make_ciff_directory(
+        std::vector<CiffValueEntry> {
+            { 0x1813U, flash_info },
+            { 0x1807U, subject_distance },
+            { 0x1818U, exposure_info },
+        });
+    const ByteVec dir300a = make_ciff_directory(
+        std::vector<CiffValueEntry> {
+            { 0x1803U, image_format },
+            { 0x180EU, datetime_original },
+            { 0x1810U, dimensions_orientation },
+        });
+    const ByteVec dir300b = make_ciff_directory(
+        std::vector<CiffValueEntry> {
+            { 0x1028U, flash_info },
+            { 0x1029U, focal_length },
+        });
+    const ByteVec root = make_ciff_directory(
+        std::vector<CiffValueEntry> {
+            { 0x2807U, dir2807 },
+            { 0x3002U, dir3002 },
+            { 0x300AU, dir300a },
+            { 0x300BU, dir300b },
+        });
+    ByteVec file;
+
+    file.reserve(14U + root.size());
+    file.push_back((unsigned char)'I');
+    file.push_back((unsigned char)'I');
+    append_u32le_vec(&file, 14U);
+    file.insert(file.end(), { 'H', 'E', 'A', 'P', 'C', 'C', 'D', 'R' });
+    append_bytes_vec(&file, root);
+    return file;
+}
+
+static ByteVec
+build_crw_semantic_native_scalars_fixture()
+{
+    const ByteVec dir3002 = make_ciff_inline_directory(
+        std::vector<CiffValueEntry> {
+            { 0x5010U, make_padded_u16_scalar(2U) },
+            { 0x5011U, make_padded_u16_scalar(1U) },
+            { 0x5016U, make_padded_u16_scalar(3U) },
+            { 0x5807U, make_padded_f32_scalar(12.5f) },
+        });
+    const ByteVec dir3003 = make_ciff_inline_directory(
+        std::vector<CiffValueEntry> {
+            { 0x5814U, make_padded_f32_scalar(9.5f) },
+        });
+    const ByteVec dir3004 = make_ciff_inline_directory(
+        std::vector<CiffValueEntry> {
+            { 0x501CU, make_padded_u16_scalar(100U) },
+            { 0x5834U, make_padded_u32_scalar(0x80000169U) },
+            { 0x583BU, make_padded_u32_scalar(2U) },
+        });
+    const ByteVec dir300a = make_ciff_inline_directory(
+        std::vector<CiffValueEntry> {
+            { 0x500AU, make_padded_u16_scalar(7U) },
+            { 0x5804U, make_padded_u32_scalar(42U) },
+            { 0x5806U, make_padded_u32_scalar(1000U) },
+            { 0x5817U, make_padded_u32_scalar(162U) },
+        });
+    const ByteVec root = make_ciff_directory(
+        std::vector<CiffValueEntry> {
+            { 0x3002U, dir3002 },
+            { 0x3003U, dir3003 },
+            { 0x3004U, dir3004 },
+            { 0x300AU, dir300a },
+        });
+    ByteVec file;
+
+    file.reserve(14U + root.size());
+    file.push_back((unsigned char)'I');
+    file.push_back((unsigned char)'I');
+    append_u32le_vec(&file, 14U);
+    file.insert(file.end(), { 'H', 'E', 'A', 'P', 'C', 'C', 'D', 'R' });
+    append_bytes_vec(&file, root);
+    return file;
+}
+
+static ByteVec
+build_crw_decoder_table_fixture()
+{
+    ByteVec decoder_table;
+    const ByteVec dir3004 = make_ciff_directory(
+        std::vector<CiffValueEntry> {
+            { 0x1835U, [&decoder_table]() -> ByteVec {
+                  append_u32le_vec(&decoder_table, 7U);
+                  append_u32le_vec(&decoder_table, 0U);
+                  append_u32le_vec(&decoder_table, 4096U);
+                  append_u32le_vec(&decoder_table, 8192U);
+                  return decoder_table;
+              }() },
+        });
+    const ByteVec root = make_ciff_directory(
+        std::vector<CiffValueEntry> { { 0x3004U, dir3004 } });
+    ByteVec file;
+
+    file.reserve(14U + root.size());
+    file.push_back((unsigned char)'I');
+    file.push_back((unsigned char)'I');
+    append_u32le_vec(&file, 14U);
+    file.insert(file.end(), { 'H', 'E', 'A', 'P', 'C', 'C', 'D', 'R' });
+    append_bytes_vec(&file, root);
+    return file;
+}
+
+static ByteVec
+build_crw_rawjpginfo_whitesample_fixture()
+{
+    ByteVec raw_jpg_info;
+    ByteVec white_sample;
+    ByteVec file;
+    const ByteVec root = [&]() -> ByteVec {
+        const ByteVec dir300b = [&]() -> ByteVec {
+            append_u16le_vec(&raw_jpg_info, 0U);
+            append_u16le_vec(&raw_jpg_info, 3U);
+            append_u16le_vec(&raw_jpg_info, 2U);
+            append_u16le_vec(&raw_jpg_info, 2048U);
+            append_u16le_vec(&raw_jpg_info, 1536U);
+
+            append_u16le_vec(&white_sample, 0U);
+            append_u16le_vec(&white_sample, 64U);
+            append_u16le_vec(&white_sample, 48U);
+            append_u16le_vec(&white_sample, 4U);
+            append_u16le_vec(&white_sample, 2U);
+            append_u16le_vec(&white_sample, 10U);
+
+            return make_ciff_directory(std::vector<CiffValueEntry> {
+                { 0x1030U, white_sample },
+                { 0x10B5U, raw_jpg_info },
+            });
+        }();
+        return make_ciff_directory(
+            std::vector<CiffValueEntry> { { 0x300BU, dir300b } });
+    }();
+
+    file.reserve(14U + root.size());
+    file.push_back((unsigned char)'I');
+    file.push_back((unsigned char)'I');
+    append_u32le_vec(&file, 14U);
+    file.insert(file.end(), { 'H', 'E', 'A', 'P', 'C', 'C', 'D', 'R' });
+    append_bytes_vec(&file, root);
+    return file;
+}
+
+static ByteVec
+build_crw_shotinfo_fixture()
+{
+    ByteVec shot_info;
+    ByteVec file;
+    const ByteVec root = [&]() -> ByteVec {
+        const ByteVec dir300b = [&]() -> ByteVec {
+            append_u16le_vec(&shot_info, 100U);
+            append_u16le_vec(&shot_info, 200U);
+            append_u16le_vec(&shot_info, 300U);
+            append_u16le_vec(&shot_info, 400U);
+            append_u16le_vec(&shot_info, (std::uint16_t)-64);
+            append_u16le_vec(&shot_info, 3U);
+            append_u16le_vec(&shot_info, 1U);
+            append_u16le_vec(&shot_info, 2U);
+            append_u16le_vec(&shot_info, 9U);
+            append_u16le_vec(&shot_info, 6U);
+
+            return make_ciff_directory(std::vector<CiffValueEntry> {
+                { 0x102AU, shot_info },
+            });
+        }();
+        return make_ciff_directory(
+            std::vector<CiffValueEntry> { { 0x300BU, dir300b } });
+    }();
+
+    file.reserve(14U + root.size());
+    file.push_back((unsigned char)'I');
+    file.push_back((unsigned char)'I');
+    append_u32le_vec(&file, 14U);
+    file.insert(file.end(), { 'H', 'E', 'A', 'P', 'C', 'C', 'D', 'R' });
+    append_bytes_vec(&file, root);
+    return file;
 }
 
 static ByteVec
@@ -2838,6 +3236,21 @@ main()
     ok = run_case("png_text", build_png_text_fixture(), false) && ok;
     ok = run_case("tiff_geotiff", build_tiff_geotiff_fixture(), false) && ok;
     ok = run_case("tiff_printim", build_tiff_printim_fixture(), false) && ok;
+    ok = run_case("crw_textual_ciff", build_crw_textual_ciff_fixture(), false)
+         && ok;
+    ok = run_case("crw_native_projection",
+                  build_crw_native_projection_fixture(), false)
+         && ok;
+    ok = run_case("crw_semantic_native_scalars",
+                  build_crw_semantic_native_scalars_fixture(), false)
+         && ok;
+    ok = run_case("crw_decoder_table", build_crw_decoder_table_fixture(),
+                  false)
+         && ok;
+    ok = run_case("crw_rawjpginfo_whitesample",
+                  build_crw_rawjpginfo_whitesample_fixture(), false)
+         && ok;
+    ok = run_case("crw_shotinfo", build_crw_shotinfo_fixture(), false) && ok;
     ok = run_case("tiff_fuji_makernote",
                   build_tiff_fuji_makernote_fixture(), true)
          && ok;
