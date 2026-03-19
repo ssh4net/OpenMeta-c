@@ -2834,6 +2834,83 @@ build_bmff_pred_fixture()
 }
 
 static ByteVec
+build_bmff_nonprimary_typed_iref_fixture()
+{
+    std::array<unsigned char, 512> file {};
+    std::array<unsigned char, 16> pitm_payload {};
+    std::array<unsigned char, 16> dimg_payload {};
+    std::array<unsigned char, 16> thmb_payload {};
+    std::array<unsigned char, 16> cdsc_payload {};
+    std::array<unsigned char, 128> iref_payload {};
+    std::array<unsigned char, 256> meta_payload {};
+    std::array<unsigned char, 16> ftyp_payload {};
+    std::size_t pitm_size;
+    std::size_t dimg_size;
+    std::size_t thmb_size;
+    std::size_t cdsc_size;
+    std::size_t iref_size;
+    std::size_t meta_size;
+    std::size_t ftyp_size;
+    std::size_t size;
+
+    pitm_size = 0U;
+    append_fullbox_header(pitm_payload.data(), &pitm_size, 0U);
+    append_u16be(pitm_payload.data(), &pitm_size, 1U);
+
+    dimg_size = 0U;
+    append_u16be(dimg_payload.data(), &dimg_size, 2U);
+    append_u16be(dimg_payload.data(), &dimg_size, 2U);
+    append_u16be(dimg_payload.data(), &dimg_size, 5U);
+    append_u16be(dimg_payload.data(), &dimg_size, 6U);
+
+    thmb_size = 0U;
+    append_u16be(thmb_payload.data(), &thmb_size, 3U);
+    append_u16be(thmb_payload.data(), &thmb_size, 1U);
+    append_u16be(thmb_payload.data(), &thmb_size, 7U);
+
+    cdsc_size = 0U;
+    append_u16be(cdsc_payload.data(), &cdsc_size, 4U);
+    append_u16be(cdsc_payload.data(), &cdsc_size, 1U);
+    append_u16be(cdsc_payload.data(), &cdsc_size, 8U);
+
+    iref_size = 0U;
+    append_fullbox_header(iref_payload.data(), &iref_size, 0U);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('d', 'i', 'm', 'g'), dimg_payload.data(),
+                    dimg_size);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('t', 'h', 'm', 'b'), thmb_payload.data(),
+                    thmb_size);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('c', 'd', 's', 'c'), cdsc_payload.data(),
+                    cdsc_size);
+
+    meta_size = 0U;
+    append_fullbox_header(meta_payload.data(), &meta_size, 0U);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('p', 'i', 't', 'm'), pitm_payload.data(),
+                    pitm_size);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('i', 'r', 'e', 'f'), iref_payload.data(),
+                    iref_size);
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('h', 'e', 'i', 'c'));
+    append_u32be(ftyp_payload.data(), &ftyp_size, 0U);
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('m', 'i', 'f', '1'));
+
+    size = 0U;
+    append_bmff_box(file.data(), &size, make_fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload.data(), ftyp_size);
+    append_bmff_box(file.data(), &size, make_fourcc('m', 'e', 't', 'a'),
+                    meta_payload.data(), meta_size);
+
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
 build_bmff_auxc_semantics_fixture()
 {
     std::array<unsigned char, 1024> file {};
@@ -4069,6 +4146,9 @@ main(int argc, char** argv)
                   build_bmff_aux_subtype_upstream_fixture(), false)
          && ok;
     ok = run_case("bmff_pred_iref", build_bmff_pred_fixture(), false) && ok;
+    ok = run_case("bmff_nonprimary_typed_iref",
+                  build_bmff_nonprimary_typed_iref_fixture(), false)
+         && ok;
     ok = run_case("tiff_geotiff", build_tiff_geotiff_fixture(), false) && ok;
     ok = run_case("tiff_printim", build_tiff_printim_fixture(), false) && ok;
     ok = run_case("crw_textual_ciff", build_crw_textual_ciff_fixture(), false)

@@ -3034,6 +3034,74 @@ make_test_bmff_pred_only(omc_u8* out, omc_u32 major_brand)
 }
 
 static omc_size
+make_test_bmff_nonprimary_typed_iref_only(omc_u8* out, omc_u32 major_brand)
+{
+    omc_u8 pitm_payload[16];
+    omc_u8 dimg_payload[16];
+    omc_u8 thmb_payload[16];
+    omc_u8 cdsc_payload[16];
+    omc_u8 iref_payload[128];
+    omc_u8 meta_payload[256];
+    omc_u8 ftyp_payload[16];
+    omc_size pitm_size;
+    omc_size dimg_size;
+    omc_size thmb_size;
+    omc_size cdsc_size;
+    omc_size iref_size;
+    omc_size meta_size;
+    omc_size ftyp_size;
+    omc_size size;
+
+    pitm_size = 0U;
+    append_fullbox_header(pitm_payload, &pitm_size, 0U);
+    append_u16be(pitm_payload, &pitm_size, 1U);
+
+    dimg_size = 0U;
+    append_u16be(dimg_payload, &dimg_size, 2U);
+    append_u16be(dimg_payload, &dimg_size, 2U);
+    append_u16be(dimg_payload, &dimg_size, 5U);
+    append_u16be(dimg_payload, &dimg_size, 6U);
+
+    thmb_size = 0U;
+    append_u16be(thmb_payload, &thmb_size, 3U);
+    append_u16be(thmb_payload, &thmb_size, 1U);
+    append_u16be(thmb_payload, &thmb_size, 7U);
+
+    cdsc_size = 0U;
+    append_u16be(cdsc_payload, &cdsc_size, 4U);
+    append_u16be(cdsc_payload, &cdsc_size, 1U);
+    append_u16be(cdsc_payload, &cdsc_size, 8U);
+
+    iref_size = 0U;
+    append_fullbox_header(iref_payload, &iref_size, 0U);
+    append_bmff_box(iref_payload, &iref_size, fourcc('d', 'i', 'm', 'g'),
+                    dimg_payload, dimg_size);
+    append_bmff_box(iref_payload, &iref_size, fourcc('t', 'h', 'm', 'b'),
+                    thmb_payload, thmb_size);
+    append_bmff_box(iref_payload, &iref_size, fourcc('c', 'd', 's', 'c'),
+                    cdsc_payload, cdsc_size);
+
+    meta_size = 0U;
+    append_fullbox_header(meta_payload, &meta_size, 0U);
+    append_bmff_box(meta_payload, &meta_size, fourcc('p', 'i', 't', 'm'),
+                    pitm_payload, pitm_size);
+    append_bmff_box(meta_payload, &meta_size, fourcc('i', 'r', 'e', 'f'),
+                    iref_payload, iref_size);
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload, &ftyp_size, major_brand);
+    append_u32be(ftyp_payload, &ftyp_size, 0U);
+    append_u32be(ftyp_payload, &ftyp_size, fourcc('m', 'i', 'f', '1'));
+
+    size = 0U;
+    append_bmff_box(out, &size, fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload, ftyp_size);
+    append_bmff_box(out, &size, fourcc('m', 'e', 't', 'a'),
+                    meta_payload, meta_size);
+    return size;
+}
+
+static omc_size
 make_test_cr3_all(omc_u8* out)
 {
     static const omc_u8 canon_uuid[16] = {
@@ -6917,6 +6985,121 @@ test_read_bmff_pred_edges(void)
 }
 
 static void
+test_read_bmff_nonprimary_typed_edges(void)
+{
+    omc_u8 file_bytes[512];
+    omc_size file_size;
+    omc_store store;
+    omc_blk_ref blocks[4];
+    omc_exif_ifd_ref ifds[4];
+    omc_u8 payload[64];
+    omc_u32 payload_parts[8];
+    omc_read_res res;
+
+    file_size = make_test_bmff_nonprimary_typed_iref_only(
+        file_bytes, fourcc('h', 'e', 'i', 'c'));
+    omc_store_init(&store);
+
+    res = omc_read_simple(file_bytes, file_size, &store, blocks, 4U, ifds, 4U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.bmff.status == OMC_BMFF_OK);
+    assert(count_bmff_field_scalar_value(&store, "iref.edge_count", 4U) == 1U);
+
+    assert(count_bmff_field_scalar_value(&store, "iref.dimg.edge_count", 2U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.graph.dimg.edge_count",
+                                         2U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.dimg.from_item_unique_count",
+                                         1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.graph.dimg.from_item_unique_count",
+                                         1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.dimg.to_item_unique_count",
+                                         2U) == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.graph.dimg.to_item_unique_count",
+                                         2U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.dimg.from_item_id", 2U)
+           == 2U);
+    assert(count_bmff_field_scalar_value(&store, "iref.dimg.to_item_id", 5U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.dimg.to_item_id", 6U)
+           == 1U);
+
+    assert(count_bmff_field_scalar_value(&store, "iref.thmb.edge_count", 1U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.graph.thmb.edge_count",
+                                         1U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.thmb.from_item_unique_count",
+                                         1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.graph.thmb.from_item_unique_count",
+                                         1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.thmb.to_item_unique_count",
+                                         1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.graph.thmb.to_item_unique_count",
+                                         1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.thmb.from_item_id", 3U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.thmb.to_item_id", 7U)
+           == 1U);
+
+    assert(count_bmff_field_scalar_value(&store, "iref.cdsc.edge_count", 1U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.graph.cdsc.edge_count",
+                                         1U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.cdsc.from_item_unique_count",
+                                         1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.graph.cdsc.from_item_unique_count",
+                                         1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.cdsc.to_item_unique_count",
+                                         1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.graph.cdsc.to_item_unique_count",
+                                         1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.cdsc.from_item_id", 4U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.cdsc.to_item_id", 8U)
+           == 1U);
+
+    assert(count_bmff_field_scalar_value(&store, "iref.item_count", 7U) == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.from_item_unique_count",
+                                         3U) == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "iref.to_item_unique_count",
+                                         4U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.item_id", 2U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.item_id", 3U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.item_id", 4U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.item_id", 5U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.item_id", 6U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.item_id", 7U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.item_id", 8U) == 1U);
+
+    assert(count_bmff_field(&store, "primary.dimg_item_id") == 0U);
+    assert(count_bmff_field(&store, "primary.thmb_item_id") == 0U);
+    assert(count_bmff_field(&store, "primary.cdsc_item_id") == 0U);
+    assert(count_bmff_field(&store, "iref.graph.auxl.edge_count") == 0U);
+
+    omc_store_fini(&store);
+}
+
+static void
 test_read_jp2_all(void)
 {
     omc_u8 file_bytes[2048];
@@ -7313,6 +7496,7 @@ main(void)
     test_read_bmff_fields();
     test_read_bmff_aux_subtype_kinds();
     test_read_bmff_pred_edges();
+    test_read_bmff_nonprimary_typed_edges();
     test_read_bmff_heif_all();
     test_read_bmff_avif_all();
     test_read_cr3_exif();
