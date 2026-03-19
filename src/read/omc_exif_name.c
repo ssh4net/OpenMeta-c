@@ -113,8 +113,16 @@ omc_exif_lookup_exact_name(const char* ifd_name, omc_u16 tag)
         { "mk_minolta0", 0x0018U, "ImageStabilization" },
         { "mk_minolta0", 0x0103U, "MinoltaImageSize" },
         { "mk_minolta0", 0x0113U, "ImageStabilization" },
+        { "mk_motorola0", 0x5500U, "BuildNumber" },
+        { "mk_motorola0", 0x5501U, "SerialNumber" },
+        { "mk_motorola0", 0x64D0U, "DriveMode" },
+        { "mk_motorola0", 0x665EU, "Sensor" },
+        { "mk_motorola0", 0x6705U, "ManufactureDate" },
         { "mk_nikonsettings_main_0", 0x0001U, "ISOAutoHiLimit" },
         { "mk_nikonsettings_main_0", 0x0046U, "OpticalVR" },
+        { "mk_olympus_equipment0", 0x0040U, "CompressedImageSize" },
+        { "mk_olympus_fetags_0", 0x0311U, "CoringValues" },
+        { "mk_olympus_fetags_0", 0x1204U, "ExternalFlashBounce" },
         { "mk_olympus_focusinfo_0", 0x1600U, "ImageStabilization" },
         { "mk_motorola0", 0x6420U, "CustomRendered" },
         { "mk_panasonic0", 0x0004U, "Model" },
@@ -122,17 +130,26 @@ omc_exif_lookup_exact_name(const char* ifd_name, omc_u16 tag)
         { "mk_panasonic0", 0x0016U, "Model" },
         { "mk_panasonic0", 0x0058U, "ThumbnailWidth" },
         { "mk_panasonic0", 0x00DEU, "AFAreaSize" },
+        { "mk_pentax0", 0x003EU, "PreviewImageBorders" },
         { "mk_pentax0", 0x0062U, "RawDevelopmentProcess" },
         { "mk_ricoh0", 0x1002U, "DriveMode" },
         { "mk_ricoh0", 0x1003U, "Sharpness" },
+        { "mk_ricoh_thetasubdir_0", 0x0003U, "Accelerometer" },
+        { "mk_flir_fff_gpsinfo_0", 0x0008U, "GPSLatitudeRef" },
         { "mk_samsung_type2_0", 0xA002U, "SerialNumber" },
         { "mk_samsung_type2_0", 0xA003U, "LensType" },
         { "mk_canon0", 0x0038U, "BatteryType" },
         { "mk_canon_shotinfo_0", 0x000EU, "AFPointsInFocus" },
         { "mk_canon_camerasettings_0", 0x0021U, "AESetting" },
+        { "mk_canon_colordata7_0", 0x0080U, "WB_RGGBLevelsDaylight" },
+        { "mk_canon_colordata7_0", 0x00D0U, "WB_RGGBLevelsUnknown20" },
+        { "mk_canon_colordata12_0", 0x0073U, "WB_RGGBLevelsMeasured" },
+        { "mk_canon_colordata12_0", 0x016BU, "PerChannelBlackLevel" },
+        { "mk_canon_colordata12_0", 0x0280U, "NormalWhiteLevel" },
         { "mk_canon_colordata4_0", 0x02CFU, "NormalWhiteLevel" },
         { "mk_canon_colorcalib_0", 0x0038U, "CameraColorCalibration15" },
         { "mk_canon_camerainfo1d_0", 0x0048U, "ColorTemperature" },
+        { "mk_canon_camerainfo1100d_0", 0x019BU, "FirmwareVersion" },
         { "mk_canon_camerainfo600d_0", 0x00EAU, "LensType" },
         { "mk_canoncustom_functions2_0", 0x0103U, "ISOSpeedRange" },
         { "mk_canoncustom_functions2_0", 0x010CU, "ShutterSpeedRange" },
@@ -190,16 +207,68 @@ omc_exif_tag_name_impl(const char* ifd_name, omc_u16 tag,
         return omc_exif_name_write_placeholder("Samsung_Type2", tag,
                                                out_name, out_cap, out_len);
     }
+    if (strcmp(ifd_name, "mk_flir0") == 0) {
+        return omc_exif_name_write_placeholder("FLIR", tag,
+                                               out_name, out_cap, out_len);
+    }
     if (strcmp(ifd_name, "mk_minolta0") == 0) {
         return omc_exif_name_write_placeholder("Minolta", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_motorola0") == 0) {
+        return omc_exif_name_write_placeholder("Motorola", tag,
                                                out_name, out_cap, out_len);
     }
     if (omc_exif_name_starts_with(ifd_name, "mk_nikonsettings_main_")) {
         return omc_exif_name_write_placeholder("NikonSettings", tag,
                                                out_name, out_cap, out_len);
     }
+    if (strcmp(ifd_name, "mk_olympus0") == 0) {
+        return omc_exif_name_write_placeholder("Olympus", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_olympus_camerasettings_0") == 0) {
+        return omc_exif_name_write_placeholder("Olympus_CameraSettings", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_olympus_focusinfo_0") == 0) {
+        return omc_exif_name_write_placeholder("Olympus_FocusInfo", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_olympus_unknowninfo_0") == 0) {
+        return omc_exif_name_write_placeholder("Olympus_UnknownInfo", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_olympus_imageprocessing_0") == 0) {
+        return omc_exif_name_write_placeholder("Olympus_ImageProcessing", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_olympus_rawdevelopment2_0") == 0) {
+        return omc_exif_name_write_placeholder("Olympus_RawDevelopment2", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (omc_exif_name_starts_with(ifd_name, "mk_olympus_fetags_")) {
+        return omc_exif_name_write_placeholder("Olympus_FETags", tag,
+                                               out_name, out_cap, out_len);
+    }
     if (strcmp(ifd_name, "mk_panasonic0") == 0) {
         return omc_exif_name_write_placeholder("Panasonic", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_ricoh_subdir_0") == 0) {
+        return omc_exif_name_write_placeholder("Ricoh_Subdir", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_ricoh_imageinfo_0") == 0) {
+        return omc_exif_name_write_placeholder("Ricoh_ImageInfo", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_ricoh_thetasubdir_0") == 0) {
+        return omc_exif_name_write_placeholder("Ricoh_ThetaSubdir", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_ricoh_type2_0") == 0) {
+        return omc_exif_name_write_placeholder("Ricoh_Type2", tag,
                                                out_name, out_cap, out_len);
     }
     if (strcmp(ifd_name, "mk_ricoh0") == 0) {
@@ -210,8 +279,30 @@ omc_exif_tag_name_impl(const char* ifd_name, omc_u16 tag,
         return omc_exif_name_write_placeholder("Pentax", tag,
                                                out_name, out_cap, out_len);
     }
+    if (strcmp(ifd_name, "mk_pentax_type2_0") == 0) {
+        return omc_exif_name_write_placeholder("Pentax_Type2", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_pentax_faceinfo_0") == 0
+        || strcmp(ifd_name, "mk_pentax_facepos_0") == 0
+        || strcmp(ifd_name, "mk_pentax_colorinfo_0") == 0) {
+        return omc_exif_name_write_placeholder("Pentax", tag,
+                                               out_name, out_cap, out_len);
+    }
     if (strcmp(ifd_name, "mk_canon0") == 0) {
         return omc_exif_name_write_placeholder("Canon", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_canoncustom_functions2_0") == 0) {
+        return omc_exif_name_write_placeholder("CanonCustom_Functions2", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_canoncustom_functions5d_0") == 0) {
+        return omc_exif_name_write_placeholder("CanonCustom_Functions5D", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_canoncustom_functionsd30_0") == 0) {
+        return omc_exif_name_write_placeholder("CanonCustom_FunctionsD30", tag,
                                                out_name, out_cap, out_len);
     }
     return omc_exif_name_write((const char*)0, out_name, out_cap, out_len);

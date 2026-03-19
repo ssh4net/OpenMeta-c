@@ -109,14 +109,55 @@ test_tag_name_basics(void)
     expect_tag_name("mk_casio_type2_0", 0x0002U, "PreviewImageSize");
     expect_tag_name("mk_casio_type2_0", 0x2002U, "Casio_Type2_0x2002");
     expect_tag_name("mk_canon0", 0x0038U, "BatteryType");
+    expect_tag_name("mk_canon0", 0x001FU, "Canon_0x001f");
+    expect_tag_name("mk_canon_colordata7_0", 0x0080U,
+                    "WB_RGGBLevelsDaylight");
+    expect_tag_name("mk_canon_colordata7_0", 0x0095U, (const char*)0);
+    expect_tag_name("mk_canon_colordata12_0", 0x016BU,
+                    "PerChannelBlackLevel");
+    expect_tag_name("mk_canon_camerainfo1100d_0", 0x019BU,
+                    "FirmwareVersion");
+    expect_tag_name("mk_canoncustom_functions2_0", 0x0115U,
+                    "CanonCustom_Functions2_0x0115");
+    expect_tag_name("mk_canoncustom_functions5d_0", 0x0015U,
+                    "CanonCustom_Functions5D_0x0015");
+    expect_tag_name("mk_canoncustom_functionsd30_0", 0x0000U,
+                    "CanonCustom_FunctionsD30_0x0000");
+    expect_tag_name("mk_flir0", 0x0007U, "FLIR_0x0007");
+    expect_tag_name("mk_flir_fff_gpsinfo_0", 0x0008U, "GPSLatitudeRef");
     expect_tag_name("mk_nikonsettings_main_0", 0x0001U, "ISOAutoHiLimit");
     expect_tag_name("mk_fuji0", 0x1200U, "FujiFilm_0x1200");
     expect_tag_name("mk_minolta0", 0x0103U, "MinoltaImageSize");
     expect_tag_name("mk_minolta0", 0x0106U, "Minolta_0x0106");
+    expect_tag_name("mk_motorola0", 0x5500U, "BuildNumber");
+    expect_tag_name("mk_motorola0", 0x6703U, "Motorola_0x6703");
+    expect_tag_name("mk_olympus_equipment0", 0x0040U, "CompressedImageSize");
+    expect_tag_name("mk_olympus_fetags_0", 0x0101U,
+                    "Olympus_FETags_0x0101");
+    expect_tag_name("mk_olympus_fetags_0", 0x0311U, "CoringValues");
+    expect_tag_name("mk_olympus_camerasettings_0", 0x0402U,
+                    "Olympus_CameraSettings_0x0402");
+    expect_tag_name("mk_olympus_unknowninfo_0", 0x2100U,
+                    "Olympus_UnknownInfo_0x2100");
+    expect_tag_name("mk_olympus_imageprocessing_0", 0x1000U,
+                    "Olympus_ImageProcessing_0x1000");
+    expect_tag_name("mk_olympus_rawdevelopment2_0", 0x0114U,
+                    "Olympus_RawDevelopment2_0x0114");
+    expect_tag_name("mk_olympus0", 0x0225U, "Olympus_0x0225");
     expect_tag_name("mk_panasonic0", 0x0022U, "Panasonic_0x0022");
     expect_tag_name("mk_panasonic0", 0x0058U, "ThumbnailWidth");
     expect_tag_name("mk_pentax0", 0x0062U, "RawDevelopmentProcess");
+    expect_tag_name("mk_pentax0", 0x003EU, "PreviewImageBorders");
+    expect_tag_name("mk_pentax_type2_0", 0x0005U, "Pentax_Type2_0x0005");
+    expect_tag_name("mk_pentax_faceinfo_0", 0x0001U, "Pentax_0x0001");
     expect_tag_name("mk_ricoh0", 0x1002U, "DriveMode");
+    expect_tag_name("mk_ricoh_subdir_0", 0x0007U, "Ricoh_Subdir_0x0007");
+    expect_tag_name("mk_ricoh_imageinfo_0", 0x0003U,
+                    "Ricoh_ImageInfo_0x0003");
+    expect_tag_name("mk_ricoh_thetasubdir_0", 0x0003U, "Accelerometer");
+    expect_tag_name("mk_ricoh_thetasubdir_0", 0x1001U,
+                    "Ricoh_ThetaSubdir_0x1001");
+    expect_tag_name("mk_ricoh_type2_0", 0x0104U, "Ricoh_Type2_0x0104");
     expect_tag_name("mk_samsung_ifd_0", 0x0002U, "Samsung_IFD_0x0002");
     expect_tag_name("mk_samsung_type2_0", 0xA002U, "SerialNumber");
     expect_tag_name("unknown_ifd", 0x010FU, (const char*)0);

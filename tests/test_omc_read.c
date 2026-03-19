@@ -2578,6 +2578,8 @@ make_test_bmff_all(omc_u8* out, omc_u32 major_brand)
 static omc_size
 make_test_bmff_fields_only(omc_u8* out, omc_u32 major_brand)
 {
+    static const omc_u8 auxc_alpha_subtype[1] = { 0x11U };
+    static const omc_u8 auxc_depth_subtype[2] = { 0xAAU, 0xBBU };
     omc_u8 infe_exif[64];
     omc_u8 infe_xmp[96];
     omc_u8 infe_jumb[96];
@@ -2680,12 +2682,16 @@ make_test_bmff_fields_only(omc_u8* out, omc_u32 major_brand)
     append_text(auxc_alpha_payload, &auxc_alpha_size,
                 "urn:mpeg:hevc:2015:auxid:1");
     append_u8(auxc_alpha_payload, &auxc_alpha_size, 0U);
+    append_bytes(auxc_alpha_payload, &auxc_alpha_size, auxc_alpha_subtype,
+                 sizeof(auxc_alpha_subtype));
 
     auxc_depth_size = 0U;
     append_fullbox_header(auxc_depth_payload, &auxc_depth_size, 0U);
     append_text(auxc_depth_payload, &auxc_depth_size,
                 "urn:mpeg:hevc:2015:auxid:2");
     append_u8(auxc_depth_payload, &auxc_depth_size, 0U);
+    append_bytes(auxc_depth_payload, &auxc_depth_size, auxc_depth_subtype,
+                 sizeof(auxc_depth_subtype));
 
     ipco_size = 0U;
     append_bmff_box(ipco_payload, &ipco_size, fourcc('i', 's', 'p', 'e'),
@@ -2767,6 +2773,259 @@ make_test_bmff_fields_only(omc_u8* out, omc_u32 major_brand)
 
     size = 0U;
     append_bytes(out, &size, moov_box, moov_size);
+    append_bmff_box(out, &size, fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload, ftyp_size);
+    append_bmff_box(out, &size, fourcc('m', 'e', 't', 'a'),
+                    meta_payload, meta_size);
+    return size;
+}
+
+static omc_size
+make_test_bmff_aux_subtype_kinds_only(omc_u8* out, omc_u32 major_brand)
+{
+    static const omc_u8 auxc_text_subtype[] = {
+        'p', 'r', 'o', 'f', 'i', 'l', 'e', 0x00U
+    };
+    static const omc_u8 auxc_u64_subtype[8] = {
+        0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U, 0x88U
+    };
+    static const omc_u8 auxc_uuid_subtype[16] = {
+        0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U,
+        0x08U, 0x09U, 0x0AU, 0x0BU, 0x0CU, 0x0DU, 0x0EU, 0x0FU
+    };
+    omc_u8 infe_primary[96];
+    omc_u8 infe_aux1[96];
+    omc_u8 infe_aux2[96];
+    omc_u8 infe_aux3[96];
+    omc_u8 iinf_payload[512];
+    omc_u8 pitm_payload[16];
+    omc_u8 auxc_text_payload[96];
+    omc_u8 auxc_u64_payload[96];
+    omc_u8 auxc_uuid_payload[112];
+    omc_u8 ipco_payload[352];
+    omc_u8 ipma_payload[64];
+    omc_u8 iprp_payload[448];
+    omc_u8 auxl_payload[16];
+    omc_u8 iref_payload[64];
+    omc_u8 meta_payload[1024];
+    omc_u8 moov_box[16];
+    omc_u8 ftyp_payload[16];
+    omc_size infe_primary_size;
+    omc_size infe_aux1_size;
+    omc_size infe_aux2_size;
+    omc_size infe_aux3_size;
+    omc_size iinf_size;
+    omc_size pitm_size;
+    omc_size auxc_text_size;
+    omc_size auxc_u64_size;
+    omc_size auxc_uuid_size;
+    omc_size ipco_size;
+    omc_size ipma_size;
+    omc_size iprp_size;
+    omc_size auxl_size;
+    omc_size iref_size;
+    omc_size meta_size;
+    omc_size moov_size;
+    omc_size ftyp_size;
+    omc_size size;
+
+    infe_primary_size = 0U;
+    append_fullbox_header(infe_primary, &infe_primary_size, 2U);
+    append_u16be(infe_primary, &infe_primary_size, 1U);
+    append_u16be(infe_primary, &infe_primary_size, 0U);
+    append_u32be(infe_primary, &infe_primary_size, fourcc('m', 'i', 'm', 'e'));
+    append_text(infe_primary, &infe_primary_size, "Primary");
+    append_u8(infe_primary, &infe_primary_size, 0U);
+    append_text(infe_primary, &infe_primary_size, "application/octet-stream");
+    append_u8(infe_primary, &infe_primary_size, 0U);
+    append_u8(infe_primary, &infe_primary_size, 0U);
+
+    infe_aux1_size = 0U;
+    append_fullbox_header(infe_aux1, &infe_aux1_size, 2U);
+    append_u16be(infe_aux1, &infe_aux1_size, 2U);
+    append_u16be(infe_aux1, &infe_aux1_size, 0U);
+    append_u32be(infe_aux1, &infe_aux1_size, fourcc('m', 'i', 'm', 'e'));
+    append_text(infe_aux1, &infe_aux1_size, "AuxText");
+    append_u8(infe_aux1, &infe_aux1_size, 0U);
+    append_text(infe_aux1, &infe_aux1_size, "application/octet-stream");
+    append_u8(infe_aux1, &infe_aux1_size, 0U);
+    append_u8(infe_aux1, &infe_aux1_size, 0U);
+
+    infe_aux2_size = 0U;
+    append_fullbox_header(infe_aux2, &infe_aux2_size, 2U);
+    append_u16be(infe_aux2, &infe_aux2_size, 3U);
+    append_u16be(infe_aux2, &infe_aux2_size, 0U);
+    append_u32be(infe_aux2, &infe_aux2_size, fourcc('m', 'i', 'm', 'e'));
+    append_text(infe_aux2, &infe_aux2_size, "AuxU64");
+    append_u8(infe_aux2, &infe_aux2_size, 0U);
+    append_text(infe_aux2, &infe_aux2_size, "application/octet-stream");
+    append_u8(infe_aux2, &infe_aux2_size, 0U);
+    append_u8(infe_aux2, &infe_aux2_size, 0U);
+
+    infe_aux3_size = 0U;
+    append_fullbox_header(infe_aux3, &infe_aux3_size, 2U);
+    append_u16be(infe_aux3, &infe_aux3_size, 4U);
+    append_u16be(infe_aux3, &infe_aux3_size, 0U);
+    append_u32be(infe_aux3, &infe_aux3_size, fourcc('m', 'i', 'm', 'e'));
+    append_text(infe_aux3, &infe_aux3_size, "AuxUuid");
+    append_u8(infe_aux3, &infe_aux3_size, 0U);
+    append_text(infe_aux3, &infe_aux3_size, "application/octet-stream");
+    append_u8(infe_aux3, &infe_aux3_size, 0U);
+    append_u8(infe_aux3, &infe_aux3_size, 0U);
+
+    iinf_size = 0U;
+    append_fullbox_header(iinf_payload, &iinf_size, 0U);
+    append_u16be(iinf_payload, &iinf_size, 4U);
+    append_bmff_box(iinf_payload, &iinf_size, fourcc('i', 'n', 'f', 'e'),
+                    infe_primary, infe_primary_size);
+    append_bmff_box(iinf_payload, &iinf_size, fourcc('i', 'n', 'f', 'e'),
+                    infe_aux1, infe_aux1_size);
+    append_bmff_box(iinf_payload, &iinf_size, fourcc('i', 'n', 'f', 'e'),
+                    infe_aux2, infe_aux2_size);
+    append_bmff_box(iinf_payload, &iinf_size, fourcc('i', 'n', 'f', 'e'),
+                    infe_aux3, infe_aux3_size);
+
+    pitm_size = 0U;
+    append_fullbox_header(pitm_payload, &pitm_size, 0U);
+    append_u16be(pitm_payload, &pitm_size, 1U);
+
+    auxc_text_size = 0U;
+    append_fullbox_header(auxc_text_payload, &auxc_text_size, 0U);
+    append_text(auxc_text_payload, &auxc_text_size,
+                "urn:mpeg:hevc:2015:auxid:2");
+    append_u8(auxc_text_payload, &auxc_text_size, 0U);
+    append_bytes(auxc_text_payload, &auxc_text_size, auxc_text_subtype,
+                 sizeof(auxc_text_subtype));
+
+    auxc_u64_size = 0U;
+    append_fullbox_header(auxc_u64_payload, &auxc_u64_size, 0U);
+    append_text(auxc_u64_payload, &auxc_u64_size,
+                "urn:mpeg:hevc:2015:auxid:1");
+    append_u8(auxc_u64_payload, &auxc_u64_size, 0U);
+    append_bytes(auxc_u64_payload, &auxc_u64_size, auxc_u64_subtype,
+                 sizeof(auxc_u64_subtype));
+
+    auxc_uuid_size = 0U;
+    append_fullbox_header(auxc_uuid_payload, &auxc_uuid_size, 0U);
+    append_text(auxc_uuid_payload, &auxc_uuid_size,
+                "urn:com:apple:photo:2020:aux:matte");
+    append_u8(auxc_uuid_payload, &auxc_uuid_size, 0U);
+    append_bytes(auxc_uuid_payload, &auxc_uuid_size, auxc_uuid_subtype,
+                 sizeof(auxc_uuid_subtype));
+
+    ipco_size = 0U;
+    append_bmff_box(ipco_payload, &ipco_size, fourcc('a', 'u', 'x', 'C'),
+                    auxc_text_payload, auxc_text_size);
+    append_bmff_box(ipco_payload, &ipco_size, fourcc('a', 'u', 'x', 'C'),
+                    auxc_u64_payload, auxc_u64_size);
+    append_bmff_box(ipco_payload, &ipco_size, fourcc('a', 'u', 'x', 'C'),
+                    auxc_uuid_payload, auxc_uuid_size);
+
+    ipma_size = 0U;
+    append_fullbox_header(ipma_payload, &ipma_size, 0U);
+    append_u32be(ipma_payload, &ipma_size, 4U);
+    append_u16be(ipma_payload, &ipma_size, 1U);
+    append_u8(ipma_payload, &ipma_size, 0U);
+    append_u16be(ipma_payload, &ipma_size, 2U);
+    append_u8(ipma_payload, &ipma_size, 1U);
+    append_u8(ipma_payload, &ipma_size, 1U);
+    append_u16be(ipma_payload, &ipma_size, 3U);
+    append_u8(ipma_payload, &ipma_size, 1U);
+    append_u8(ipma_payload, &ipma_size, 2U);
+    append_u16be(ipma_payload, &ipma_size, 4U);
+    append_u8(ipma_payload, &ipma_size, 1U);
+    append_u8(ipma_payload, &ipma_size, 3U);
+
+    iprp_size = 0U;
+    append_bmff_box(iprp_payload, &iprp_size, fourcc('i', 'p', 'c', 'o'),
+                    ipco_payload, ipco_size);
+    append_bmff_box(iprp_payload, &iprp_size, fourcc('i', 'p', 'm', 'a'),
+                    ipma_payload, ipma_size);
+
+    auxl_size = 0U;
+    append_u16be(auxl_payload, &auxl_size, 1U);
+    append_u16be(auxl_payload, &auxl_size, 3U);
+    append_u16be(auxl_payload, &auxl_size, 2U);
+    append_u16be(auxl_payload, &auxl_size, 3U);
+    append_u16be(auxl_payload, &auxl_size, 4U);
+
+    iref_size = 0U;
+    append_fullbox_header(iref_payload, &iref_size, 0U);
+    append_bmff_box(iref_payload, &iref_size, fourcc('a', 'u', 'x', 'l'),
+                    auxl_payload, auxl_size);
+
+    meta_size = 0U;
+    append_fullbox_header(meta_payload, &meta_size, 0U);
+    append_bmff_box(meta_payload, &meta_size, fourcc('i', 'i', 'n', 'f'),
+                    iinf_payload, iinf_size);
+    append_bmff_box(meta_payload, &meta_size, fourcc('p', 'i', 't', 'm'),
+                    pitm_payload, pitm_size);
+    append_bmff_box(meta_payload, &meta_size, fourcc('i', 'r', 'e', 'f'),
+                    iref_payload, iref_size);
+    append_bmff_box(meta_payload, &meta_size, fourcc('i', 'p', 'r', 'p'),
+                    iprp_payload, iprp_size);
+
+    moov_size = 0U;
+    append_bmff_box(moov_box, &moov_size, fourcc('m', 'o', 'o', 'v'),
+                    (const omc_u8*)0, 0U);
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload, &ftyp_size, major_brand);
+    append_u32be(ftyp_payload, &ftyp_size, 0U);
+    append_u32be(ftyp_payload, &ftyp_size, fourcc('m', 'i', 'f', '1'));
+
+    size = 0U;
+    append_bytes(out, &size, moov_box, moov_size);
+    append_bmff_box(out, &size, fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload, ftyp_size);
+    append_bmff_box(out, &size, fourcc('m', 'e', 't', 'a'),
+                    meta_payload, meta_size);
+    return size;
+}
+
+static omc_size
+make_test_bmff_pred_only(omc_u8* out, omc_u32 major_brand)
+{
+    omc_u8 pitm_payload[16];
+    omc_u8 pred_payload[16];
+    omc_u8 iref_payload[64];
+    omc_u8 meta_payload[128];
+    omc_u8 ftyp_payload[16];
+    omc_size pitm_size;
+    omc_size pred_size;
+    omc_size iref_size;
+    omc_size meta_size;
+    omc_size ftyp_size;
+    omc_size size;
+
+    pitm_size = 0U;
+    append_fullbox_header(pitm_payload, &pitm_size, 0U);
+    append_u16be(pitm_payload, &pitm_size, 1U);
+
+    pred_size = 0U;
+    append_u16be(pred_payload, &pred_size, 9U);
+    append_u16be(pred_payload, &pred_size, 2U);
+    append_u16be(pred_payload, &pred_size, 10U);
+    append_u16be(pred_payload, &pred_size, 11U);
+
+    iref_size = 0U;
+    append_fullbox_header(iref_payload, &iref_size, 0U);
+    append_bmff_box(iref_payload, &iref_size, fourcc('p', 'r', 'e', 'd'),
+                    pred_payload, pred_size);
+
+    meta_size = 0U;
+    append_fullbox_header(meta_payload, &meta_size, 0U);
+    append_bmff_box(meta_payload, &meta_size, fourcc('p', 'i', 't', 'm'),
+                    pitm_payload, pitm_size);
+    append_bmff_box(meta_payload, &meta_size, fourcc('i', 'r', 'e', 'f'),
+                    iref_payload, iref_size);
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload, &ftyp_size, major_brand);
+    append_u32be(ftyp_payload, &ftyp_size, 0U);
+    append_u32be(ftyp_payload, &ftyp_size, fourcc('m', 'i', 'f', '1'));
+
+    size = 0U;
     append_bmff_box(out, &size, fourcc('f', 't', 'y', 'p'),
                     ftyp_payload, ftyp_size);
     append_bmff_box(out, &size, fourcc('m', 'e', 't', 'a'),
@@ -3801,6 +4060,33 @@ count_bmff_field(const omc_store* store, const char* field)
         field_view = omc_arena_view(&store->arena, entry->key.u.bmff_field.field);
         if (field_view.size == strlen(field)
             && memcmp(field_view.data, field, field_view.size) == 0) {
+            count += 1U;
+        }
+    }
+    return count;
+}
+
+static omc_size
+count_bmff_field_scalar_value(const omc_store* store, const char* field,
+                              omc_u64 value)
+{
+    omc_size i;
+    omc_size count;
+
+    count = 0U;
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes field_view;
+
+        entry = &store->entries[i];
+        if (entry->key.kind != OMC_KEY_BMFF_FIELD
+            || entry->value.kind != OMC_VAL_SCALAR) {
+            continue;
+        }
+        field_view = omc_arena_view(&store->arena, entry->key.u.bmff_field.field);
+        if (field_view.size == strlen(field)
+            && memcmp(field_view.data, field, field_view.size) == 0
+            && entry->value.u.u64 == value) {
             count += 1U;
         }
     }
@@ -6248,14 +6534,31 @@ test_read_bmff_fields(void)
     const omc_entry* primary_rotation;
     const omc_entry* primary_mirror;
     const omc_entry* iref_edge_count;
+    const omc_entry* iref_item_count;
+    const omc_entry* iref_from_unique_count;
+    const omc_entry* iref_to_unique_count;
     const omc_entry* auxl_edge_count;
     const omc_entry* dimg_edge_count;
     const omc_entry* thmb_edge_count;
+    const omc_entry* auxl_item_count;
+    const omc_entry* auxl_graph_edge_count;
+    const omc_entry* auxl_graph_from_unique_count;
+    const omc_entry* auxl_graph_to_unique_count;
+    const omc_entry* dimg_graph_edge_count;
+    const omc_entry* thmb_graph_edge_count;
     const omc_entry* primary_auxl_item_id;
+    const omc_entry* primary_auxl_count;
     const omc_entry* primary_dimg_item_id;
     const omc_entry* primary_thmb_item_id;
     const omc_entry* primary_alpha_item_id;
+    const omc_entry* primary_alpha_count;
     const omc_entry* primary_depth_item_id;
+    const omc_entry* primary_depth_count;
+    const omc_entry* aux_item_count;
+    const omc_entry* aux_alpha_count;
+    const omc_entry* aux_depth_count;
+    const omc_entry* compat_brands;
+    omc_u32 compat_brand_value;
     omc_const_bytes value_view;
 
     file_size = make_test_bmff_fields_only(file_bytes,
@@ -6270,6 +6573,15 @@ test_read_bmff_fields(void)
     assert(res.bmff.status == OMC_BMFF_OK);
     assert(store.block_count == 1U);
     assert(count_bmff_field(&store, "item.id") == 3U);
+    compat_brands = find_bmff_field(&store, "ftyp.compat_brands");
+    assert(compat_brands != (const omc_entry*)0);
+    assert(compat_brands->value.kind == OMC_VAL_ARRAY);
+    assert(compat_brands->value.elem_type == OMC_ELEM_U32);
+    assert(compat_brands->value.count == 1U);
+    value_view = omc_arena_view(&store.arena, compat_brands->value.u.ref);
+    assert(value_view.size == sizeof(omc_u32));
+    memcpy(&compat_brand_value, value_view.data, sizeof(compat_brand_value));
+    assert(compat_brand_value == fourcc('m', 'i', 'f', '1'));
 
     item_info_count = find_bmff_field(&store, "item.info_count");
     assert(item_info_count != (const omc_entry*)0);
@@ -6310,31 +6622,75 @@ test_read_bmff_fields(void)
     assert(iref_edge_count != (const omc_entry*)0);
     assert(iref_edge_count->value.u.u64 == 4U);
     assert(count_bmff_field(&store, "iref.ref_type") == 4U);
+    assert(count_bmff_field(&store, "iref.ref_type_name") == 4U);
+    assert(find_bmff_field_text(&store, "iref.ref_type_name", "auxl")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.ref_type_name", "dimg")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.ref_type_name", "thmb")
+           != (const omc_entry*)0);
     assert(count_bmff_field(&store, "iref.from_item_id") == 4U);
     assert(count_bmff_field(&store, "iref.to_item_id") == 4U);
+    iref_item_count = find_bmff_field(&store, "iref.item_count");
+    assert(iref_item_count != (const omc_entry*)0);
+    assert(iref_item_count->value.u.u64 == 3U);
+    iref_from_unique_count = find_bmff_field(&store,
+                                             "iref.from_item_unique_count");
+    assert(iref_from_unique_count != (const omc_entry*)0);
+    assert(iref_from_unique_count->value.u.u64 == 1U);
+    iref_to_unique_count = find_bmff_field(&store,
+                                           "iref.to_item_unique_count");
+    assert(iref_to_unique_count != (const omc_entry*)0);
+    assert(iref_to_unique_count->value.u.u64 == 2U);
+    assert(count_bmff_field(&store, "iref.item_id") == 3U);
+    assert(count_bmff_field(&store, "iref.item_out_edge_count") == 3U);
+    assert(count_bmff_field(&store, "iref.item_in_edge_count") == 3U);
 
     auxl_edge_count = find_bmff_field(&store, "iref.auxl.edge_count");
     assert(auxl_edge_count != (const omc_entry*)0);
     assert(auxl_edge_count->value.u.u64 == 2U);
     assert(count_bmff_field(&store, "iref.auxl.from_item_id") == 2U);
     assert(count_bmff_field(&store, "iref.auxl.to_item_id") == 2U);
+    auxl_item_count = find_bmff_field(&store, "iref.auxl.item_count");
+    assert(auxl_item_count != (const omc_entry*)0);
+    assert(auxl_item_count->value.u.u64 == 3U);
+    auxl_graph_edge_count = find_bmff_field(&store, "iref.graph.auxl.edge_count");
+    assert(auxl_graph_edge_count != (const omc_entry*)0);
+    assert(auxl_graph_edge_count->value.u.u64 == 2U);
+    auxl_graph_from_unique_count = find_bmff_field(
+        &store, "iref.graph.auxl.from_item_unique_count");
+    assert(auxl_graph_from_unique_count != (const omc_entry*)0);
+    assert(auxl_graph_from_unique_count->value.u.u64 == 1U);
+    auxl_graph_to_unique_count = find_bmff_field(
+        &store, "iref.graph.auxl.to_item_unique_count");
+    assert(auxl_graph_to_unique_count != (const omc_entry*)0);
+    assert(auxl_graph_to_unique_count->value.u.u64 == 2U);
 
     dimg_edge_count = find_bmff_field(&store, "iref.dimg.edge_count");
     assert(dimg_edge_count != (const omc_entry*)0);
     assert(dimg_edge_count->value.u.u64 == 1U);
     assert(count_bmff_field(&store, "iref.dimg.from_item_id") == 1U);
     assert(count_bmff_field(&store, "iref.dimg.to_item_id") == 1U);
+    dimg_graph_edge_count = find_bmff_field(&store, "iref.graph.dimg.edge_count");
+    assert(dimg_graph_edge_count != (const omc_entry*)0);
+    assert(dimg_graph_edge_count->value.u.u64 == 1U);
 
     thmb_edge_count = find_bmff_field(&store, "iref.thmb.edge_count");
     assert(thmb_edge_count != (const omc_entry*)0);
     assert(thmb_edge_count->value.u.u64 == 1U);
     assert(count_bmff_field(&store, "iref.thmb.from_item_id") == 1U);
     assert(count_bmff_field(&store, "iref.thmb.to_item_id") == 1U);
+    thmb_graph_edge_count = find_bmff_field(&store, "iref.graph.thmb.edge_count");
+    assert(thmb_graph_edge_count != (const omc_entry*)0);
+    assert(thmb_graph_edge_count->value.u.u64 == 1U);
 
     primary_auxl_item_id = find_bmff_field(&store, "primary.auxl_item_id");
     assert(primary_auxl_item_id != (const omc_entry*)0);
     assert(primary_auxl_item_id->value.u.u64 == 1U);
     assert(count_bmff_field(&store, "primary.auxl_item_id") == 2U);
+    primary_auxl_count = find_bmff_field(&store, "primary.auxl_count");
+    assert(primary_auxl_count != (const omc_entry*)0);
+    assert(primary_auxl_count->value.u.u64 == 2U);
     assert(find_bmff_field_text(&store, "primary.auxl_semantic", "alpha")
            != (const omc_entry*)0);
     assert(find_bmff_field_text(&store, "primary.auxl_semantic", "depth")
@@ -6351,12 +6707,49 @@ test_read_bmff_fields(void)
     primary_alpha_item_id = find_bmff_field(&store, "primary.alpha_item_id");
     assert(primary_alpha_item_id != (const omc_entry*)0);
     assert(primary_alpha_item_id->value.u.u64 == 1U);
+    primary_alpha_count = find_bmff_field(&store, "primary.alpha_count");
+    assert(primary_alpha_count != (const omc_entry*)0);
+    assert(primary_alpha_count->value.u.u64 == 1U);
 
     primary_depth_item_id = find_bmff_field(&store, "primary.depth_item_id");
     assert(primary_depth_item_id != (const omc_entry*)0);
     assert(primary_depth_item_id->value.u.u64 == 3U);
+    primary_depth_count = find_bmff_field(&store, "primary.depth_count");
+    assert(primary_depth_count != (const omc_entry*)0);
+    assert(primary_depth_count->value.u.u64 == 1U);
+    assert(count_bmff_field_scalar_value(&store,
+                                         "primary.linked_item_role_count",
+                                         4U) == 1U);
+    assert(count_bmff_field(&store, "primary.linked_item_id") == 4U);
+    assert(count_bmff_field_scalar_value(&store, "primary.linked_item_type",
+                                         fourcc('E', 'x', 'i', 'f')) == 2U);
+    assert(count_bmff_field_scalar_value(&store, "primary.linked_item_type",
+                                         fourcc('m', 'i', 'm', 'e')) == 2U);
+    assert(find_bmff_field_text(&store, "primary.linked_item_name", "Exif")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "primary.linked_item_name", "C2PA")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "primary.linked_item_role", "alpha")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "primary.linked_item_role", "depth")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "primary.linked_item_role",
+                                "derived")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "primary.linked_item_role",
+                                "thumbnail")
+           != (const omc_entry*)0);
 
     assert(count_bmff_field(&store, "aux.item_id") == 2U);
+    aux_item_count = find_bmff_field(&store, "aux.item_count");
+    assert(aux_item_count != (const omc_entry*)0);
+    assert(aux_item_count->value.u.u64 == 2U);
+    aux_alpha_count = find_bmff_field(&store, "aux.alpha_count");
+    assert(aux_alpha_count != (const omc_entry*)0);
+    assert(aux_alpha_count->value.u.u64 == 1U);
+    aux_depth_count = find_bmff_field(&store, "aux.depth_count");
+    assert(aux_depth_count != (const omc_entry*)0);
+    assert(aux_depth_count->value.u.u64 == 1U);
     assert(find_bmff_field_text(&store, "aux.semantic", "alpha")
            != (const omc_entry*)0);
     assert(find_bmff_field_text(&store, "aux.semantic", "depth")
@@ -6367,6 +6760,158 @@ test_read_bmff_fields(void)
     assert(find_bmff_field_text(&store, "aux.type",
                                 "urn:mpeg:hevc:2015:auxid:2")
            != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "aux.subtype_hex", "0x11")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "aux.subtype_hex", "0xAABB")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "aux.subtype_kind", "u8")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "aux.subtype_kind", "u16be")
+           != (const omc_entry*)0);
+    assert(count_bmff_field_scalar_value(&store, "aux.subtype_len", 1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "aux.subtype_len", 2U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "aux.subtype_u32", 17U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "aux.subtype_u32",
+                                         0xAABBU) == 1U);
+    assert(find_bmff_field_text(&store, "iref.auxl.semantic", "alpha")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.semantic", "depth")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.type",
+                                "urn:mpeg:hevc:2015:auxid:1")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.type",
+                                "urn:mpeg:hevc:2015:auxid:2")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.subtype_hex", "0x11")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.subtype_hex", "0xAABB")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.subtype_kind", "u8")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.subtype_kind", "u16be")
+           != (const omc_entry*)0);
+    assert(count_bmff_field_scalar_value(&store, "iref.auxl.subtype_u32",
+                                         17U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.auxl.subtype_u32",
+                                         0xAABBU) == 1U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_bmff_aux_subtype_kinds(void)
+{
+    omc_u8 file_bytes[2048];
+    omc_size file_size;
+    omc_store store;
+    omc_blk_ref blocks[4];
+    omc_exif_ifd_ref ifds[4];
+    omc_u8 payload[64];
+    omc_u32 payload_parts[8];
+    omc_read_res res;
+
+    file_size = make_test_bmff_aux_subtype_kinds_only(
+        file_bytes, fourcc('h', 'e', 'i', 'c'));
+    omc_store_init(&store);
+
+    res = omc_read_simple(file_bytes, file_size, &store, blocks, 4U, ifds, 4U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.bmff.status == OMC_BMFF_OK);
+    assert(count_bmff_field(&store, "aux.item_id") == 3U);
+    assert(count_bmff_field_scalar_value(&store, "aux.item_count", 3U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "aux.depth_count", 1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "aux.alpha_count", 1U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "aux.matte_count", 1U) == 1U);
+    assert(find_bmff_field_text(&store, "aux.subtype_kind", "ascii_z")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "aux.subtype_kind", "u64be")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "aux.subtype_kind", "uuid")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "aux.subtype_text", "profile")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "aux.subtype_text",
+                                "00010203-0405-0607-0809-0A0B0C0D0E0F")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "aux.subtype_uuid",
+                                "00010203-0405-0607-0809-0A0B0C0D0E0F")
+           != (const omc_entry*)0);
+    assert(count_bmff_field_scalar_value(
+               &store, "aux.subtype_u64",
+               (((omc_u64)0x11223344U) << 32) | (omc_u64)0x55667788U)
+           == 1U);
+    assert(find_bmff_field_text(&store, "iref.auxl.semantic", "depth")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.semantic", "alpha")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.semantic", "matte")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.subtype_kind", "ascii_z")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.subtype_kind", "u64be")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.subtype_kind", "uuid")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.subtype_text", "profile")
+           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "iref.auxl.subtype_uuid",
+                                "00010203-0405-0607-0809-0A0B0C0D0E0F")
+           != (const omc_entry*)0);
+    assert(count_bmff_field_scalar_value(
+               &store, "iref.auxl.subtype_u64",
+               (((omc_u64)0x11223344U) << 32) | (omc_u64)0x55667788U)
+           == 1U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_bmff_pred_edges(void)
+{
+    omc_u8 file_bytes[512];
+    omc_size file_size;
+    omc_store store;
+    omc_blk_ref blocks[4];
+    omc_exif_ifd_ref ifds[4];
+    omc_u8 payload[64];
+    omc_u32 payload_parts[8];
+    omc_read_res res;
+
+    file_size = make_test_bmff_pred_only(file_bytes,
+                                         fourcc('h', 'e', 'i', 'c'));
+    omc_store_init(&store);
+
+    res = omc_read_simple(file_bytes, file_size, &store, blocks, 4U, ifds, 4U,
+                          payload, sizeof(payload), payload_parts, 8U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.bmff.status == OMC_BMFF_OK);
+    assert(count_bmff_field(&store, "iref.ref_type_name") == 2U);
+    assert(find_bmff_field_text(&store, "iref.ref_type_name", "pred")
+           != (const omc_entry*)0);
+    assert(count_bmff_field_scalar_value(&store, "iref.pred.edge_count", 2U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.graph.pred.edge_count",
+                                         2U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.pred.item_count", 3U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.pred.item_id", 9U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.pred.item_id", 10U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.pred.item_id", 11U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.pred.from_item_id", 9U)
+           == 2U);
+    assert(count_bmff_field_scalar_value(&store, "iref.pred.to_item_id", 10U)
+           == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.pred.to_item_id", 11U)
+           == 1U);
 
     omc_store_fini(&store);
 }
@@ -6766,6 +7311,8 @@ main(void)
     test_read_crw_semantic_native_scalars();
     test_read_crw_native_tables();
     test_read_bmff_fields();
+    test_read_bmff_aux_subtype_kinds();
+    test_read_bmff_pred_edges();
     test_read_bmff_heif_all();
     test_read_bmff_avif_all();
     test_read_cr3_exif();

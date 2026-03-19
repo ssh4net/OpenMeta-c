@@ -54,6 +54,8 @@ typedef struct omc_bmff_auxc_prop {
     omc_bmff_aux_semantic semantic;
     char aux_type[96];
     omc_u16 aux_type_len;
+    omc_u8 aux_subtype[48];
+    omc_u16 aux_subtype_len;
 } omc_bmff_auxc_prop;
 
 typedef struct omc_bmff_aux_item_info {
@@ -61,6 +63,8 @@ typedef struct omc_bmff_aux_item_info {
     omc_bmff_aux_semantic semantic;
     char aux_type[96];
     omc_u16 aux_type_len;
+    omc_u8 aux_subtype[48];
+    omc_u16 aux_subtype_len;
 } omc_bmff_aux_item_info;
 
 typedef struct omc_bmff_iref_edge {
@@ -111,6 +115,8 @@ typedef struct omc_bmff_primary_props {
 typedef struct omc_bmff_brand_info {
     omc_u32 major_brand;
     omc_u32 minor_version;
+    omc_u32 compat_brands[32];
+    omc_u32 compat_count;
     int is_heif;
     int is_avif;
     int is_cr3;
@@ -393,6 +399,10 @@ omc_bmff_parse_ftyp(omc_bmff_ctx* ctx, const omc_bmff_box* ftyp,
             return 0;
         }
         omc_bmff_note_brand(brand, out_info);
+        if (out_info->compat_count < 32U) {
+            out_info->compat_brands[out_info->compat_count] = brand;
+        }
+        out_info->compat_count += 1U;
         p += 4U;
     }
     return 1;
@@ -496,6 +506,69 @@ omc_bmff_emit_u32_field(omc_bmff_ctx* ctx, const char* field, omc_u32 value)
 }
 
 static int
+omc_bmff_emit_u16_field(omc_bmff_ctx* ctx, const char* field, omc_u16 value)
+{
+    omc_val val;
+
+    omc_val_make_u16(&val, value);
+    return omc_bmff_emit_entry(ctx, field, &val);
+}
+
+static int
+omc_bmff_emit_u64_field(omc_bmff_ctx* ctx, const char* field, omc_u64 value)
+{
+    omc_val val;
+
+    omc_val_make_u64(&val, value);
+    return omc_bmff_emit_entry(ctx, field, &val);
+}
+
+static int
+omc_bmff_emit_u32_array_field(omc_bmff_ctx* ctx, const char* field,
+                              const omc_u32* values, omc_u32 count)
+{
+    omc_val val;
+    omc_byte_ref ref;
+    omc_status st;
+    omc_size bytes_size;
+
+    if (ctx == (omc_bmff_ctx*)0 || field == (const char*)0
+        || values == (const omc_u32*)0 || count == 0U) {
+        return 0;
+    }
+    if (count > ((omc_u32)(~(omc_size)0) / (omc_u32)sizeof(omc_u32))) {
+        ctx->res.status = OMC_BMFF_LIMIT;
+        return 0;
+    }
+    if (ctx->res.entries_decoded >= ctx->opts.limits.max_entries) {
+        ctx->res.status = OMC_BMFF_LIMIT;
+        return 0;
+    }
+    if (ctx->store == (omc_store*)0) {
+        ctx->res.entries_decoded += 1U;
+        ctx->order_in_block += 1U;
+        return 1;
+    }
+    if (!omc_bmff_prepare_block(ctx)) {
+        return 0;
+    }
+
+    bytes_size = (omc_size)count * sizeof(omc_u32);
+    st = omc_arena_append(&ctx->store->arena, values, bytes_size, &ref);
+    if (st != OMC_STATUS_OK) {
+        ctx->res.status = OMC_BMFF_NOMEM;
+        return 0;
+    }
+
+    omc_val_init(&val);
+    val.kind = OMC_VAL_ARRAY;
+    val.elem_type = OMC_ELEM_U32;
+    val.count = count;
+    val.u.ref = ref;
+    return omc_bmff_emit_entry(ctx, field, &val);
+}
+
+static int
 omc_bmff_emit_u8_field(omc_bmff_ctx* ctx, const char* field, omc_u8 value)
 {
     omc_val val;
@@ -582,6 +655,213 @@ omc_bmff_push_unique_item_id(omc_u32* ids, omc_u32* io_count, omc_u32 cap,
     }
 
     omc_bmff_push_primary_item_id(ids, io_count, cap, item_id);
+    return 1;
+}
+
+static void
+omc_bmff_sort_u32_values(omc_u32* values, omc_u32 count)
+{
+    omc_u32 i;
+
+    if (values == (omc_u32*)0 || count < 2U) {
+        return;
+    }
+
+    for (i = 1U; i < count; ++i) {
+        omc_u32 key;
+        omc_u32 j;
+
+        key = values[i];
+        j = i;
+        while (j > 0U && values[j - 1U] > key) {
+            values[j] = values[j - 1U];
+            j -= 1U;
+        }
+        values[j] = key;
+    }
+}
+
+static int
+omc_bmff_fourcc_token(omc_u32 type, char out[5])
+{
+    omc_u32 i;
+
+    if (out == (char*)0) {
+        return 0;
+    }
+
+    for (i = 0U; i < 4U; ++i) {
+        char c;
+
+        c = (char)((type >> ((3U - i) * 8U)) & 0xFFU);
+        if (c >= 'A' && c <= 'Z') {
+            c = (char)(c - 'A' + 'a');
+        } else if (c == ' ') {
+            c = '_';
+        } else if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                     || c == '_')) {
+            return 0;
+        }
+        out[i] = c;
+    }
+    out[4] = '\0';
+    return 1;
+}
+
+static int
+omc_bmff_make_field2(char* out, omc_size cap,
+                     const char* prefix, const char* suffix)
+{
+    omc_size prefix_len;
+    omc_size suffix_len;
+
+    if (out == (char*)0 || cap == 0U || prefix == (const char*)0
+        || suffix == (const char*)0) {
+        return 0;
+    }
+
+    prefix_len = strlen(prefix);
+    suffix_len = strlen(suffix);
+    if (prefix_len + 1U + suffix_len >= cap) {
+        return 0;
+    }
+
+    memcpy(out, prefix, prefix_len);
+    out[prefix_len] = '.';
+    memcpy(out + prefix_len + 1U, suffix, suffix_len);
+    out[prefix_len + 1U + suffix_len] = '\0';
+    return 1;
+}
+
+static int
+omc_bmff_count_item_edges(const omc_bmff_iref_edge* edges, omc_u32 edge_count,
+                          omc_u32 filter_type, int use_filter,
+                          omc_u32 item_id, omc_u32* out_in_count,
+                          omc_u32* out_out_count)
+{
+    omc_u32 i;
+    omc_u32 in_count;
+    omc_u32 out_count;
+
+    if (edges == (const omc_bmff_iref_edge*)0
+        || out_in_count == (omc_u32*)0 || out_out_count == (omc_u32*)0) {
+        return 0;
+    }
+
+    in_count = 0U;
+    out_count = 0U;
+    for (i = 0U; i < edge_count; ++i) {
+        if (use_filter && edges[i].ref_type != filter_type) {
+            continue;
+        }
+        if (edges[i].from_item_id == item_id) {
+            out_count += 1U;
+        }
+        if (edges[i].to_item_id == item_id) {
+            in_count += 1U;
+        }
+    }
+
+    *out_in_count = in_count;
+    *out_out_count = out_count;
+    return 1;
+}
+
+static int
+omc_bmff_emit_iref_item_summary(omc_bmff_ctx* ctx,
+                                const omc_bmff_iref_edge* edges,
+                                omc_u32 edge_count, omc_u32 filter_type,
+                                int use_filter, const char* prefix,
+                                const char* graph_prefix)
+{
+    omc_u32 item_ids[256];
+    omc_u32 from_ids[128];
+    omc_u32 to_ids[128];
+    omc_u32 item_count;
+    omc_u32 from_count;
+    omc_u32 to_count;
+    omc_u32 match_count;
+    omc_u32 i;
+    char field[64];
+
+    if (ctx == (omc_bmff_ctx*)0 || edges == (const omc_bmff_iref_edge*)0
+        || prefix == (const char*)0) {
+        return 0;
+    }
+
+    item_count = 0U;
+    from_count = 0U;
+    to_count = 0U;
+    match_count = 0U;
+    for (i = 0U; i < edge_count; ++i) {
+        if (use_filter && edges[i].ref_type != filter_type) {
+            continue;
+        }
+        match_count += 1U;
+        if (!omc_bmff_push_unique_item_id(item_ids, &item_count, 256U,
+                                          edges[i].from_item_id)
+            || !omc_bmff_push_unique_item_id(item_ids, &item_count, 256U,
+                                             edges[i].to_item_id)
+            || !omc_bmff_push_unique_item_id(from_ids, &from_count, 128U,
+                                             edges[i].from_item_id)
+            || !omc_bmff_push_unique_item_id(to_ids, &to_count, 128U,
+                                             edges[i].to_item_id)) {
+            return 0;
+        }
+    }
+
+    omc_bmff_sort_u32_values(item_ids, item_count);
+    omc_bmff_sort_u32_values(from_ids, from_count);
+    omc_bmff_sort_u32_values(to_ids, to_count);
+
+    if (!omc_bmff_make_field2(field, sizeof(field), prefix, "item_count")
+        || !omc_bmff_emit_u32_field(ctx, field, item_count)
+        || !omc_bmff_make_field2(field, sizeof(field), prefix,
+                                 "from_item_unique_count")
+        || !omc_bmff_emit_u32_field(ctx, field, from_count)
+        || !omc_bmff_make_field2(field, sizeof(field), prefix,
+                                 "to_item_unique_count")
+        || !omc_bmff_emit_u32_field(ctx, field, to_count)) {
+        return 0;
+    }
+
+    for (i = 0U; i < item_count; ++i) {
+        omc_u32 in_count;
+        omc_u32 out_count;
+
+        if (!omc_bmff_make_field2(field, sizeof(field), prefix, "item_id")
+            || !omc_bmff_emit_u32_field(ctx, field, item_ids[i])) {
+            return 0;
+        }
+        if (!omc_bmff_count_item_edges(edges, edge_count, filter_type,
+                                       use_filter, item_ids[i], &in_count,
+                                       &out_count)) {
+            return 0;
+        }
+        if (!omc_bmff_make_field2(field, sizeof(field), prefix,
+                                  "item_out_edge_count")
+            || !omc_bmff_emit_u32_field(ctx, field, out_count)
+            || !omc_bmff_make_field2(field, sizeof(field), prefix,
+                                     "item_in_edge_count")
+            || !omc_bmff_emit_u32_field(ctx, field, in_count)) {
+            return 0;
+        }
+    }
+
+    if (graph_prefix != (const char*)0) {
+        if (!omc_bmff_make_field2(field, sizeof(field), graph_prefix,
+                                  "edge_count")
+            || !omc_bmff_emit_u32_field(ctx, field, match_count)
+            || !omc_bmff_make_field2(field, sizeof(field), graph_prefix,
+                                     "from_item_unique_count")
+            || !omc_bmff_emit_u32_field(ctx, field, from_count)
+            || !omc_bmff_make_field2(field, sizeof(field), graph_prefix,
+                                     "to_item_unique_count")
+            || !omc_bmff_emit_u32_field(ctx, field, to_count)) {
+            return 0;
+        }
+    }
+
     return 1;
 }
 
@@ -717,6 +997,255 @@ omc_bmff_aux_semantic_name(omc_bmff_aux_semantic semantic)
     }
 }
 
+static const char*
+omc_bmff_primary_linked_role_for_aux(omc_bmff_aux_semantic semantic)
+{
+    switch (semantic) {
+    case OMC_BMFF_AUX_ALPHA:
+        return "alpha";
+    case OMC_BMFF_AUX_DEPTH:
+        return "depth";
+    case OMC_BMFF_AUX_DISPARITY:
+        return "disparity";
+    case OMC_BMFF_AUX_MATTE:
+        return "matte";
+    case OMC_BMFF_AUX_UNKNOWN:
+    default:
+        return "auxiliary";
+    }
+}
+
+typedef enum omc_bmff_aux_subtype_kind {
+    OMC_BMFF_AUX_SUBTYPE_NONE = 0,
+    OMC_BMFF_AUX_SUBTYPE_U8 = 1,
+    OMC_BMFF_AUX_SUBTYPE_U16BE = 2,
+    OMC_BMFF_AUX_SUBTYPE_U32BE = 3,
+    OMC_BMFF_AUX_SUBTYPE_U64BE = 4,
+    OMC_BMFF_AUX_SUBTYPE_ASCII_Z = 5,
+    OMC_BMFF_AUX_SUBTYPE_UUID = 6,
+    OMC_BMFF_AUX_SUBTYPE_HEX = 7
+} omc_bmff_aux_subtype_kind;
+
+static const char*
+omc_bmff_aux_subtype_kind_name(omc_bmff_aux_subtype_kind kind)
+{
+    switch (kind) {
+    case OMC_BMFF_AUX_SUBTYPE_U8:
+        return "u8";
+    case OMC_BMFF_AUX_SUBTYPE_U16BE:
+        return "u16be";
+    case OMC_BMFF_AUX_SUBTYPE_U32BE:
+        return "u32be";
+    case OMC_BMFF_AUX_SUBTYPE_U64BE:
+        return "u64be";
+    case OMC_BMFF_AUX_SUBTYPE_ASCII_Z:
+        return "ascii_z";
+    case OMC_BMFF_AUX_SUBTYPE_UUID:
+        return "uuid";
+    case OMC_BMFF_AUX_SUBTYPE_HEX:
+        return "hex";
+    case OMC_BMFF_AUX_SUBTYPE_NONE:
+    default:
+        return "none";
+    }
+}
+
+static int
+omc_bmff_aux_subtype_is_ascii_z(const omc_u8* bytes, omc_u16 size)
+{
+    omc_u16 i;
+
+    if (bytes == (const omc_u8*)0 || size < 2U) {
+        return 0;
+    }
+    if (bytes[size - 1U] != 0U) {
+        return 0;
+    }
+    for (i = 0U; i + 1U < size; ++i) {
+        omc_u8 c;
+
+        c = bytes[i];
+        if (c < 0x20U || c > 0x7EU) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static omc_bmff_aux_subtype_kind
+omc_bmff_classify_aux_subtype(const omc_u8* bytes, omc_u16 size)
+{
+    if (bytes == (const omc_u8*)0 || size == 0U) {
+        return OMC_BMFF_AUX_SUBTYPE_NONE;
+    }
+    if (omc_bmff_aux_subtype_is_ascii_z(bytes, size)) {
+        return OMC_BMFF_AUX_SUBTYPE_ASCII_Z;
+    }
+    if (size == 1U) {
+        return OMC_BMFF_AUX_SUBTYPE_U8;
+    }
+    if (size == 2U) {
+        return OMC_BMFF_AUX_SUBTYPE_U16BE;
+    }
+    if (size == 4U) {
+        return OMC_BMFF_AUX_SUBTYPE_U32BE;
+    }
+    if (size == 8U) {
+        return OMC_BMFF_AUX_SUBTYPE_U64BE;
+    }
+    if (size == 16U) {
+        return OMC_BMFF_AUX_SUBTYPE_UUID;
+    }
+    return OMC_BMFF_AUX_SUBTYPE_HEX;
+}
+
+static int
+omc_bmff_format_subtype_hex(const omc_u8* bytes, omc_u16 size,
+                            char* out, omc_size out_cap)
+{
+    static const char hex_digits[] = "0123456789ABCDEF";
+    omc_u16 i;
+    omc_size need;
+
+    if (bytes == (const omc_u8*)0 || out == (char*)0) {
+        return 0;
+    }
+
+    need = 2U + ((omc_size)size * 2U) + 1U;
+    if (out_cap < need) {
+        return 0;
+    }
+
+    out[0] = '0';
+    out[1] = 'x';
+    for (i = 0U; i < size; ++i) {
+        out[2U + ((omc_size)i * 2U) + 0U]
+            = hex_digits[(bytes[i] >> 4) & 0x0FU];
+        out[2U + ((omc_size)i * 2U) + 1U]
+            = hex_digits[bytes[i] & 0x0FU];
+    }
+    out[need - 1U] = '\0';
+    return 1;
+}
+
+static int
+omc_bmff_format_uuid_text(const omc_u8* bytes, char* out, omc_size out_cap)
+{
+    static const char hex_digits[] = "0123456789ABCDEF";
+    static const omc_u8 dash_pos[] = { 4U, 6U, 8U, 10U };
+    omc_u16 i;
+    omc_u16 out_pos;
+    omc_u16 dash_index;
+
+    if (bytes == (const omc_u8*)0 || out == (char*)0 || out_cap < 37U) {
+        return 0;
+    }
+
+    out_pos = 0U;
+    dash_index = 0U;
+    for (i = 0U; i < 16U; ++i) {
+        if (dash_index < 4U && i == dash_pos[dash_index]) {
+            out[out_pos] = '-';
+            out_pos += 1U;
+            dash_index += 1U;
+        }
+        out[out_pos + 0U] = hex_digits[(bytes[i] >> 4) & 0x0FU];
+        out[out_pos + 1U] = hex_digits[bytes[i] & 0x0FU];
+        out_pos += 2U;
+    }
+    out[out_pos] = '\0';
+    return 1;
+}
+
+static int
+omc_bmff_emit_aux_subtype_fields(omc_bmff_ctx* ctx, const char* prefix,
+                                 const omc_u8* subtype,
+                                 omc_u16 subtype_len, int emit_len)
+{
+    omc_bmff_aux_subtype_kind kind;
+    char field[64];
+    char text[128];
+    const char* kind_name;
+
+    if (ctx == (omc_bmff_ctx*)0 || prefix == (const char*)0) {
+        return 0;
+    }
+    if (subtype == (const omc_u8*)0 || subtype_len == 0U) {
+        return 1;
+    }
+
+    kind = omc_bmff_classify_aux_subtype(subtype, subtype_len);
+    kind_name = omc_bmff_aux_subtype_kind_name(kind);
+    if ((emit_len
+         && (!omc_bmff_make_field2(field, sizeof(field), prefix, "subtype_len")
+             || !omc_bmff_emit_u32_field(ctx, field, subtype_len)))
+        || !omc_bmff_make_field2(field, sizeof(field), prefix, "subtype_kind")
+        || !omc_bmff_emit_text_field(ctx, field, kind_name,
+                                     (omc_u16)strlen(kind_name))
+        || !omc_bmff_format_subtype_hex(subtype, subtype_len, text,
+                                        sizeof(text))
+        || !omc_bmff_make_field2(field, sizeof(field), prefix, "subtype_hex")
+        || !omc_bmff_emit_text_field(ctx, field, text,
+                                     (omc_u16)strlen(text))) {
+        return 0;
+    }
+
+    if (kind == OMC_BMFF_AUX_SUBTYPE_U8) {
+        if (!omc_bmff_make_field2(field, sizeof(field), prefix, "subtype_u32")
+            || !omc_bmff_emit_u32_field(ctx, field, subtype[0])) {
+            return 0;
+        }
+    } else if (kind == OMC_BMFF_AUX_SUBTYPE_U16BE) {
+        omc_u32 value;
+
+        value = ((omc_u32)subtype[0] << 8) | ((omc_u32)subtype[1] << 0);
+        if (!omc_bmff_make_field2(field, sizeof(field), prefix, "subtype_u32")
+            || !omc_bmff_emit_u32_field(ctx, field, value)) {
+            return 0;
+        }
+    } else if (kind == OMC_BMFF_AUX_SUBTYPE_U32BE) {
+        omc_u32 value;
+
+        value = ((omc_u32)subtype[0] << 24) | ((omc_u32)subtype[1] << 16)
+                | ((omc_u32)subtype[2] << 8) | ((omc_u32)subtype[3] << 0);
+        if (!omc_bmff_make_field2(field, sizeof(field), prefix, "subtype_u32")
+            || !omc_bmff_emit_u32_field(ctx, field, value)) {
+            return 0;
+        }
+    } else if (kind == OMC_BMFF_AUX_SUBTYPE_U64BE) {
+        omc_u64 value;
+
+        value = ((omc_u64)subtype[0] << 56) | ((omc_u64)subtype[1] << 48)
+                | ((omc_u64)subtype[2] << 40) | ((omc_u64)subtype[3] << 32)
+                | ((omc_u64)subtype[4] << 24) | ((omc_u64)subtype[5] << 16)
+                | ((omc_u64)subtype[6] << 8) | ((omc_u64)subtype[7] << 0);
+        if (!omc_bmff_make_field2(field, sizeof(field), prefix, "subtype_u64")
+            || !omc_bmff_emit_u64_field(ctx, field, value)) {
+            return 0;
+        }
+    } else if (kind == OMC_BMFF_AUX_SUBTYPE_ASCII_Z) {
+        if (!omc_bmff_make_field2(field, sizeof(field), prefix, "subtype_text")
+            || !omc_bmff_emit_text_field(ctx, field, (const char*)subtype,
+                                         (omc_u16)(subtype_len - 1U))) {
+            return 0;
+        }
+    } else if (kind == OMC_BMFF_AUX_SUBTYPE_UUID) {
+        if (!omc_bmff_format_uuid_text(subtype, text, sizeof(text))
+            || !omc_bmff_make_field2(field, sizeof(field), prefix,
+                                     "subtype_text")
+            || !omc_bmff_emit_text_field(ctx, field, text,
+                                         (omc_u16)strlen(text))
+            || !omc_bmff_make_field2(field, sizeof(field), prefix,
+                                     "subtype_uuid")
+            || !omc_bmff_emit_text_field(ctx, field, text,
+                                         (omc_u16)strlen(text))) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static omc_u32
 omc_bmff_find_primary_auxl_index(const omc_bmff_primary_props* props,
                                  omc_u32 item_id)
@@ -834,6 +1363,47 @@ omc_bmff_set_aux_item_type(omc_bmff_primary_props* props, omc_u32 item_id,
     }
     memcpy(props->aux_items[idx].aux_type, aux_type, copy_len);
     props->aux_items[idx].aux_type_len = copy_len;
+}
+
+static void
+omc_bmff_set_aux_item_subtype(omc_bmff_primary_props* props, omc_u32 item_id,
+                              const omc_u8* aux_subtype,
+                              omc_u16 aux_subtype_len)
+{
+    omc_u32 idx;
+    omc_u16 copy_len;
+
+    if (props == (omc_bmff_primary_props*)0
+        || aux_subtype == (const omc_u8*)0 || aux_subtype_len == 0U) {
+        return;
+    }
+
+    idx = omc_bmff_upsert_aux_item(props, item_id);
+    if (idx == ~(omc_u32)0 || idx >= 64U) {
+        return;
+    }
+    if (props->aux_items[idx].aux_subtype_len != 0U) {
+        return;
+    }
+
+    copy_len = aux_subtype_len;
+    if (copy_len > (omc_u16)sizeof(props->aux_items[idx].aux_subtype)) {
+        copy_len = (omc_u16)sizeof(props->aux_items[idx].aux_subtype);
+    }
+    memcpy(props->aux_items[idx].aux_subtype, aux_subtype, copy_len);
+    props->aux_items[idx].aux_subtype_len = copy_len;
+}
+
+static const omc_bmff_aux_item_info*
+omc_bmff_find_aux_item(const omc_bmff_primary_props* props, omc_u32 item_id)
+{
+    omc_u32 idx;
+
+    idx = omc_bmff_find_aux_item_index(props, item_id);
+    if (idx == ~(omc_u32)0 || idx >= 64U) {
+        return (const omc_bmff_aux_item_info*)0;
+    }
+    return &props->aux_items[idx];
 }
 
 static void
@@ -1331,6 +1901,21 @@ omc_bmff_collect_ipco_props(omc_bmff_ctx* ctx, const omc_bmff_box* ipco,
                             prop->semantic
                                 = omc_bmff_classify_auxc_type(prop->aux_type,
                                                               prop->aux_type_len);
+                            if (p + 1U < e) {
+                                omc_size subtype_len;
+
+                                subtype_len = (omc_size)(e - (p + 1U));
+                                if (subtype_len
+                                    > sizeof(prop->aux_subtype)) {
+                                    subtype_len
+                                        = sizeof(prop->aux_subtype);
+                                }
+                                memcpy(prop->aux_subtype,
+                                       ctx->bytes + (omc_size)(p + 1U),
+                                       subtype_len);
+                                prop->aux_subtype_len
+                                    = (omc_u16)subtype_len;
+                            }
                             *out_auxc_count += 1U;
                         }
                     }
@@ -1482,6 +2067,11 @@ omc_bmff_apply_ipma_primary(omc_bmff_ctx* ctx, const omc_bmff_box* ipma,
                         omc_bmff_set_aux_item_type(out_props, item_id,
                                                    auxc_prop->aux_type,
                                                    auxc_prop->aux_type_len);
+                    }
+                    if (auxc_prop->aux_subtype_len != 0U) {
+                        omc_bmff_set_aux_item_subtype(
+                            out_props, item_id, auxc_prop->aux_subtype,
+                            auxc_prop->aux_subtype_len);
                     }
                     if (is_primary_aux) {
                         omc_bmff_set_primary_auxl_semantic(
@@ -1653,7 +2243,7 @@ omc_bmff_emit_item_info_fields(omc_bmff_ctx* ctx,
 
     for (i = 0U; i < item_count; ++i) {
         if (!omc_bmff_emit_u32_field(ctx, "item.id", items[i].item_id)
-            || !omc_bmff_emit_u32_field(ctx, "item.protection_index",
+            || !omc_bmff_emit_u16_field(ctx, "item.protection_index",
                                         items[i].protection_index)) {
             return 0;
         }
@@ -1720,6 +2310,8 @@ omc_bmff_emit_iref_fields(omc_bmff_ctx* ctx,
 {
     omc_u32 i;
     omc_u32 take_count;
+    omc_u32 group_types[128];
+    omc_u32 group_count;
 
     if (ctx == (omc_bmff_ctx*)0) {
         return 0;
@@ -1740,8 +2332,12 @@ omc_bmff_emit_iref_fields(omc_bmff_ctx* ctx,
     if (take_count > 128U) {
         take_count = 128U;
     }
+    group_count = 0U;
     for (i = 0U; i < take_count; ++i) {
         const omc_bmff_iref_edge* edge;
+        char token[5];
+        char field[32];
+        const omc_bmff_aux_item_info* aux_item;
 
         edge = &props->edges[i];
         if (!omc_bmff_emit_u32_field(ctx, "iref.ref_type", edge->ref_type)
@@ -1752,56 +2348,99 @@ omc_bmff_emit_iref_fields(omc_bmff_ctx* ctx,
             return 0;
         }
 
-        if (edge->ref_type == OMC_BMFF_FOURCC('a', 'u', 'x', 'l')) {
-            if (!omc_bmff_emit_u32_field(ctx, "iref.auxl.from_item_id",
-                                         edge->from_item_id)
-                || !omc_bmff_emit_u32_field(ctx, "iref.auxl.to_item_id",
-                                            edge->to_item_id)) {
-                return 0;
-            }
-        } else if (edge->ref_type == OMC_BMFF_FOURCC('d', 'i', 'm', 'g')) {
-            if (!omc_bmff_emit_u32_field(ctx, "iref.dimg.from_item_id",
-                                         edge->from_item_id)
-                || !omc_bmff_emit_u32_field(ctx, "iref.dimg.to_item_id",
-                                            edge->to_item_id)) {
-                return 0;
-            }
-        } else if (edge->ref_type == OMC_BMFF_FOURCC('t', 'h', 'm', 'b')) {
-            if (!omc_bmff_emit_u32_field(ctx, "iref.thmb.from_item_id",
-                                         edge->from_item_id)
-                || !omc_bmff_emit_u32_field(ctx, "iref.thmb.to_item_id",
-                                            edge->to_item_id)) {
-                return 0;
-            }
-        } else if (edge->ref_type == OMC_BMFF_FOURCC('c', 'd', 's', 'c')) {
-            if (!omc_bmff_emit_u32_field(ctx, "iref.cdsc.from_item_id",
-                                         edge->from_item_id)
-                || !omc_bmff_emit_u32_field(ctx, "iref.cdsc.to_item_id",
-                                            edge->to_item_id)) {
+        if (omc_bmff_fourcc_token(edge->ref_type, token)) {
+            if (!omc_bmff_emit_text_field(ctx, "iref.ref_type_name", token, 4U)
+                || !omc_bmff_make_field2(field, sizeof(field), "iref", token)
+                || !omc_bmff_make_field2(field, sizeof(field), field,
+                                         "from_item_id")
+                || !omc_bmff_emit_u32_field(ctx, field, edge->from_item_id)
+                || !omc_bmff_make_field2(field, sizeof(field), "iref", token)
+                || !omc_bmff_make_field2(field, sizeof(field), field,
+                                         "to_item_id")
+                || !omc_bmff_emit_u32_field(ctx, field, edge->to_item_id)
+                || !omc_bmff_push_unique_item_id(group_types, &group_count,
+                                                 128U, edge->ref_type)) {
                 return 0;
             }
         }
+
+        if (edge->ref_type != OMC_BMFF_FOURCC('a', 'u', 'x', 'l')) {
+            continue;
+        }
+
+        aux_item = omc_bmff_find_aux_item(props, edge->to_item_id);
+        if (!omc_bmff_emit_text_field(
+                ctx, "iref.auxl.semantic",
+                omc_bmff_aux_semantic_name(
+                    aux_item != (const omc_bmff_aux_item_info*)0
+                        ? aux_item->semantic
+                        : OMC_BMFF_AUX_UNKNOWN),
+                (omc_u16)strlen(
+                    omc_bmff_aux_semantic_name(
+                        aux_item != (const omc_bmff_aux_item_info*)0
+                            ? aux_item->semantic
+                            : OMC_BMFF_AUX_UNKNOWN)))) {
+            return 0;
+        }
+        if (aux_item == (const omc_bmff_aux_item_info*)0) {
+            continue;
+        }
+        if (aux_item->aux_type_len != 0U
+            && !omc_bmff_emit_text_field(ctx, "iref.auxl.type",
+                                         aux_item->aux_type,
+                                         aux_item->aux_type_len)) {
+            return 0;
+        }
+        if (!omc_bmff_emit_aux_subtype_fields(ctx, "iref.auxl",
+                                              aux_item->aux_subtype,
+                                              aux_item->aux_subtype_len, 0)) {
+            return 0;
+        }
     }
 
-    if (props->auxl_edge_count != 0U
-        && !omc_bmff_emit_u32_field(ctx, "iref.auxl.edge_count",
-                                    props->auxl_edge_count)) {
+    if (props->edge_truncated) {
+        return 1;
+    }
+
+    if (!omc_bmff_emit_iref_item_summary(ctx, props->edges, take_count, 0U, 0,
+                                         "iref", (const char*)0)) {
         return 0;
     }
-    if (props->dimg_edge_count != 0U
-        && !omc_bmff_emit_u32_field(ctx, "iref.dimg.edge_count",
-                                    props->dimg_edge_count)) {
-        return 0;
-    }
-    if (props->thmb_edge_count != 0U
-        && !omc_bmff_emit_u32_field(ctx, "iref.thmb.edge_count",
-                                    props->thmb_edge_count)) {
-        return 0;
-    }
-    if (props->cdsc_edge_count != 0U
-        && !omc_bmff_emit_u32_field(ctx, "iref.cdsc.edge_count",
-                                    props->cdsc_edge_count)) {
-        return 0;
+
+    for (i = 0U; i < group_count; ++i) {
+        char token[5];
+        char prefix[16];
+        char graph_prefix[24];
+        char edge_field[32];
+        omc_u32 j;
+        omc_u32 group_edge_count;
+
+        if (!omc_bmff_fourcc_token(group_types[i], token)) {
+            continue;
+        }
+        if (!omc_bmff_make_field2(prefix, sizeof(prefix), "iref", token)
+            || !omc_bmff_make_field2(graph_prefix, sizeof(graph_prefix),
+                                     "iref.graph", token)) {
+            continue;
+        }
+
+        group_edge_count = 0U;
+        for (j = 0U; j < take_count; ++j) {
+            if (props->edges[j].ref_type == group_types[i]) {
+                group_edge_count += 1U;
+            }
+        }
+        if (!omc_bmff_make_field2(edge_field, sizeof(edge_field),
+                                  prefix, "edge_count")
+            || !omc_bmff_emit_u32_field(ctx, edge_field,
+                                        group_edge_count)) {
+            return 0;
+        }
+        if (!omc_bmff_emit_iref_item_summary(ctx, props->edges, take_count,
+                                             group_types[i], 1, prefix,
+                                             graph_prefix)) {
+            return 0;
+        }
     }
 
     return 1;
@@ -1813,6 +2452,10 @@ omc_bmff_emit_aux_fields(omc_bmff_ctx* ctx,
 {
     omc_u32 i;
     omc_u32 take_count;
+    omc_u32 alpha_count;
+    omc_u32 depth_count;
+    omc_u32 disparity_count;
+    omc_u32 matte_count;
 
     if (ctx == (omc_bmff_ctx*)0) {
         return 0;
@@ -1824,6 +2467,42 @@ omc_bmff_emit_aux_fields(omc_bmff_ctx* ctx,
     take_count = props->aux_item_count;
     if (take_count > 64U) {
         take_count = 64U;
+    }
+    alpha_count = 0U;
+    depth_count = 0U;
+    disparity_count = 0U;
+    matte_count = 0U;
+    for (i = 0U; i < take_count; ++i) {
+        if (props->aux_items[i].semantic == OMC_BMFF_AUX_ALPHA) {
+            alpha_count += 1U;
+        } else if (props->aux_items[i].semantic == OMC_BMFF_AUX_DEPTH) {
+            depth_count += 1U;
+        } else if (props->aux_items[i].semantic
+                   == OMC_BMFF_AUX_DISPARITY) {
+            disparity_count += 1U;
+        } else if (props->aux_items[i].semantic == OMC_BMFF_AUX_MATTE) {
+            matte_count += 1U;
+        }
+    }
+    if (!omc_bmff_emit_u32_field(ctx, "aux.item_count", take_count)) {
+        return 0;
+    }
+    if (alpha_count != 0U
+        && !omc_bmff_emit_u32_field(ctx, "aux.alpha_count", alpha_count)) {
+        return 0;
+    }
+    if (depth_count != 0U
+        && !omc_bmff_emit_u32_field(ctx, "aux.depth_count", depth_count)) {
+        return 0;
+    }
+    if (disparity_count != 0U
+        && !omc_bmff_emit_u32_field(ctx, "aux.disparity_count",
+                                    disparity_count)) {
+        return 0;
+    }
+    if (matte_count != 0U
+        && !omc_bmff_emit_u32_field(ctx, "aux.matte_count", matte_count)) {
+        return 0;
     }
     for (i = 0U; i < take_count; ++i) {
         if (!omc_bmff_emit_u32_field(ctx, "aux.item_id",
@@ -1839,6 +2518,131 @@ omc_bmff_emit_aux_fields(omc_bmff_ctx* ctx,
             && !omc_bmff_emit_text_field(ctx, "aux.type",
                                          props->aux_items[i].aux_type,
                                          props->aux_items[i].aux_type_len)) {
+            return 0;
+        }
+        if (!omc_bmff_emit_aux_subtype_fields(ctx, "aux",
+                                              props->aux_items[i].aux_subtype,
+                                              props->aux_items[i].aux_subtype_len,
+                                              1)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+omc_bmff_emit_primary_linked_fields(omc_bmff_ctx* ctx,
+                                    const omc_bmff_item_info* items,
+                                    omc_u32 item_count,
+                                    const omc_bmff_primary_props* props)
+{
+    omc_u32 item_ids[128];
+    const char* roles[128];
+    const omc_bmff_item_info* info;
+    omc_u32 count;
+    omc_u32 i;
+
+    if (ctx == (omc_bmff_ctx*)0 || props == (const omc_bmff_primary_props*)0) {
+        return 0;
+    }
+
+    count = 0U;
+    for (i = 0U; i < props->primary_auxl_count && i < 32U; ++i) {
+        omc_u32 j;
+        int found;
+        const char* role_name;
+
+        role_name = omc_bmff_primary_linked_role_for_aux(
+            props->primary_auxl_semantics[i]);
+        found = 0;
+        for (j = 0U; j < count; ++j) {
+            if (item_ids[j] == props->primary_auxl_item_ids[i]
+                && strcmp(roles[j], role_name) == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found && count < 128U) {
+            item_ids[count] = props->primary_auxl_item_ids[i];
+            roles[count] = role_name;
+            count += 1U;
+        }
+    }
+    for (i = 0U; i < props->primary_dimg_count && i < 32U; ++i) {
+        omc_u32 j;
+        int found;
+
+        found = 0;
+        for (j = 0U; j < count; ++j) {
+            if (item_ids[j] == props->primary_dimg_item_ids[i]
+                && strcmp(roles[j], "derived") == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found && count < 128U) {
+            item_ids[count] = props->primary_dimg_item_ids[i];
+            roles[count] = "derived";
+            count += 1U;
+        }
+    }
+    for (i = 0U; i < props->primary_thmb_count && i < 32U; ++i) {
+        omc_u32 j;
+        int found;
+
+        found = 0;
+        for (j = 0U; j < count; ++j) {
+            if (item_ids[j] == props->primary_thmb_item_ids[i]
+                && strcmp(roles[j], "thumbnail") == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found && count < 128U) {
+            item_ids[count] = props->primary_thmb_item_ids[i];
+            roles[count] = "thumbnail";
+            count += 1U;
+        }
+    }
+    for (i = 0U; i < props->primary_cdsc_count && i < 32U; ++i) {
+        omc_u32 j;
+        int found;
+
+        found = 0;
+        for (j = 0U; j < count; ++j) {
+            if (item_ids[j] == props->primary_cdsc_item_ids[i]
+                && strcmp(roles[j], "content_description") == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found && count < 128U) {
+            item_ids[count] = props->primary_cdsc_item_ids[i];
+            roles[count] = "content_description";
+            count += 1U;
+        }
+    }
+
+    if (count == 0U) {
+        return 1;
+    }
+
+    if (!omc_bmff_emit_u32_field(ctx, "primary.linked_item_role_count",
+                                 count)) {
+        return 0;
+    }
+    for (i = 0U; i < count; ++i) {
+        info = omc_bmff_find_item_info(items, item_count, item_ids[i]);
+        if (!omc_bmff_emit_u32_field(ctx, "primary.linked_item_id", item_ids[i])
+            || (info != (const omc_bmff_item_info*)0 && info->have_type
+                && !omc_bmff_emit_u32_field(ctx, "primary.linked_item_type",
+                                            info->item_type))
+            || (info != (const omc_bmff_item_info*)0 && info->name_len != 0U
+                && !omc_bmff_emit_text_field(ctx, "primary.linked_item_name",
+                                             info->name, info->name_len))
+            || !omc_bmff_emit_text_field(ctx, "primary.linked_item_role",
+                                         roles[i],
+                                         (omc_u16)strlen(roles[i]))) {
             return 0;
         }
     }
@@ -1864,7 +2668,7 @@ omc_bmff_emit_primary_fields(omc_bmff_ctx* ctx,
 
     primary = omc_bmff_find_item_info(items, item_count, primary_item_id);
     if (primary != (const omc_bmff_item_info*)0) {
-        if (!omc_bmff_emit_u32_field(ctx, "primary.protection_index",
+        if (!omc_bmff_emit_u16_field(ctx, "primary.protection_index",
                                      primary->protection_index)) {
             return 0;
         }
@@ -1949,6 +2753,10 @@ omc_bmff_emit_primary_fields(omc_bmff_ctx* ctx,
                 return 0;
             }
         }
+        if (!omc_bmff_emit_primary_linked_fields(ctx, items, item_count,
+                                                 props)) {
+            return 0;
+        }
         if (!omc_bmff_emit_primary_rel_ids(ctx, "primary.alpha_item_id",
                                            props->primary_alpha_item_ids,
                                            props->primary_alpha_count, 32U)
@@ -1963,6 +2771,46 @@ omc_bmff_emit_primary_fields(omc_bmff_ctx* ctx,
                                               props->primary_matte_item_ids,
                                               props->primary_matte_count,
                                               32U)) {
+            return 0;
+        }
+        if (props->primary_auxl_count != 0U
+            && !omc_bmff_emit_u32_field(ctx, "primary.auxl_count",
+                                        props->primary_auxl_count)) {
+            return 0;
+        }
+        if (props->primary_alpha_count != 0U
+            && !omc_bmff_emit_u32_field(ctx, "primary.alpha_count",
+                                        props->primary_alpha_count)) {
+            return 0;
+        }
+        if (props->primary_depth_count != 0U
+            && !omc_bmff_emit_u32_field(ctx, "primary.depth_count",
+                                        props->primary_depth_count)) {
+            return 0;
+        }
+        if (props->primary_dimg_count != 0U
+            && !omc_bmff_emit_u32_field(ctx, "primary.dimg_count",
+                                        props->primary_dimg_count)) {
+            return 0;
+        }
+        if (props->primary_thmb_count != 0U
+            && !omc_bmff_emit_u32_field(ctx, "primary.thmb_count",
+                                        props->primary_thmb_count)) {
+            return 0;
+        }
+        if (props->primary_cdsc_count != 0U
+            && !omc_bmff_emit_u32_field(ctx, "primary.cdsc_count",
+                                        props->primary_cdsc_count)) {
+            return 0;
+        }
+        if (props->primary_disparity_count != 0U
+            && !omc_bmff_emit_u32_field(ctx, "primary.disparity_count",
+                                        props->primary_disparity_count)) {
+            return 0;
+        }
+        if (props->primary_matte_count != 0U
+            && !omc_bmff_emit_u32_field(ctx, "primary.matte_count",
+                                        props->primary_matte_count)) {
             return 0;
         }
     }
@@ -2237,6 +3085,19 @@ omc_bmff_run(const omc_u8* file_bytes, omc_size file_size, omc_store* store,
         || !omc_bmff_emit_u32_field(&ctx, "ftyp.minor_version",
                                     brand.minor_version)) {
         return ctx.res;
+    }
+    if (brand.compat_count != 0U) {
+        omc_u32 compat_count;
+
+        compat_count = brand.compat_count;
+        if (compat_count > 32U) {
+            compat_count = 32U;
+        }
+        if (!omc_bmff_emit_u32_array_field(&ctx, "ftyp.compat_brands",
+                                           brand.compat_brands,
+                                           compat_count)) {
+            return ctx.res;
+        }
     }
 
     omc_bmff_scan_for_meta(&ctx, 0U, (omc_u64)file_size, 0U);
