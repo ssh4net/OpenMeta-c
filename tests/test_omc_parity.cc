@@ -472,6 +472,137 @@ build_tiff_fuji_makernote_fixture()
     return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
 }
 
+static ByteVec
+build_tiff_with_make_makernote_fixture(const char* make,
+                                       const unsigned char* makernote,
+                                       std::size_t makernote_size);
+
+static ByteVec
+build_tiff_with_make_model_makernote_fixture(const char* make,
+                                             const char* model,
+                                             const unsigned char* makernote,
+                                             std::size_t makernote_size);
+
+static ByteVec
+build_tiff_casio_makernote_fixture()
+{
+    std::array<unsigned char, 64> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_bytes(makernote.data(), &size, "QVC\0", 4U);
+    append_u32be(makernote.data(), &size, 1U);
+    append_u16be(makernote.data(), &size, 0x0002U);
+    append_u16be(makernote.data(), &size, 3U);
+    append_u32be(makernote.data(), &size, 2U);
+    append_u16be(makernote.data(), &size, 320U);
+    append_u16be(makernote.data(), &size, 240U);
+
+    return build_tiff_with_make_makernote_fixture("CASIO", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
+build_tiff_casio_legacy_makernote_fixture()
+{
+    std::array<unsigned char, 96> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_bytes(makernote.data(), &size, "QVC\0", 4U);
+    append_u32be(makernote.data(), &size, 3U);
+
+    append_u16be(makernote.data(), &size, 0x0002U);
+    append_u16be(makernote.data(), &size, 3U);
+    append_u32be(makernote.data(), &size, 1U);
+    append_u16be(makernote.data(), &size, 3U);
+    append_u16be(makernote.data(), &size, 0U);
+
+    append_u16be(makernote.data(), &size, 0x0008U);
+    append_u16be(makernote.data(), &size, 3U);
+    append_u32be(makernote.data(), &size, 1U);
+    append_u16be(makernote.data(), &size, 1U);
+    append_u16be(makernote.data(), &size, 0U);
+
+    append_u16be(makernote.data(), &size, 0x0E00U);
+    append_u16be(makernote.data(), &size, 7U);
+    append_u32be(makernote.data(), &size, 4U);
+    append_u32be(makernote.data(), &size, 0x01020304U);
+
+    return build_tiff_with_make_makernote_fixture("CASIO", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
+build_tiff_casio_legacy_ifd_makernote_fixture()
+{
+    std::array<unsigned char, 96> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_u16le(makernote.data(), &size, 3U);
+
+    append_u16le(makernote.data(), &size, 0x0002U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 0x0008U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 0x0E00U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 0x04030201U);
+    append_u32le(makernote.data(), &size, 0U);
+
+    return build_tiff_with_make_model_makernote_fixture(
+        "CASIO", "QV-2100", makernote.data(), size);
+}
+
+static ByteVec
+build_tiff_casio_faceinfo2_makernote_fixture()
+{
+    std::array<unsigned char, 64> makernote {};
+    std::array<unsigned char, 0x54> payload {};
+    ByteVec tiff;
+    std::size_t size;
+    std::uint32_t payload_off;
+
+    size = 0U;
+    append_bytes(makernote.data(), &size, "DCI\0", 4U);
+    append_u32be(makernote.data(), &size, 1U);
+    append_u16be(makernote.data(), &size, 0x2089U);
+    append_u16be(makernote.data(), &size, 7U);
+    append_u32be(makernote.data(), &size, 0x54U);
+    append_u32be(makernote.data(), &size, 0U);
+
+    payload_off = 38U + (std::uint32_t)std::strlen("CASIO") + 1U
+                  + (std::uint32_t)size;
+    write_u32be_at(makernote.data(), 16U, payload_off);
+
+    payload.fill(0U);
+    payload[0] = 0x02U;
+    payload[1] = 0x01U;
+    payload[2] = 2U;
+    write_u16le_at(payload.data(), 0x0004U, 640U);
+    write_u16le_at(payload.data(), 0x0006U, 480U);
+    payload[0x0008U] = 7U;
+    write_u16le_at(payload.data(), 0x0018U, 10U);
+    write_u16le_at(payload.data(), 0x001AU, 20U);
+    write_u16le_at(payload.data(), 0x001CU, 30U);
+    write_u16le_at(payload.data(), 0x001EU, 40U);
+
+    tiff = build_tiff_with_make_makernote_fixture("CASIO", makernote.data(),
+                                                  size);
+    tiff.insert(tiff.end(), payload.begin(), payload.end());
+    return tiff;
+}
+
 struct CiffValueEntry final {
     std::uint16_t tag = 0U;
     ByteVec value;
@@ -2834,6 +2965,63 @@ build_bmff_pred_fixture()
 }
 
 static ByteVec
+build_bmff_v1_auxl_fixture()
+{
+    std::array<unsigned char, 512> file {};
+    std::array<unsigned char, 16> pitm_payload {};
+    std::array<unsigned char, 24> auxl_payload {};
+    std::array<unsigned char, 64> iref_payload {};
+    std::array<unsigned char, 128> meta_payload {};
+    std::array<unsigned char, 16> ftyp_payload {};
+    std::size_t pitm_size;
+    std::size_t auxl_size;
+    std::size_t iref_size;
+    std::size_t meta_size;
+    std::size_t ftyp_size;
+    std::size_t size;
+
+    pitm_size = 0U;
+    append_fullbox_header(pitm_payload.data(), &pitm_size, 1U);
+    append_u32be(pitm_payload.data(), &pitm_size, 0x10001U);
+
+    auxl_size = 0U;
+    append_u32be(auxl_payload.data(), &auxl_size, 0x10001U);
+    append_u16be(auxl_payload.data(), &auxl_size, 2U);
+    append_u32be(auxl_payload.data(), &auxl_size, 0x10002U);
+    append_u32be(auxl_payload.data(), &auxl_size, 0x10003U);
+
+    iref_size = 0U;
+    append_fullbox_header(iref_payload.data(), &iref_size, 1U);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('a', 'u', 'x', 'l'), auxl_payload.data(),
+                    auxl_size);
+
+    meta_size = 0U;
+    append_fullbox_header(meta_payload.data(), &meta_size, 0U);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('p', 'i', 't', 'm'), pitm_payload.data(),
+                    pitm_size);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('i', 'r', 'e', 'f'), iref_payload.data(),
+                    iref_size);
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('h', 'e', 'i', 'c'));
+    append_u32be(ftyp_payload.data(), &ftyp_size, 0U);
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('m', 'i', 'f', '1'));
+
+    size = 0U;
+    append_bmff_box(file.data(), &size, make_fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload.data(), ftyp_size);
+    append_bmff_box(file.data(), &size, make_fourcc('m', 'e', 't', 'a'),
+                    meta_payload.data(), meta_size);
+
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
 build_bmff_nonprimary_typed_iref_fixture()
 {
     std::array<unsigned char, 512> file {};
@@ -2893,6 +3081,477 @@ build_bmff_nonprimary_typed_iref_fixture()
     append_bmff_box(meta_payload.data(), &meta_size,
                     make_fourcc('i', 'r', 'e', 'f'), iref_payload.data(),
                     iref_size);
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('h', 'e', 'i', 'c'));
+    append_u32be(ftyp_payload.data(), &ftyp_size, 0U);
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('m', 'i', 'f', '1'));
+
+    size = 0U;
+    append_bmff_box(file.data(), &size, make_fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload.data(), ftyp_size);
+    append_bmff_box(file.data(), &size, make_fourcc('m', 'e', 't', 'a'),
+                    meta_payload.data(), meta_size);
+
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_bmff_v1_nonprimary_typed_iref_fixture()
+{
+    std::array<unsigned char, 512> file {};
+    std::array<unsigned char, 16> pitm_payload {};
+    std::array<unsigned char, 24> dimg_payload {};
+    std::array<unsigned char, 20> thmb_payload {};
+    std::array<unsigned char, 20> cdsc_payload {};
+    std::array<unsigned char, 128> iref_payload {};
+    std::array<unsigned char, 256> meta_payload {};
+    std::array<unsigned char, 16> ftyp_payload {};
+    std::size_t pitm_size;
+    std::size_t dimg_size;
+    std::size_t thmb_size;
+    std::size_t cdsc_size;
+    std::size_t iref_size;
+    std::size_t meta_size;
+    std::size_t ftyp_size;
+    std::size_t size;
+
+    pitm_size = 0U;
+    append_fullbox_header(pitm_payload.data(), &pitm_size, 1U);
+    append_u32be(pitm_payload.data(), &pitm_size, 0x10001U);
+
+    dimg_size = 0U;
+    append_u32be(dimg_payload.data(), &dimg_size, 0x20002U);
+    append_u16be(dimg_payload.data(), &dimg_size, 2U);
+    append_u32be(dimg_payload.data(), &dimg_size, 0x30005U);
+    append_u32be(dimg_payload.data(), &dimg_size, 0x30006U);
+
+    thmb_size = 0U;
+    append_u32be(thmb_payload.data(), &thmb_size, 0x20003U);
+    append_u16be(thmb_payload.data(), &thmb_size, 1U);
+    append_u32be(thmb_payload.data(), &thmb_size, 0x30007U);
+
+    cdsc_size = 0U;
+    append_u32be(cdsc_payload.data(), &cdsc_size, 0x20004U);
+    append_u16be(cdsc_payload.data(), &cdsc_size, 1U);
+    append_u32be(cdsc_payload.data(), &cdsc_size, 0x30008U);
+
+    iref_size = 0U;
+    append_fullbox_header(iref_payload.data(), &iref_size, 1U);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('d', 'i', 'm', 'g'), dimg_payload.data(),
+                    dimg_size);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('t', 'h', 'm', 'b'), thmb_payload.data(),
+                    thmb_size);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('c', 'd', 's', 'c'), cdsc_payload.data(),
+                    cdsc_size);
+
+    meta_size = 0U;
+    append_fullbox_header(meta_payload.data(), &meta_size, 0U);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('p', 'i', 't', 'm'), pitm_payload.data(),
+                    pitm_size);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('i', 'r', 'e', 'f'), iref_payload.data(),
+                    iref_size);
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('h', 'e', 'i', 'c'));
+    append_u32be(ftyp_payload.data(), &ftyp_size, 0U);
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('m', 'i', 'f', '1'));
+
+    size = 0U;
+    append_bmff_box(file.data(), &size, make_fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload.data(), ftyp_size);
+    append_bmff_box(file.data(), &size, make_fourcc('m', 'e', 't', 'a'),
+                    meta_payload.data(), meta_size);
+
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_bmff_duplicate_edges_fixture()
+{
+    std::array<unsigned char, 1024> file {};
+    std::array<unsigned char, 16> pitm_payload {};
+    std::array<unsigned char, 16> auxl_a_payload {};
+    std::array<unsigned char, 16> auxl_b_payload {};
+    std::array<unsigned char, 16> dimg_a_payload {};
+    std::array<unsigned char, 16> dimg_b_payload {};
+    std::array<unsigned char, 16> thmb_a_payload {};
+    std::array<unsigned char, 16> thmb_b_payload {};
+    std::array<unsigned char, 16> cdsc_a_payload {};
+    std::array<unsigned char, 16> cdsc_b_payload {};
+    std::array<unsigned char, 256> iref_payload {};
+    std::array<unsigned char, 384> meta_payload {};
+    std::array<unsigned char, 16> ftyp_payload {};
+    std::size_t pitm_size;
+    std::size_t auxl_a_size;
+    std::size_t auxl_b_size;
+    std::size_t dimg_a_size;
+    std::size_t dimg_b_size;
+    std::size_t thmb_a_size;
+    std::size_t thmb_b_size;
+    std::size_t cdsc_a_size;
+    std::size_t cdsc_b_size;
+    std::size_t iref_size;
+    std::size_t meta_size;
+    std::size_t ftyp_size;
+    std::size_t size;
+
+    pitm_size = 0U;
+    append_fullbox_header(pitm_payload.data(), &pitm_size, 0U);
+    append_u16be(pitm_payload.data(), &pitm_size, 1U);
+
+    auxl_a_size = 0U;
+    append_u16be(auxl_a_payload.data(), &auxl_a_size, 1U);
+    append_u16be(auxl_a_payload.data(), &auxl_a_size, 3U);
+    append_u16be(auxl_a_payload.data(), &auxl_a_size, 2U);
+    append_u16be(auxl_a_payload.data(), &auxl_a_size, 2U);
+    append_u16be(auxl_a_payload.data(), &auxl_a_size, 3U);
+
+    auxl_b_size = 0U;
+    append_u16be(auxl_b_payload.data(), &auxl_b_size, 1U);
+    append_u16be(auxl_b_payload.data(), &auxl_b_size, 1U);
+    append_u16be(auxl_b_payload.data(), &auxl_b_size, 3U);
+
+    dimg_a_size = 0U;
+    append_u16be(dimg_a_payload.data(), &dimg_a_size, 2U);
+    append_u16be(dimg_a_payload.data(), &dimg_a_size, 2U);
+    append_u16be(dimg_a_payload.data(), &dimg_a_size, 5U);
+    append_u16be(dimg_a_payload.data(), &dimg_a_size, 5U);
+
+    dimg_b_size = 0U;
+    append_u16be(dimg_b_payload.data(), &dimg_b_size, 4U);
+    append_u16be(dimg_b_payload.data(), &dimg_b_size, 1U);
+    append_u16be(dimg_b_payload.data(), &dimg_b_size, 5U);
+
+    thmb_a_size = 0U;
+    append_u16be(thmb_a_payload.data(), &thmb_a_size, 3U);
+    append_u16be(thmb_a_payload.data(), &thmb_a_size, 2U);
+    append_u16be(thmb_a_payload.data(), &thmb_a_size, 7U);
+    append_u16be(thmb_a_payload.data(), &thmb_a_size, 7U);
+
+    thmb_b_size = 0U;
+    append_u16be(thmb_b_payload.data(), &thmb_b_size, 3U);
+    append_u16be(thmb_b_payload.data(), &thmb_b_size, 1U);
+    append_u16be(thmb_b_payload.data(), &thmb_b_size, 8U);
+
+    cdsc_a_size = 0U;
+    append_u16be(cdsc_a_payload.data(), &cdsc_a_size, 4U);
+    append_u16be(cdsc_a_payload.data(), &cdsc_a_size, 3U);
+    append_u16be(cdsc_a_payload.data(), &cdsc_a_size, 8U);
+    append_u16be(cdsc_a_payload.data(), &cdsc_a_size, 9U);
+    append_u16be(cdsc_a_payload.data(), &cdsc_a_size, 9U);
+
+    cdsc_b_size = 0U;
+    append_u16be(cdsc_b_payload.data(), &cdsc_b_size, 5U);
+    append_u16be(cdsc_b_payload.data(), &cdsc_b_size, 1U);
+    append_u16be(cdsc_b_payload.data(), &cdsc_b_size, 8U);
+
+    iref_size = 0U;
+    append_fullbox_header(iref_payload.data(), &iref_size, 0U);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('a', 'u', 'x', 'l'), auxl_a_payload.data(),
+                    auxl_a_size);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('a', 'u', 'x', 'l'), auxl_b_payload.data(),
+                    auxl_b_size);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('d', 'i', 'm', 'g'), dimg_a_payload.data(),
+                    dimg_a_size);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('d', 'i', 'm', 'g'), dimg_b_payload.data(),
+                    dimg_b_size);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('t', 'h', 'm', 'b'), thmb_a_payload.data(),
+                    thmb_a_size);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('t', 'h', 'm', 'b'), thmb_b_payload.data(),
+                    thmb_b_size);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('c', 'd', 's', 'c'), cdsc_a_payload.data(),
+                    cdsc_a_size);
+    append_bmff_box(iref_payload.data(), &iref_size,
+                    make_fourcc('c', 'd', 's', 'c'), cdsc_b_payload.data(),
+                    cdsc_b_size);
+
+    meta_size = 0U;
+    append_fullbox_header(meta_payload.data(), &meta_size, 0U);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('p', 'i', 't', 'm'), pitm_payload.data(),
+                    pitm_size);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('i', 'r', 'e', 'f'), iref_payload.data(),
+                    iref_size);
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('h', 'e', 'i', 'c'));
+    append_u32be(ftyp_payload.data(), &ftyp_size, 0U);
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('m', 'i', 'f', '1'));
+
+    size = 0U;
+    append_bmff_box(file.data(), &size, make_fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload.data(), ftyp_size);
+    append_bmff_box(file.data(), &size, make_fourcc('m', 'e', 't', 'a'),
+                    meta_payload.data(), meta_size);
+
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_bmff_item_info_rows_fixture()
+{
+    std::array<unsigned char, 512> file {};
+    std::array<unsigned char, 16> pitm_payload {};
+    std::array<unsigned char, 96> infe_preview {};
+    std::array<unsigned char, 64> infe_exif {};
+    std::array<unsigned char, 256> iinf_payload {};
+    std::array<unsigned char, 384> meta_payload {};
+    std::array<unsigned char, 16> ftyp_payload {};
+    std::size_t pitm_size;
+    std::size_t infe_preview_size;
+    std::size_t infe_exif_size;
+    std::size_t iinf_size;
+    std::size_t meta_size;
+    std::size_t ftyp_size;
+    std::size_t size;
+
+    pitm_size = 0U;
+    append_fullbox_header(pitm_payload.data(), &pitm_size, 1U);
+    append_u32be(pitm_payload.data(), &pitm_size, 0x10002U);
+
+    infe_preview_size = 0U;
+    append_fullbox_header(infe_preview.data(), &infe_preview_size, 3U);
+    append_u32be(infe_preview.data(), &infe_preview_size, 0x10001U);
+    append_u16be(infe_preview.data(), &infe_preview_size, 0U);
+    append_u32be(infe_preview.data(), &infe_preview_size,
+                 make_fourcc('m', 'i', 'm', 'e'));
+    append_text(infe_preview.data(), &infe_preview_size, "preview");
+    append_u8(infe_preview.data(), &infe_preview_size, 0U);
+    append_text(infe_preview.data(), &infe_preview_size, "image/png");
+    append_u8(infe_preview.data(), &infe_preview_size, 0U);
+    append_text(infe_preview.data(), &infe_preview_size, "gzip");
+    append_u8(infe_preview.data(), &infe_preview_size, 0U);
+
+    infe_exif_size = 0U;
+    append_fullbox_header(infe_exif.data(), &infe_exif_size, 3U);
+    append_u32be(infe_exif.data(), &infe_exif_size, 0x10002U);
+    append_u16be(infe_exif.data(), &infe_exif_size, 0U);
+    append_u32be(infe_exif.data(), &infe_exif_size,
+                 make_fourcc('E', 'x', 'i', 'f'));
+    append_text(infe_exif.data(), &infe_exif_size, "exif");
+    append_u8(infe_exif.data(), &infe_exif_size, 0U);
+
+    iinf_size = 0U;
+    append_fullbox_header(iinf_payload.data(), &iinf_size, 2U);
+    append_u32be(iinf_payload.data(), &iinf_size, 2U);
+    append_bmff_box(iinf_payload.data(), &iinf_size,
+                    make_fourcc('i', 'n', 'f', 'e'),
+                    infe_preview.data(), infe_preview_size);
+    append_bmff_box(iinf_payload.data(), &iinf_size,
+                    make_fourcc('i', 'n', 'f', 'e'),
+                    infe_exif.data(), infe_exif_size);
+
+    meta_size = 0U;
+    append_fullbox_header(meta_payload.data(), &meta_size, 0U);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('p', 'i', 't', 'm'),
+                    pitm_payload.data(), pitm_size);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('i', 'i', 'n', 'f'),
+                    iinf_payload.data(), iinf_size);
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('h', 'e', 'i', 'c'));
+    append_u32be(ftyp_payload.data(), &ftyp_size, 0U);
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('m', 'i', 'f', '1'));
+
+    size = 0U;
+    append_bmff_box(file.data(), &size, make_fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload.data(), ftyp_size);
+    append_bmff_box(file.data(), &size, make_fourcc('m', 'e', 't', 'a'),
+                    meta_payload.data(), meta_size);
+
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_bmff_primary_mime_item_info_fixture()
+{
+    std::array<unsigned char, 512> file {};
+    std::array<unsigned char, 16> pitm_payload {};
+    std::array<unsigned char, 128> infe_payload {};
+    std::array<unsigned char, 192> iinf_payload {};
+    std::array<unsigned char, 320> meta_payload {};
+    std::array<unsigned char, 16> ftyp_payload {};
+    std::size_t pitm_size;
+    std::size_t infe_size;
+    std::size_t iinf_size;
+    std::size_t meta_size;
+    std::size_t ftyp_size;
+    std::size_t size;
+
+    pitm_size = 0U;
+    append_fullbox_header(pitm_payload.data(), &pitm_size, 0U);
+    append_u16be(pitm_payload.data(), &pitm_size, 1U);
+
+    infe_size = 0U;
+    append_fullbox_header(infe_payload.data(), &infe_size, 2U);
+    append_u16be(infe_payload.data(), &infe_size, 1U);
+    append_u16be(infe_payload.data(), &infe_size, 7U);
+    append_u32be(infe_payload.data(), &infe_size,
+                 make_fourcc('m', 'i', 'm', 'e'));
+    append_text(infe_payload.data(), &infe_size, "payload");
+    append_u8(infe_payload.data(), &infe_size, 0U);
+    append_text(infe_payload.data(), &infe_size, "application/rdf+xml");
+    append_u8(infe_payload.data(), &infe_size, 0U);
+    append_text(infe_payload.data(), &infe_size, "gzip");
+    append_u8(infe_payload.data(), &infe_size, 0U);
+
+    iinf_size = 0U;
+    append_fullbox_header(iinf_payload.data(), &iinf_size, 2U);
+    append_u32be(iinf_payload.data(), &iinf_size, 1U);
+    append_bmff_box(iinf_payload.data(), &iinf_size,
+                    make_fourcc('i', 'n', 'f', 'e'),
+                    infe_payload.data(), infe_size);
+
+    meta_size = 0U;
+    append_fullbox_header(meta_payload.data(), &meta_size, 0U);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('p', 'i', 't', 'm'),
+                    pitm_payload.data(), pitm_size);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('i', 'i', 'n', 'f'),
+                    iinf_payload.data(), iinf_size);
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('h', 'e', 'i', 'c'));
+    append_u32be(ftyp_payload.data(), &ftyp_size, 0U);
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('m', 'i', 'f', '1'));
+
+    size = 0U;
+    append_bmff_box(file.data(), &size, make_fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload.data(), ftyp_size);
+    append_bmff_box(file.data(), &size, make_fourcc('m', 'e', 't', 'a'),
+                    meta_payload.data(), meta_size);
+
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_bmff_item_info_without_pitm_fixture()
+{
+    std::array<unsigned char, 384> file {};
+    std::array<unsigned char, 128> infe_payload {};
+    std::array<unsigned char, 192> iinf_payload {};
+    std::array<unsigned char, 256> meta_payload {};
+    std::array<unsigned char, 16> ftyp_payload {};
+    std::size_t infe_size;
+    std::size_t iinf_size;
+    std::size_t meta_size;
+    std::size_t ftyp_size;
+    std::size_t size;
+
+    infe_size = 0U;
+    append_fullbox_header(infe_payload.data(), &infe_size, 2U);
+    append_u16be(infe_payload.data(), &infe_size, 3U);
+    append_u16be(infe_payload.data(), &infe_size, 0U);
+    append_u32be(infe_payload.data(), &infe_size,
+                 make_fourcc('m', 'i', 'm', 'e'));
+    append_text(infe_payload.data(), &infe_size, "sidecar");
+    append_u8(infe_payload.data(), &infe_size, 0U);
+    append_text(infe_payload.data(), &infe_size, "application/json");
+    append_u8(infe_payload.data(), &infe_size, 0U);
+    append_u8(infe_payload.data(), &infe_size, 0U);
+
+    iinf_size = 0U;
+    append_fullbox_header(iinf_payload.data(), &iinf_size, 2U);
+    append_u32be(iinf_payload.data(), &iinf_size, 1U);
+    append_bmff_box(iinf_payload.data(), &iinf_size,
+                    make_fourcc('i', 'n', 'f', 'e'),
+                    infe_payload.data(), infe_size);
+
+    meta_size = 0U;
+    append_fullbox_header(meta_payload.data(), &meta_size, 0U);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('i', 'i', 'n', 'f'),
+                    iinf_payload.data(), iinf_size);
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('h', 'e', 'i', 'c'));
+    append_u32be(ftyp_payload.data(), &ftyp_size, 0U);
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('m', 'i', 'f', '1'));
+
+    size = 0U;
+    append_bmff_box(file.data(), &size, make_fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload.data(), ftyp_size);
+    append_bmff_box(file.data(), &size, make_fourcc('m', 'e', 't', 'a'),
+                    meta_payload.data(), meta_size);
+
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_bmff_primary_uri_item_info_fixture()
+{
+    std::array<unsigned char, 512> file {};
+    std::array<unsigned char, 16> pitm_payload {};
+    std::array<unsigned char, 128> infe_payload {};
+    std::array<unsigned char, 192> iinf_payload {};
+    std::array<unsigned char, 320> meta_payload {};
+    std::array<unsigned char, 16> ftyp_payload {};
+    std::size_t pitm_size;
+    std::size_t infe_size;
+    std::size_t iinf_size;
+    std::size_t meta_size;
+    std::size_t ftyp_size;
+    std::size_t size;
+
+    pitm_size = 0U;
+    append_fullbox_header(pitm_payload.data(), &pitm_size, 0U);
+    append_u16be(pitm_payload.data(), &pitm_size, 1U);
+
+    infe_size = 0U;
+    append_fullbox_header(infe_payload.data(), &infe_size, 2U);
+    append_u16be(infe_payload.data(), &infe_size, 1U);
+    append_u16be(infe_payload.data(), &infe_size, 3U);
+    append_u32be(infe_payload.data(), &infe_size,
+                 make_fourcc('u', 'r', 'i', ' '));
+    append_text(infe_payload.data(), &infe_size, "link");
+    append_u8(infe_payload.data(), &infe_size, 0U);
+    append_text(infe_payload.data(), &infe_size, "https://ns.example/item");
+    append_u8(infe_payload.data(), &infe_size, 0U);
+
+    iinf_size = 0U;
+    append_fullbox_header(iinf_payload.data(), &iinf_size, 2U);
+    append_u32be(iinf_payload.data(), &iinf_size, 1U);
+    append_bmff_box(iinf_payload.data(), &iinf_size,
+                    make_fourcc('i', 'n', 'f', 'e'),
+                    infe_payload.data(), infe_size);
+
+    meta_size = 0U;
+    append_fullbox_header(meta_payload.data(), &meta_size, 0U);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('p', 'i', 't', 'm'),
+                    pitm_payload.data(), pitm_size);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('i', 'i', 'n', 'f'),
+                    iinf_payload.data(), iinf_size);
 
     ftyp_size = 0U;
     append_u32be(ftyp_payload.data(), &ftyp_size,
@@ -4146,8 +4805,28 @@ main(int argc, char** argv)
                   build_bmff_aux_subtype_upstream_fixture(), false)
          && ok;
     ok = run_case("bmff_pred_iref", build_bmff_pred_fixture(), false) && ok;
+    ok = run_case("bmff_v1_auxl_iref", build_bmff_v1_auxl_fixture(), false)
+         && ok;
     ok = run_case("bmff_nonprimary_typed_iref",
                   build_bmff_nonprimary_typed_iref_fixture(), false)
+         && ok;
+    ok = run_case("bmff_v1_nonprimary_typed_iref",
+                  build_bmff_v1_nonprimary_typed_iref_fixture(), false)
+         && ok;
+    ok = run_case("bmff_duplicate_edges",
+                  build_bmff_duplicate_edges_fixture(), false)
+         && ok;
+    ok = run_case("bmff_item_info_rows",
+                  build_bmff_item_info_rows_fixture(), false)
+         && ok;
+    ok = run_case("bmff_primary_mime_item_info",
+                  build_bmff_primary_mime_item_info_fixture(), false)
+         && ok;
+    ok = run_case("bmff_item_info_without_pitm",
+                  build_bmff_item_info_without_pitm_fixture(), false)
+         && ok;
+    ok = run_case("bmff_primary_uri_item_info",
+                  build_bmff_primary_uri_item_info_fixture(), false)
          && ok;
     ok = run_case("tiff_geotiff", build_tiff_geotiff_fixture(), false) && ok;
     ok = run_case("tiff_printim", build_tiff_printim_fixture(), false) && ok;
@@ -4166,6 +4845,18 @@ main(int argc, char** argv)
                   build_crw_rawjpginfo_whitesample_fixture(), false)
          && ok;
     ok = run_case("crw_shotinfo", build_crw_shotinfo_fixture(), false) && ok;
+    ok = run_case("tiff_casio_makernote",
+                  build_tiff_casio_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_casio_legacy_makernote",
+                  build_tiff_casio_legacy_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_casio_legacy_ifd_makernote",
+                  build_tiff_casio_legacy_ifd_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_casio_faceinfo2_makernote",
+                  build_tiff_casio_faceinfo2_makernote_fixture(), true)
+         && ok;
     ok = run_case("tiff_fuji_makernote",
                   build_tiff_fuji_makernote_fixture(), true)
          && ok;

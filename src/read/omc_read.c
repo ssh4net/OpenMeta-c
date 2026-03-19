@@ -297,6 +297,29 @@ omc_read_store_block(omc_store* store, const omc_blk_ref* block,
     return st == OMC_STATUS_OK;
 }
 
+static void
+omc_read_clear_casio_simple_context(omc_store* store, omc_size entry_start)
+{
+    omc_size i;
+
+    if (store == (omc_store*)0 || entry_start >= store->entry_count) {
+        return;
+    }
+    for (i = entry_start; i < store->entry_count; ++i) {
+        omc_entry* entry;
+
+        entry = &store->entries[i];
+        if ((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) == 0U
+            || entry->origin.name_context_kind
+                   != OMC_ENTRY_NAME_CTX_CASIO_TYPE2_LEGACY) {
+            continue;
+        }
+        entry->flags &= (omc_entry_flags)~OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
+        entry->origin.name_context_variant = 0U;
+    }
+}
+
 static int
 omc_read_read_u32be(const omc_u8* bytes, omc_size size, omc_u64 off,
                     omc_u32* out_value)
@@ -889,6 +912,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                 exif_res = omc_exif_dec(file_bytes, file_size, store, block_id,
                                         out_ifds, ifd_cap, &use_opts->exif);
                 omc_read_merge_exif(&res.exif, exif_res);
+                omc_read_clear_casio_simple_context(store, entry_start);
                 if (exif_res.status == OMC_EXIF_OK
                     || exif_res.status == OMC_EXIF_TRUNCATED) {
                     omc_read_decode_tiff_embedded(use_opts, store, block_id,
@@ -909,6 +933,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                         store, block_id, out_ifds, ifd_cap,
                                         &use_opts->exif);
                 omc_read_merge_exif(&res.exif, exif_res);
+                omc_read_clear_casio_simple_context(store, entry_start);
             }
         } else if (block->kind == OMC_BLK_CIFF) {
             omc_exif_res ciff_res;
@@ -1042,11 +1067,14 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                 omc_read_merge_jumbf(&res.jumbf, jumbf_res);
             } else if (block->aux_u32 == OMC_FOURCC('E', 'x', 'i', 'f')) {
                 omc_exif_res exif_res;
+                omc_size entry_start;
 
+                entry_start = store->entry_count;
                 exif_res = omc_exif_dec(block_view.data, block_view.size,
                                         store, block_id, out_ifds, ifd_cap,
                                         &use_opts->exif);
                 omc_read_merge_exif(&res.exif, exif_res);
+                omc_read_clear_casio_simple_context(store, entry_start);
             }
         } else if (block->kind == OMC_BLK_COMMENT) {
             omc_const_bytes block_view;

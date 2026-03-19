@@ -560,6 +560,24 @@ omc_exif_read_u16be_raw(const omc_u8* bytes, omc_u64 size, omc_u64 offset,
 }
 
 static int
+omc_exif_read_u32be_raw(const omc_u8* bytes, omc_u64 size, omc_u64 offset,
+                        omc_u32* out_value)
+{
+    if (bytes == (const omc_u8*)0 || out_value == (omc_u32*)0) {
+        return 0;
+    }
+    if (offset > size || (size - offset) < 4U) {
+        return 0;
+    }
+
+    *out_value = (((omc_u32)bytes[(omc_size)offset + 0U]) << 24)
+                 | (((omc_u32)bytes[(omc_size)offset + 1U]) << 16)
+                 | (((omc_u32)bytes[(omc_size)offset + 2U]) << 8)
+                 | (((omc_u32)bytes[(omc_size)offset + 3U]) << 0);
+    return 1;
+}
+
+static int
 omc_exif_read_u8_raw(const omc_u8* bytes, omc_u64 size, omc_u64 offset,
                      omc_u8* out_value)
 {
@@ -2048,7 +2066,8 @@ typedef enum omc_exif_mn_vendor {
     OMC_EXIF_MN_FLIR = 7,
     OMC_EXIF_MN_HP = 8,
     OMC_EXIF_MN_NINTENDO = 9,
-    OMC_EXIF_MN_RECONYX = 10
+    OMC_EXIF_MN_RECONYX = 10,
+    OMC_EXIF_MN_CASIO = 11
 } omc_exif_mn_vendor;
 
 static omc_exif_cfg
@@ -2163,6 +2182,20 @@ omc_exif_set_nintendo_tokens(omc_exif_opts* opts)
     opts->tokens.exif_ifd_token = "mk_nintendo_exififd";
     opts->tokens.gps_ifd_token = "mk_nintendo_gpsifd";
     opts->tokens.interop_ifd_token = "mk_nintendo_interopifd";
+}
+
+static void
+omc_exif_set_casio_tokens(omc_exif_opts* opts)
+{
+    if (opts == (omc_exif_opts*)0) {
+        return;
+    }
+
+    opts->tokens.ifd_prefix = "mk_casio_type2_";
+    opts->tokens.subifd_prefix = "mk_casio_type2_subifd_";
+    opts->tokens.exif_ifd_token = "mk_casio_type2_exififd";
+    opts->tokens.gps_ifd_token = "mk_casio_type2_gpsifd";
+    opts->tokens.interop_ifd_token = "mk_casio_type2_interopifd";
 }
 
 static void
@@ -2609,6 +2642,10 @@ omc_exif_detect_makernote_vendor(omc_exif_ctx* ctx, const omc_u8* raw,
         && memcmp(raw, "RECONYXH2", 9U) == 0) {
         return OMC_EXIF_MN_RECONYX;
     }
+    if (raw != (const omc_u8*)0 && raw_size >= 4U
+        && (memcmp(raw, "QVC\0", 4U) == 0 || memcmp(raw, "DCI\0", 4U) == 0)) {
+        return OMC_EXIF_MN_CASIO;
+    }
     if (raw != (const omc_u8*)0 && raw_size >= 10U
         && raw[0] == (omc_u8)'G' && raw[1] == (omc_u8)'E'
         && raw[2] == 0x0CU && raw[6] == 0x16U) {
@@ -2653,6 +2690,9 @@ omc_exif_detect_makernote_vendor(omc_exif_ctx* ctx, const omc_u8* raw,
     }
     if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "RECONYX")) {
         return OMC_EXIF_MN_RECONYX;
+    }
+    if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "CASIO")) {
+        return OMC_EXIF_MN_CASIO;
     }
     return OMC_EXIF_MN_UNKNOWN;
 }
@@ -7939,6 +7979,605 @@ omc_exif_decode_reconyx_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
 }
 
 static int
+omc_exif_casio_legacy_main_tag(omc_u16 tag)
+{
+    return (tag <= 0x0019U || tag == 0x0E00U);
+}
+
+static void
+omc_exif_casio_mark_last_legacy_entry(omc_exif_ctx* ctx, omc_u16 tag)
+{
+    omc_entry* entry;
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->measure_only || ctx->store == (omc_store*)0
+        || ctx->store->entry_count == 0U || !omc_exif_casio_legacy_main_tag(tag)) {
+        return;
+    }
+    entry = &ctx->store->entries[ctx->store->entry_count - 1U];
+    if (entry->key.kind != OMC_KEY_EXIF_TAG) {
+        return;
+    }
+    entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+    entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_CASIO_TYPE2_LEGACY;
+    entry->origin.name_context_variant = 1U;
+}
+
+static void
+omc_exif_casio_mark_legacy_entries(omc_exif_ctx* ctx, const char* ifd_name)
+{
+    omc_size i;
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0
+        || ifd_name == (const char*)0) {
+        return;
+    }
+    for (i = 0U; i < ctx->store->entry_count; ++i) {
+        omc_entry* entry;
+
+        entry = &ctx->store->entries[i];
+        if (entry->key.kind != OMC_KEY_EXIF_TAG
+            || !omc_exif_casio_legacy_main_tag(entry->key.u.exif_tag.tag)
+            || !omc_exif_entry_ifd_equals(ctx->store, entry, ifd_name)) {
+            continue;
+        }
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_CASIO_TYPE2_LEGACY;
+        entry->origin.name_context_variant = 1U;
+    }
+}
+
+static int
+omc_exif_casio_faceinfo1_bytes(const omc_u8* raw, omc_u64 raw_size)
+{
+    if (raw == (const omc_u8*)0) {
+        return 0;
+    }
+    if (raw_size >= 2U && raw[0] == 0U && raw[1] == 0U) {
+        return 1;
+    }
+    if (raw_size >= 5U && raw[1] == 0x02U && raw[2] == 0x80U
+        && raw[3] == 0x01U && raw[4] == 0xE0U) {
+        return 1;
+    }
+    return 0;
+}
+
+static int
+omc_exif_casio_faceinfo2_bytes(const omc_u8* raw, omc_u64 raw_size)
+{
+    return raw != (const omc_u8*)0 && raw_size >= 2U && raw[0] == 0x02U
+           && raw[1] == 0x01U;
+}
+
+static int
+omc_exif_casio_frame_size_plausible(omc_u16 width, omc_u16 height)
+{
+    return width != 0U && height != 0U && width <= 20000U && height <= 20000U;
+}
+
+static int
+omc_exif_casio_choose_pair_endian(const omc_u8* raw, omc_u64 raw_size,
+                                  omc_u64 off, int default_le, int* out_le)
+{
+    omc_u16 a_be;
+    omc_u16 b_be;
+    omc_u16 a_le;
+    omc_u16 b_le;
+    int be_ok;
+    int le_ok;
+
+    if (out_le == (int*)0 || raw == (const omc_u8*)0 || off > raw_size
+        || (raw_size - off) < 4U) {
+        return 0;
+    }
+
+    a_be = 0U;
+    b_be = 0U;
+    a_le = 0U;
+    b_le = 0U;
+    be_ok = omc_exif_read_u16be_raw(raw, raw_size, off + 0U, &a_be)
+            && omc_exif_read_u16be_raw(raw, raw_size, off + 2U, &b_be)
+            && omc_exif_casio_frame_size_plausible(a_be, b_be);
+    le_ok = omc_exif_read_u16le_raw(raw, raw_size, off + 0U, &a_le)
+            && omc_exif_read_u16le_raw(raw, raw_size, off + 2U, &b_le)
+            && omc_exif_casio_frame_size_plausible(a_le, b_le);
+
+    if (be_ok && !le_ok) {
+        *out_le = 0;
+        return 1;
+    }
+    if (le_ok && !be_ok) {
+        *out_le = 1;
+        return 1;
+    }
+
+    *out_le = default_le;
+    return 1;
+}
+
+static int
+omc_exif_casio_read_u16_array(const omc_u8* raw, omc_u64 raw_size, omc_u64 off,
+                              int little_endian, omc_u16* out_values,
+                              omc_u32 count)
+{
+    omc_u32 i;
+
+    if (raw == (const omc_u8*)0 || out_values == (omc_u16*)0 || count == 0U
+        || off > raw_size || (raw_size - off) < ((omc_u64)count * 2U)) {
+        return 0;
+    }
+    for (i = 0U; i < count; ++i) {
+        omc_u16 value16;
+
+        value16 = 0U;
+        if (little_endian) {
+            if (!omc_exif_read_u16le_raw(raw, raw_size, off + ((omc_u64)i * 2U),
+                                         &value16)) {
+                return 0;
+            }
+        } else if (!omc_exif_read_u16be_raw(raw, raw_size,
+                                            off + ((omc_u64)i * 2U),
+                                            &value16)) {
+            return 0;
+        }
+        out_values[i] = value16;
+    }
+    return 1;
+}
+
+static int
+omc_exif_casio_decode_faceinfo1(omc_exif_ctx* ctx, const omc_u8* raw,
+                                omc_u64 raw_size, omc_u32 index)
+{
+    char ifd_name[64];
+    omc_u16 dims[2];
+    int little_endian;
+    omc_exif_status status;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0
+        || !omc_exif_make_subifd_name("mk_casio", "faceinfo1", index, ifd_name,
+                                      sizeof(ifd_name))) {
+        return 1;
+    }
+
+    status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0000U, 0U, raw[0]);
+    if (status != OMC_EXIF_OK) {
+        ctx->res.status = status;
+        return 0;
+    }
+
+    little_endian = 0;
+    (void)omc_exif_casio_choose_pair_endian(raw, raw_size, 0x0001U, 0,
+                                            &little_endian);
+    if (raw_size >= 5U && omc_exif_casio_read_u16_array(raw, raw_size, 0x0001U,
+                                                        little_endian, dims,
+                                                        2U)) {
+        status = omc_exif_emit_derived_exif_array_copy(
+            ctx, ifd_name, 0x0001U, 1U, OMC_ELEM_U16, (const omc_u8*)dims,
+            (omc_u32)sizeof(dims), 2U);
+        if (status != OMC_EXIF_OK) {
+            ctx->res.status = status;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+omc_exif_casio_decode_faceinfo2(omc_exif_ctx* ctx, const omc_u8* raw,
+                                omc_u64 raw_size, omc_u32 index)
+{
+    char ifd_name[64];
+    omc_u16 dims[2];
+    omc_u16 rect[4];
+    static const omc_u16 k_face_pos_tags[10] = {
+        0x0018U, 0x004CU, 0x0080U, 0x00B4U, 0x00E8U,
+        0x011CU, 0x0150U, 0x0184U, 0x01B8U, 0x01ECU,
+    };
+    int little_endian;
+    omc_u32 face_count;
+    omc_u32 face_n;
+    omc_u32 i;
+    omc_exif_status status;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 3U
+        || !omc_exif_make_subifd_name("mk_casio", "faceinfo2", index, ifd_name,
+                                      sizeof(ifd_name))) {
+        return 1;
+    }
+
+    status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0002U, 0U, raw[2]);
+    if (status != OMC_EXIF_OK) {
+        ctx->res.status = status;
+        return 0;
+    }
+    face_count = (omc_u32)raw[2];
+
+    little_endian = 1;
+    (void)omc_exif_casio_choose_pair_endian(raw, raw_size, 0x0004U, 1,
+                                            &little_endian);
+    if (raw_size >= 8U && omc_exif_casio_read_u16_array(raw, raw_size, 0x0004U,
+                                                        little_endian, dims,
+                                                        2U)) {
+        status = omc_exif_emit_derived_exif_array_copy(
+            ctx, ifd_name, 0x0004U, 1U, OMC_ELEM_U16, (const omc_u8*)dims,
+            (omc_u32)sizeof(dims), 2U);
+        if (status != OMC_EXIF_OK) {
+            ctx->res.status = status;
+            return 0;
+        }
+    }
+    if (raw_size >= 9U) {
+        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0008U, 2U,
+                                               raw[0x0008U]);
+        if (status != OMC_EXIF_OK) {
+            ctx->res.status = status;
+            return 0;
+        }
+    }
+    face_n = (face_count < 10U) ? face_count : 10U;
+    for (i = 0U; i < face_n; ++i) {
+        omc_u16 tag;
+
+        tag = k_face_pos_tags[i];
+        if ((omc_u64)tag > raw_size || (raw_size - (omc_u64)tag) < 8U
+            || !omc_exif_casio_read_u16_array(raw, raw_size, (omc_u64)tag,
+                                              little_endian, rect, 4U)) {
+            continue;
+        }
+        status = omc_exif_emit_derived_exif_array_copy(
+            ctx, ifd_name, tag, 3U + i, OMC_ELEM_U16, (const omc_u8*)rect,
+            (omc_u32)sizeof(rect), 4U);
+        if (status != OMC_EXIF_OK) {
+            ctx->res.status = status;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static omc_exif_status
+omc_exif_casio_add_u16_array_entry(omc_exif_ctx* ctx,
+                                   const omc_byte_ref* token_ref,
+                                   omc_u16 tag, omc_u32 count,
+                                   const omc_u8* raw, omc_u64 raw_size,
+                                   omc_u32 order_in_block,
+                                   omc_entry_flags flags)
+{
+    omc_entry entry;
+    omc_byte_ref ref;
+    omc_mut_bytes view;
+    omc_exif_status status;
+    omc_status st;
+    omc_u32 i;
+
+    if (ctx == (omc_exif_ctx*)0 || token_ref == (const omc_byte_ref*)0
+        || raw == (const omc_u8*)0 || count == 0U
+        || raw_size < ((omc_u64)count * 2U)) {
+        return OMC_EXIF_MALFORMED;
+    }
+    if (ctx->measure_only
+        || ((omc_u64)count * 2U) > ctx->opts.limits.max_value_bytes) {
+        return omc_exif_add_entry(ctx, token_ref, tag, 3U, (omc_u64)count,
+                                  raw, raw_size, order_in_block, flags);
+    }
+
+    status = omc_exif_store_ref(ctx, raw, (omc_u64)count * 2U, &ref);
+    if (status != OMC_EXIF_OK) {
+        return status;
+    }
+    view = omc_arena_view_mut(&ctx->store->arena, ref);
+    if (view.data == (omc_u8*)0
+        || view.size < (omc_size)((omc_u64)count * 2U)) {
+        return OMC_EXIF_MALFORMED;
+    }
+
+    for (i = 0U; i < count; ++i) {
+        omc_u16 value16;
+
+        value16 = 0U;
+        if (!omc_exif_read_u16(ctx->cfg, raw, (omc_size)raw_size,
+                               (omc_u64)i * 2U, &value16)) {
+            return OMC_EXIF_MALFORMED;
+        }
+        view.data[(omc_size)i * 2U + 0U] = (omc_u8)(value16 & 0xFFU);
+        view.data[(omc_size)i * 2U + 1U] = (omc_u8)((value16 >> 8) & 0xFFU);
+    }
+
+    memset(&entry, 0, sizeof(entry));
+    entry.key.kind = OMC_KEY_EXIF_TAG;
+    entry.key.u.exif_tag.ifd = *token_ref;
+    entry.key.u.exif_tag.tag = tag;
+    entry.origin.block = ctx->source_block;
+    entry.origin.order_in_block = order_in_block;
+    entry.origin.wire_type.family = OMC_WIRE_TIFF;
+    entry.origin.wire_type.code = 3U;
+    entry.origin.wire_count = count;
+    entry.origin.name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
+    entry.origin.name_context_variant = 0U;
+    entry.flags = flags;
+    entry.value.kind = OMC_VAL_ARRAY;
+    entry.value.elem_type = OMC_ELEM_U16;
+    entry.value.count = count;
+    entry.value.u.ref = ref;
+
+    st = omc_store_add_entry(ctx->store, &entry, (omc_entry_id*)0);
+    if (st == OMC_STATUS_NO_MEMORY) {
+        return OMC_EXIF_NOMEM;
+    }
+    if (st != OMC_STATUS_OK) {
+        return OMC_EXIF_LIMIT;
+    }
+    return OMC_EXIF_OK;
+}
+
+static int
+omc_exif_casio_decode_binary_subdirs(omc_exif_ctx* ctx)
+{
+    omc_u32 faceinfo1_index;
+    omc_u32 faceinfo2_index;
+    omc_size i;
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0) {
+        return 1;
+    }
+
+    faceinfo1_index = 0U;
+    faceinfo2_index = 0U;
+    for (i = 0U; i < ctx->store->entry_count; ++i) {
+        omc_entry* entry;
+        omc_const_bytes raw_view;
+
+        entry = &ctx->store->entries[i];
+        if (entry->key.kind != OMC_KEY_EXIF_TAG
+            || entry->key.u.exif_tag.tag != 0x2089U
+            || !omc_exif_entry_ifd_equals(ctx->store, entry, "mk_casio_type2_0")) {
+            continue;
+        }
+        if (entry->value.kind != OMC_VAL_BYTES
+            && entry->value.kind != OMC_VAL_ARRAY) {
+            continue;
+        }
+        raw_view = omc_arena_view(&ctx->store->arena, entry->value.u.ref);
+        if (raw_view.data == (const omc_u8*)0 || raw_view.size == 0U) {
+            continue;
+        }
+
+        if (omc_exif_casio_faceinfo1_bytes(raw_view.data, raw_view.size)) {
+            if (!omc_exif_casio_decode_faceinfo1(ctx, raw_view.data,
+                                                 raw_view.size,
+                                                 faceinfo1_index++)) {
+                return 0;
+            }
+            continue;
+        }
+        if (omc_exif_casio_faceinfo2_bytes(raw_view.data, raw_view.size)) {
+            if (!omc_exif_casio_decode_faceinfo2(ctx, raw_view.data,
+                                                 raw_view.size,
+                                                 faceinfo2_index++)) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static int
+omc_exif_casio_try_read_entry(const omc_u8* raw, omc_u64 raw_size,
+                              omc_exif_cfg cfg, omc_u64 entry_off,
+                              omc_u16* out_tag, omc_u16* out_type,
+                              omc_u32* out_count, omc_u32* out_off32)
+{
+    return omc_exif_read_u16(cfg, raw, (omc_size)raw_size, entry_off + 0U,
+                             out_tag)
+           && omc_exif_read_u16(cfg, raw, (omc_size)raw_size, entry_off + 2U,
+                                out_type)
+           && omc_exif_read_u32(cfg, raw, (omc_size)raw_size, entry_off + 4U,
+                                out_count)
+           && omc_exif_read_u32(cfg, raw, (omc_size)raw_size, entry_off + 8U,
+                                out_off32);
+}
+
+static int
+omc_exif_casio_has_legacy_main_compat(const omc_u8* raw, omc_u64 raw_size,
+                                      omc_exif_cfg cfg, omc_u64 entry_count,
+                                      omc_u64 entries_off)
+{
+    int has_printim;
+    int has_modern;
+    omc_u64 i;
+
+    has_printim = 0;
+    has_modern = 0;
+    for (i = 0U; i < entry_count; ++i) {
+        omc_u16 tag16;
+        omc_u16 type16;
+        omc_u32 count32;
+        omc_u32 off32;
+
+        tag16 = 0U;
+        type16 = 0U;
+        count32 = 0U;
+        off32 = 0U;
+        if (!omc_exif_casio_try_read_entry(raw, raw_size, cfg,
+                                           entries_off + (i * 12U),
+                                           &tag16, &type16, &count32,
+                                           &off32)) {
+            return 0;
+        }
+        if (tag16 == 0x0E00U) {
+            has_printim = 1;
+        }
+        if (tag16 >= 0x2000U) {
+            has_modern = 1;
+        }
+    }
+    return has_printim && !has_modern;
+}
+
+static int
+omc_exif_decode_casio_makernote(omc_exif_ctx* ctx, omc_u64 maker_note_off,
+                                const omc_u8* raw, omc_u64 raw_size)
+{
+    omc_exif_cfg qvc_cfg;
+    omc_exif_opts mn_opts;
+    omc_exif_ctx child;
+    omc_byte_ref token_ref;
+    omc_u64 entry_count;
+    omc_u64 entries_off;
+    int legacy_main_compat;
+    int little_endian;
+    int be_ok;
+    int le_ok;
+
+    (void)maker_note_off;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 2U) {
+        return 1;
+    }
+
+    mn_opts = ctx->opts;
+    mn_opts.decode_printim = 0;
+    mn_opts.decode_geotiff = 0;
+    mn_opts.decode_makernote = 0;
+    mn_opts.decode_embedded_containers = 0;
+    omc_exif_set_casio_tokens(&mn_opts);
+
+    if (raw_size >= 4U
+        && (memcmp(raw, "QVC\0", 4U) == 0 || memcmp(raw, "DCI\0", 4U) == 0)) {
+        omc_u32 be_count;
+        omc_u16 le_version;
+        omc_u16 le_count;
+
+        entries_off = 8U;
+        be_count = 0U;
+        le_version = 0U;
+        le_count = 0U;
+        be_ok = omc_exif_read_u32be_raw(raw, raw_size, 4U, &be_count)
+                && be_count != 0U
+                && be_count <= ctx->opts.limits.max_entries_per_ifd
+                && entries_off <= raw_size
+                && ((omc_u64)be_count * 12U) <= (raw_size - entries_off);
+        le_ok = 0;
+        if (!be_ok) {
+            le_ok = omc_exif_read_u16le_raw(raw, raw_size, 4U, &le_version)
+                    && omc_exif_read_u16le_raw(raw, raw_size, 6U, &le_count)
+                    && le_count != 0U
+                    && le_count <= ctx->opts.limits.max_entries_per_ifd
+                    && entries_off <= raw_size
+                    && ((omc_u64)le_count * 12U) <= (raw_size - entries_off);
+        }
+        if (!be_ok && !le_ok) {
+            ctx->res.status = OMC_EXIF_MALFORMED;
+            return 1;
+        }
+
+        little_endian = le_ok ? 1 : 0;
+        entry_count = le_ok ? (omc_u64)le_count : (omc_u64)be_count;
+        qvc_cfg = omc_exif_make_classic_cfg(little_endian);
+        legacy_main_compat = omc_exif_casio_has_legacy_main_compat(
+            raw, raw_size, qvc_cfg, entry_count, entries_off);
+
+        omc_exif_init_child_cfg(&child, ctx, ctx->bytes, ctx->size, &mn_opts,
+                                qvc_cfg);
+        memset(&token_ref, 0, sizeof(token_ref));
+        if (omc_exif_make_token(&child, OMC_EXIF_IFD, 0U, &token_ref)
+            != OMC_EXIF_OK) {
+            ctx->res.status = OMC_EXIF_LIMIT;
+            return 0;
+        }
+
+        {
+            omc_u64 i;
+
+            for (i = 0U; i < entry_count; ++i) {
+                omc_u16 tag16;
+                omc_u16 type16;
+                omc_u32 count32;
+                omc_u32 off32;
+                omc_u32 elem_size;
+                omc_u64 value_bytes;
+                const omc_u8* value_ptr;
+                omc_exif_status status;
+
+                tag16 = 0U;
+                type16 = 0U;
+                count32 = 0U;
+                off32 = 0U;
+                value_ptr = (const omc_u8*)0;
+                if (!omc_exif_casio_try_read_entry(raw, raw_size, qvc_cfg,
+                                                   entries_off + (i * 12U),
+                                                   &tag16, &type16, &count32,
+                                                   &off32)) {
+                    ctx->res.status = OMC_EXIF_MALFORMED;
+                    return 1;
+                }
+                if (!omc_exif_elem_size(type16, &elem_size)
+                    || !omc_exif_mul_u64((omc_u64)elem_size,
+                                         (omc_u64)count32, &value_bytes)) {
+                    continue;
+                }
+                if (value_bytes <= 4U) {
+                    value_ptr = raw + entries_off + (i * 12U) + 8U;
+                } else if ((omc_u64)off32 <= (omc_u64)ctx->size
+                           && value_bytes <= ((omc_u64)ctx->size
+                                              - (omc_u64)off32)) {
+                    value_ptr = ctx->bytes + off32;
+                } else if ((omc_u64)off32 <= raw_size
+                           && value_bytes <= (raw_size - (omc_u64)off32)) {
+                    value_ptr = raw + off32;
+                } else {
+                    ctx->res.status = OMC_EXIF_MALFORMED;
+                    continue;
+                }
+
+                if (type16 == 3U && count32 > 1U) {
+                    status = omc_exif_casio_add_u16_array_entry(
+                        &child, &token_ref, tag16, count32, value_ptr,
+                        value_bytes, (omc_u32)i, OMC_ENTRY_FLAG_NONE);
+                } else {
+                    status = omc_exif_add_entry(&child, &token_ref, tag16,
+                                                type16, (omc_u64)count32,
+                                                value_ptr, value_bytes,
+                                                (omc_u32)i,
+                                                OMC_ENTRY_FLAG_NONE);
+                }
+                if (status != OMC_EXIF_OK) {
+                    ctx->res.status = status;
+                    return 0;
+                }
+                if (legacy_main_compat) {
+                    omc_exif_casio_mark_last_legacy_entry(&child, tag16);
+                }
+            }
+        }
+        return omc_exif_casio_decode_binary_subdirs(ctx);
+    }
+
+    qvc_cfg = omc_exif_make_classic_cfg(1);
+    {
+        omc_u16 count16;
+
+        count16 = 0U;
+        if (!omc_exif_read_u16le_raw(raw, raw_size, 0U, &count16)
+            || count16 == 0U || count16 > ctx->opts.limits.max_entries_per_ifd
+            || (2U + ((omc_u64)count16 * 12U) + 4U) > raw_size) {
+            return 1;
+        }
+        legacy_main_compat = omc_exif_casio_has_legacy_main_compat(
+            raw, raw_size, qvc_cfg, (omc_u64)count16, 2U);
+    }
+
+    if (!omc_exif_decode_ifd_blob_loose(ctx, raw, raw_size, 0U, &mn_opts)) {
+        return 0;
+    }
+    if (legacy_main_compat) {
+        omc_exif_casio_mark_legacy_entries(ctx, "mk_casio_type2_0");
+    }
+    return omc_exif_casio_decode_binary_subdirs(ctx);
+}
+
+static int
 omc_exif_decode_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
                           omc_u64 raw_size)
 {
@@ -7993,6 +8632,10 @@ omc_exif_decode_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
     }
     if (vendor == OMC_EXIF_MN_RECONYX) {
         return omc_exif_decode_reconyx_makernote(ctx, raw, raw_size);
+    }
+    if (vendor == OMC_EXIF_MN_CASIO) {
+        return omc_exif_decode_casio_makernote(ctx, maker_note_off, raw,
+                                               raw_size);
     }
     return 1;
 }

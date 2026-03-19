@@ -368,6 +368,143 @@ make_fuji_makernote(omc_u8* out)
 }
 
 static omc_size
+make_casio_type2_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_raw(out, &size, "QVC\0", 4U);
+    append_u32be(out, &size, 1U);
+    append_u16be(out, &size, 0x0002U);
+    append_u16be(out, &size, 3U);
+    append_u32be(out, &size, 2U);
+    append_u16be(out, &size, 320U);
+    append_u16be(out, &size, 240U);
+    return size;
+}
+
+static omc_size
+make_casio_type2_legacy_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_raw(out, &size, "QVC\0", 4U);
+    append_u32be(out, &size, 3U);
+
+    append_u16be(out, &size, 0x0002U);
+    append_u16be(out, &size, 3U);
+    append_u32be(out, &size, 1U);
+    append_u16be(out, &size, 3U);
+    append_u16be(out, &size, 0U);
+
+    append_u16be(out, &size, 0x0008U);
+    append_u16be(out, &size, 3U);
+    append_u32be(out, &size, 1U);
+    append_u16be(out, &size, 1U);
+    append_u16be(out, &size, 0U);
+
+    append_u16be(out, &size, 0x0E00U);
+    append_u16be(out, &size, 7U);
+    append_u32be(out, &size, 4U);
+    append_u32be(out, &size, 0x01020304U);
+    return size;
+}
+
+static omc_size
+make_casio_type2_legacy_ifd_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 3U);
+
+    append_u16le(out, &size, 0x0002U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 3U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0008U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0E00U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 4U);
+    append_u32le(out, &size, 0x04030201U);
+
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_casio_type2_makernote_fr10_variant(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_raw(out, &size, "QVC\0", 4U);
+    append_u16le(out, &size, 0U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0002U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 2U);
+    append_u16le(out, &size, 320U);
+    append_u16le(out, &size, 240U);
+    return size;
+}
+
+static omc_size
+make_casio_type2_makernote_out_of_line(omc_u8* out, omc_u32 payload_off)
+{
+    omc_size size;
+
+    size = 0U;
+    append_raw(out, &size, "QVC\0", 4U);
+    append_u32be(out, &size, 1U);
+    append_u16be(out, &size, 0x2000U);
+    append_u16be(out, &size, 7U);
+    append_u32be(out, &size, 6U);
+    append_u32be(out, &size, payload_off);
+    return size;
+}
+
+static omc_size
+make_casio_type2_makernote_faceinfo1(omc_u8* out, omc_u32 payload_off,
+                                     omc_u32 payload_bytes)
+{
+    omc_size size;
+
+    size = 0U;
+    append_raw(out, &size, "QVC\0", 4U);
+    append_u32be(out, &size, 1U);
+    append_u16be(out, &size, 0x2089U);
+    append_u16be(out, &size, 7U);
+    append_u32be(out, &size, payload_bytes);
+    append_u32be(out, &size, payload_off);
+    return size;
+}
+
+static omc_size
+make_casio_type2_makernote_faceinfo2(omc_u8* out, omc_u32 payload_off,
+                                     omc_u32 payload_bytes)
+{
+    omc_size size;
+
+    size = 0U;
+    append_raw(out, &size, "DCI\0", 4U);
+    append_u32be(out, &size, 1U);
+    append_u16be(out, &size, 0x2089U);
+    append_u16be(out, &size, 7U);
+    append_u32be(out, &size, payload_bytes);
+    append_u32be(out, &size, payload_off);
+    return size;
+}
+
+static omc_size
 make_fuji_makernote_extended(omc_u8* out)
 {
     omc_size size;
@@ -2026,6 +2163,333 @@ test_bad_offset_and_limit(void)
                        (omc_exif_ifd_ref*)0, 0U, &opts);
     assert(res.status == OMC_EXIF_LIMIT);
     assert(res.limit_reason == OMC_EXIF_LIM_MAX_ENTRIES_TOTAL);
+    omc_store_fini(&store);
+}
+
+static void
+test_casio_type2_qvc_directory(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_casio_type2_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "CASIO", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_casio_type2_0", 0x0002U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.count == 2U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_casio_type2_fr10_variant(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_casio_type2_makernote_fr10_variant(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "CASIO", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_casio_type2_0", 0x0002U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.count == 2U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_casio_legacy_contextual_names(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_casio_type2_legacy_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "CASIO", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_casio_type2_0", 0x0002U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert(entry->origin.name_context_kind == OMC_ENTRY_NAME_CTX_CASIO_TYPE2_LEGACY);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "PreviewImageSize");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Quality");
+
+    entry = find_exif_entry(&store, "mk_casio_type2_0", 0x0008U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "QualityMode");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Casio_0x0008");
+
+    entry = find_exif_entry(&store, "mk_casio_type2_0", 0x0E00U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "PrintIM");
+
+    omc_store_fini(&store);
+}
+
+static void
+test_casio_legacy_generic_route_contextual_names(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_casio_type2_legacy_ifd_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "CASIO", "QV-2100", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_casio_type2_0", 0x0002U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Quality");
+
+    entry = find_exif_entry(&store, "mk_casio_type2_0", 0x0008U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Casio_0x0008");
+
+    entry = find_exif_entry(&store, "mk_casio_type2_0", 0x0E00U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "PrintIM");
+
+    omc_store_fini(&store);
+}
+
+static void
+test_casio_out_of_line_preview(void)
+{
+    static const omc_u8 payload_bytes[6] = {
+        0xAAU, 0xBBU, 0xCCU, 0xDDU, 0xEEU, 0xFFU
+    };
+    omc_u8 makernote[64];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_u32 payload_off;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    makernote_size = make_casio_type2_makernote_out_of_line(makernote,
+                                                             0U);
+    payload_off = 38U + (omc_u32)(strlen("CASIO") + 1U)
+                  + (omc_u32)makernote_size;
+    makernote_size = make_casio_type2_makernote_out_of_line(makernote,
+                                                             payload_off);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "CASIO", makernote, makernote_size, (omc_u32)makernote_size);
+    assert(tiff_size == payload_off);
+    append_raw(tiff, &tiff_size, payload_bytes, sizeof(payload_bytes));
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_casio_type2_0", 0x2000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_BYTES);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == sizeof(payload_bytes));
+    assert(memcmp(view.data, payload_bytes, sizeof(payload_bytes)) == 0);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_casio_faceinfo_subdirs(void)
+{
+    omc_u8 makernote[64];
+    omc_u8 tiff[512];
+    omc_u8 payload[0x54];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_u32 payload_off;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+    omc_u16 value16;
+
+    makernote_size = make_casio_type2_makernote_faceinfo1(makernote, 0U, 32U);
+    payload_off = 38U + (omc_u32)(strlen("CASIO") + 1U)
+                  + (omc_u32)makernote_size;
+    makernote_size = make_casio_type2_makernote_faceinfo1(makernote,
+                                                           payload_off, 32U);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "CASIO", makernote, makernote_size, (omc_u32)makernote_size);
+    memset(payload, 0, sizeof(payload));
+    payload[0] = 1U;
+    payload[1] = 0x02U;
+    payload[2] = 0x80U;
+    payload[3] = 0x01U;
+    payload[4] = 0xE0U;
+    append_raw(tiff, &tiff_size, payload, 32U);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_casio_faceinfo1_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_DERIVED) != 0U);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 1U);
+
+    entry = find_exif_entry(&store, "mk_casio_faceinfo1_0", 0x0001U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.count == 2U);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 4U);
+    memcpy(&value16, view.data + 0U, 2U);
+    assert(value16 == 640U);
+    memcpy(&value16, view.data + 2U, 2U);
+    assert(value16 == 480U);
+    omc_store_fini(&store);
+
+    makernote_size = make_casio_type2_makernote_faceinfo2(makernote, 0U,
+                                                           0x54U);
+    payload_off = 38U + (omc_u32)(strlen("CASIO") + 1U)
+                  + (omc_u32)makernote_size;
+    makernote_size = make_casio_type2_makernote_faceinfo2(makernote,
+                                                           payload_off, 0x54U);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "CASIO", makernote, makernote_size, (omc_u32)makernote_size);
+    memset(payload, 0, sizeof(payload));
+    payload[0] = 0x02U;
+    payload[1] = 0x01U;
+    payload[2] = 2U;
+    write_u16le_at(payload, 0x0004U, 640U);
+    write_u16le_at(payload, 0x0006U, 480U);
+    payload[0x0008U] = 7U;
+    write_u16le_at(payload, 0x0018U, 10U);
+    write_u16le_at(payload, 0x001AU, 20U);
+    write_u16le_at(payload, 0x001CU, 30U);
+    write_u16le_at(payload, 0x001EU, 40U);
+    append_raw(tiff, &tiff_size, payload, 0x54U);
+
+    omc_store_init(&store);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_casio_faceinfo2_0", 0x0002U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_DERIVED) != 0U);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 2U);
+
+    entry = find_exif_entry(&store, "mk_casio_faceinfo2_0", 0x0004U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.count == 2U);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 4U);
+    memcpy(&value16, view.data + 0U, 2U);
+    assert(value16 == 640U);
+    memcpy(&value16, view.data + 2U, 2U);
+    assert(value16 == 480U);
+
+    entry = find_exif_entry(&store, "mk_casio_faceinfo2_0", 0x0008U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 7U);
+
+    entry = find_exif_entry(&store, "mk_casio_faceinfo2_0", 0x0018U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.count == 4U);
+
+    entry = find_exif_entry(&store, "mk_casio_faceinfo2_0", 0x004CU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.count == 4U);
+
     omc_store_fini(&store);
 }
 
@@ -4007,6 +4471,12 @@ main(void)
     test_decode_be();
     test_utf8_and_ascii_bytes();
     test_bad_offset_and_limit();
+    test_casio_type2_qvc_directory();
+    test_casio_type2_fr10_variant();
+    test_casio_legacy_contextual_names();
+    test_casio_legacy_generic_route_contextual_names();
+    test_casio_out_of_line_preview();
+    test_casio_faceinfo_subdirs();
     test_fuji_makernote_signature();
     test_fuji_makernote_extended();
     test_fuji_ge2_makernote();
