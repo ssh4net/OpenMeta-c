@@ -22,8 +22,14 @@ typedef struct omc_irb_limits {
     omc_u32 max_resource_len;
 } omc_irb_limits;
 
+typedef enum omc_irb_str_charset {
+    OMC_IRB_STR_LATIN = 0,
+    OMC_IRB_STR_ASCII = 1
+} omc_irb_str_charset;
+
 typedef struct omc_irb_opts {
     int decode_iptc_iim;
+    omc_irb_str_charset string_charset;
     omc_irb_limits limits;
     omc_iptc_opts iptc;
 } omc_irb_opts;

@@ -47,6 +47,9 @@ typedef struct omc_exif_geotiff_tag_ref {
 } omc_exif_geotiff_tag_ref;
 
 static void
+omc_exif_maybe_mark_contextual_name(const omc_exif_ctx* ctx, omc_entry* entry);
+
+static void
 omc_exif_res_init(omc_exif_res* res)
 {
     res->status = OMC_EXIF_OK;
@@ -681,6 +684,10 @@ omc_exif_add_derived_entry(omc_exif_ctx* ctx, const omc_key* key,
     entry.origin.wire_type.code = 0U;
     entry.origin.wire_count = wire_count;
     entry.flags = OMC_ENTRY_FLAG_DERIVED;
+    entry.origin.name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
+    entry.origin.name_context_variant = 0U;
+
+    omc_exif_maybe_mark_contextual_name(ctx, &entry);
 
     st = omc_store_add_entry(ctx->store, &entry, (omc_entry_id*)0);
     if (st == OMC_STATUS_NO_MEMORY) {
@@ -1816,6 +1823,8 @@ omc_exif_add_entry(omc_exif_ctx* ctx, const omc_byte_ref* token_ref,
         return OMC_EXIF_LIMIT;
     }
     entry.origin.wire_count = (omc_u32)count;
+    entry.origin.name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
+    entry.origin.name_context_variant = 0U;
     entry.flags = flags;
 
     if (!omc_exif_elem_size(type, &elem_size)
@@ -1827,6 +1836,7 @@ omc_exif_add_entry(omc_exif_ctx* ctx, const omc_byte_ref* token_ref,
         && total_size > ctx->opts.limits.max_value_bytes) {
         entry.flags |= OMC_ENTRY_FLAG_TRUNCATED;
         entry.value.kind = OMC_VAL_EMPTY;
+        omc_exif_maybe_mark_contextual_name(ctx, &entry);
         st = omc_store_add_entry(ctx->store, &entry, (omc_entry_id*)0);
         if (st == OMC_STATUS_NO_MEMORY) {
             return OMC_EXIF_NOMEM;
@@ -2013,6 +2023,7 @@ omc_exif_add_entry(omc_exif_ctx* ctx, const omc_byte_ref* token_ref,
         return OMC_EXIF_UNSUPPORTED;
     }
 
+    omc_exif_maybe_mark_contextual_name(ctx, &entry);
     st = omc_store_add_entry(ctx->store, &entry, (omc_entry_id*)0);
     if (st == OMC_STATUS_NO_MEMORY) {
         return OMC_EXIF_NOMEM;
@@ -3969,6 +3980,408 @@ omc_exif_bytes_contains_text(const omc_u8* bytes, omc_u32 size,
     }
 
     return 0;
+}
+
+static int
+omc_exif_entry_ifd_equals(const omc_store* store, const omc_entry* entry,
+                          const char* ifd_name)
+{
+    omc_const_bytes ifd_view;
+    omc_size ifd_name_size;
+
+    if (store == (const omc_store*)0 || entry == (const omc_entry*)0
+        || ifd_name == (const char*)0 || entry->key.kind != OMC_KEY_EXIF_TAG) {
+        return 0;
+    }
+
+    ifd_view = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
+    ifd_name_size = strlen(ifd_name);
+    return ifd_view.size == ifd_name_size
+           && memcmp(ifd_view.data, ifd_name, ifd_name_size) == 0;
+}
+
+static int
+omc_exif_entry_ifd_starts_with(const omc_store* store, const omc_entry* entry,
+                               const char* prefix)
+{
+    omc_const_bytes ifd_view;
+    omc_size prefix_size;
+
+    if (store == (const omc_store*)0 || entry == (const omc_entry*)0
+        || prefix == (const char*)0 || entry->key.kind != OMC_KEY_EXIF_TAG) {
+        return 0;
+    }
+
+    ifd_view = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
+    prefix_size = strlen(prefix);
+    return ifd_view.size >= prefix_size
+           && memcmp(ifd_view.data, prefix, prefix_size) == 0;
+}
+
+static int
+omc_exif_canon_model_matches_any(const omc_u8* model, omc_u32 model_size,
+                                 const char* const* needles,
+                                 omc_u32 needle_count)
+{
+    omc_u32 i;
+
+    if (model == (const omc_u8*)0 || needles == (const char* const*)0) {
+        return 0;
+    }
+    for (i = 0U; i < needle_count; ++i) {
+        if (omc_exif_bytes_contains_text(model, model_size, needles[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
+omc_exif_canon_model_is_1d_family(const omc_u8* model, omc_u32 model_size)
+{
+    static const char* const k_needles[] = {
+        "EOS-1D",
+        "EOS-1DS"
+    };
+    return omc_exif_canon_model_matches_any(model, model_size, k_needles, 2U);
+}
+
+static int
+omc_exif_canon_model_is_1ds(const omc_u8* model, omc_u32 model_size)
+{
+    return omc_exif_bytes_contains_text(model, model_size, "EOS-1DS");
+}
+
+static int
+omc_exif_canon_model_is_early_kelvin_group(const omc_u8* model,
+                                           omc_u32 model_size)
+{
+    static const char* const k_needles[] = {
+        "EOS 10D",
+        "EOS 300D",
+        "EOS DIGITAL REBEL",
+        "EOS Kiss Digital"
+    };
+    return omc_exif_canon_model_matches_any(model, model_size, k_needles, 4U);
+}
+
+static int
+omc_exif_canon_model_is_1100d_blacklevel_group(const omc_u8* model,
+                                               omc_u32 model_size)
+{
+    static const char* const k_needles[] = {
+        "EOS 1100D",
+        "EOS Kiss X50",
+        "EOS REBEL T3",
+        "EOS 60D"
+    };
+    return omc_exif_canon_model_matches_any(model, model_size, k_needles, 4U);
+}
+
+static int
+omc_exif_canon_model_is_1100d_maxfocal_group(const omc_u8* model,
+                                             omc_u32 model_size)
+{
+    static const char* const k_needles[] = {
+        "EOS 1100D",
+        "EOS Kiss X50",
+        "EOS REBEL T3"
+    };
+    return omc_exif_canon_model_matches_any(model, model_size, k_needles, 3U);
+}
+
+static int
+omc_exif_canon_model_is_1200d_wb_unknown7_group(const omc_u8* model,
+                                                omc_u32 model_size)
+{
+    static const char* const k_needles[] = {
+        "EOS 1200D",
+        "EOS Kiss X70",
+        "EOS REBEL T5"
+    };
+    return omc_exif_canon_model_matches_any(model, model_size, k_needles, 3U);
+}
+
+static int
+omc_exif_canon_model_is_r1_r5m2_battery_group(const omc_u8* model,
+                                              omc_u32 model_size)
+{
+    static const char* const k_needles[] = {
+        "EOS R1",
+        "EOS R5m2",
+        "EOS R5 Mark II"
+    };
+    return omc_exif_canon_model_matches_any(model, model_size, k_needles, 3U);
+}
+
+static int
+omc_exif_nikon_model_is_d7500(const omc_u8* model, omc_u32 model_size)
+{
+    return model != (const omc_u8*)0
+           && model_size == 11U
+           && memcmp(model, "NIKON D7500", 11U) == 0;
+}
+
+static int
+omc_exif_nikon_model_is_d780(const omc_u8* model, omc_u32 model_size)
+{
+    return model != (const omc_u8*)0
+           && model_size == 10U
+           && memcmp(model, "NIKON D780", 10U) == 0;
+}
+
+static int
+omc_exif_nikon_model_is_d850(const omc_u8* model, omc_u32 model_size)
+{
+    return model != (const omc_u8*)0
+           && model_size == 10U
+           && memcmp(model, "NIKON D850", 10U) == 0;
+}
+
+static int
+omc_exif_nikon_model_is_z30(const omc_u8* model, omc_u32 model_size)
+{
+    return model != (const omc_u8*)0
+           && model_size == 10U
+           && memcmp(model, "NIKON Z 30", 10U) == 0;
+}
+
+static int
+omc_exif_nikonsettings_prefers_placeholder(omc_u16 tag, const omc_u8* model,
+                                           omc_u32 model_size)
+{
+    const int d7500 = omc_exif_nikon_model_is_d7500(model, model_size);
+    const int d780 = omc_exif_nikon_model_is_d780(model, model_size);
+    const int d850 = omc_exif_nikon_model_is_d850(model, model_size);
+    const int z30 = omc_exif_nikon_model_is_z30(model, model_size);
+
+    switch (tag) {
+    case 0x0103U:
+    case 0x0104U:
+    case 0x010BU:
+    case 0x010CU:
+    case 0x013AU:
+    case 0x013CU: return 1;
+    case 0x0001U:
+    case 0x0002U:
+    case 0x000DU: return d7500 || d780;
+    case 0x001DU:
+    case 0x0020U:
+    case 0x002DU:
+    case 0x0034U:
+    case 0x0047U:
+    case 0x0052U:
+    case 0x0053U:
+    case 0x0054U:
+    case 0x006CU: return d7500 || d780;
+    case 0x0080U: return d7500 || d780 || d850 || z30;
+    case 0x0097U:
+    case 0x00A0U:
+    case 0x00A2U:
+    case 0x00A3U:
+    case 0x00A5U:
+    case 0x00A7U:
+    case 0x00B6U: return d780 || d850 || z30;
+    case 0x00B1U: return d7500 || d780;
+    default: return 0;
+    }
+}
+
+static int
+omc_exif_fujifilm_prefers_placeholder(omc_u16 tag, const omc_u8* make,
+                                      omc_u32 make_size)
+{
+    if (make != (const omc_u8*)0
+        && omc_exif_ascii_starts_with_nocase(make, make_size,
+                                             "GENERAL IMAGING")) {
+        return 0;
+    }
+
+    switch (tag) {
+    case 0x1051U:
+    case 0x1150U:
+    case 0x1151U:
+    case 0x1152U:
+    case 0x1304U:
+    case 0x144AU:
+    case 0x144BU:
+    case 0x144CU: return 1;
+    default: return 0;
+    }
+}
+
+static void
+omc_exif_maybe_mark_contextual_name(const omc_exif_ctx* ctx, omc_entry* entry)
+{
+    const omc_u8* model_text;
+    const omc_u8* make_text;
+    omc_u32 model_size;
+    omc_u32 make_size;
+
+    if (ctx == (const omc_exif_ctx*)0 || entry == (omc_entry*)0
+        || ctx->store == (omc_store*)0 || entry->key.kind != OMC_KEY_EXIF_TAG) {
+        return;
+    }
+
+    model_text = (const omc_u8*)0;
+    make_text = (const omc_u8*)0;
+    model_size = 0U;
+    make_size = 0U;
+    (void)omc_exif_find_first_text(ctx->store, "ifd0", 0x0110U, &model_text,
+                                   &model_size);
+    (void)omc_exif_find_first_text(ctx->store, "ifd0", 0x010FU, &make_text,
+                                   &make_size);
+    if (model_text == (const omc_u8*)0) {
+        (void)omc_exif_find_outer_ifd0_ascii(ctx, 0x0110U, &model_text,
+                                             &model_size);
+    }
+    if (make_text == (const omc_u8*)0) {
+        (void)omc_exif_find_outer_ifd0_ascii(ctx, 0x010FU, &make_text,
+                                             &make_size);
+    }
+
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_fuji0")
+        && omc_exif_fujifilm_prefers_placeholder(entry->key.u.exif_tag.tag,
+                                                 make_text, make_size)) {
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_FUJIFILM_MAIN_1304;
+        entry->origin.name_context_variant = 1U;
+        return;
+    }
+    if (omc_exif_entry_ifd_starts_with(ctx->store, entry,
+                                       "mk_nikonsettings_main_")
+        && omc_exif_nikonsettings_prefers_placeholder(entry->key.u.exif_tag.tag,
+                                                      model_text, model_size)) {
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_NIKONSETTINGS_MAIN;
+        entry->origin.name_context_variant = 1U;
+        return;
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_kodak0")
+        && entry->key.u.exif_tag.tag == 0x0028U
+        && entry->value.kind == OMC_VAL_TEXT) {
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_KODAK_MAIN_0028;
+        entry->origin.name_context_variant = 1U;
+        return;
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_canon0")
+        && entry->key.u.exif_tag.tag == 0x0038U
+        && entry->value.kind == OMC_VAL_BYTES) {
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_CANON_MAIN_0038;
+        entry->origin.name_context_variant = 1U;
+        return;
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_canon_shotinfo_0")
+        && entry->key.u.exif_tag.tag == 0x000EU
+        && omc_exif_canon_model_is_1d_family(model_text, model_size)) {
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind
+            = OMC_ENTRY_NAME_CTX_CANON_SHOTINFO_000E;
+        entry->origin.name_context_variant = 1U;
+        return;
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry,
+                                  "mk_canon_camerasettings_0")
+        && entry->key.u.exif_tag.tag == 0x0021U
+        && omc_exif_canon_model_is_early_kelvin_group(model_text,
+                                                      model_size)) {
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_CANON_CAMSET_0021;
+        entry->origin.name_context_variant = 1U;
+        return;
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_canon_colordata4_0")) {
+        if (entry->key.u.exif_tag.tag == 0x00EAU
+            && omc_exif_canon_model_is_1200d_wb_unknown7_group(model_text,
+                                                               model_size)) {
+            entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+            entry->origin.name_context_kind
+                = OMC_ENTRY_NAME_CTX_CANON_COLORDATA4_00EA;
+            entry->origin.name_context_variant = 1U;
+            return;
+        }
+        if (entry->key.u.exif_tag.tag == 0x00EEU
+            && omc_exif_canon_model_is_1100d_maxfocal_group(model_text,
+                                                            model_size)) {
+            entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+            entry->origin.name_context_kind
+                = OMC_ENTRY_NAME_CTX_CANON_COLORDATA4_00EE;
+            entry->origin.name_context_variant = 1U;
+            return;
+        }
+        if (entry->key.u.exif_tag.tag == 0x02CFU
+            && omc_exif_canon_model_is_1100d_blacklevel_group(model_text,
+                                                              model_size)) {
+            entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+            entry->origin.name_context_kind
+                = OMC_ENTRY_NAME_CTX_CANON_COLORDATA4_02CF;
+            entry->origin.name_context_variant = 1U;
+            return;
+        }
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_canon_colorcalib_0")
+        && entry->key.u.exif_tag.tag == 0x0038U
+        && omc_exif_canon_model_is_r1_r5m2_battery_group(model_text,
+                                                         model_size)) {
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind
+            = OMC_ENTRY_NAME_CTX_CANON_COLORCALIB_0038;
+        entry->origin.name_context_variant = 1U;
+        return;
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_canon_camerainfo1d_0")
+        && entry->key.u.exif_tag.tag == 0x0048U
+        && omc_exif_canon_model_is_1ds(model_text, model_size)) {
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind
+            = OMC_ENTRY_NAME_CTX_CANON_CAMERAINFO1D_0048;
+        entry->origin.name_context_variant = 1U;
+        return;
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry,
+                                  "mk_canon_camerainfo600d_0")
+        && entry->key.u.exif_tag.tag == 0x00EAU) {
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind
+            = OMC_ENTRY_NAME_CTX_CANON_CAMERAINFO600D_00EA;
+        entry->origin.name_context_variant = 1U;
+        return;
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry,
+                                  "mk_canoncustom_functions2_0")) {
+        if (entry->key.u.exif_tag.tag == 0x0103U) {
+            entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+            entry->origin.name_context_kind
+                = OMC_ENTRY_NAME_CTX_CANON_CUSTOMFUNC2_0103;
+            entry->origin.name_context_variant
+                = (entry->origin.wire_count > 1U) ? 2U : 1U;
+            return;
+        }
+        if (entry->key.u.exif_tag.tag == 0x010CU) {
+            entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+            entry->origin.name_context_kind
+                = OMC_ENTRY_NAME_CTX_CANON_CUSTOMFUNC2_010C;
+            entry->origin.name_context_variant = 1U;
+            return;
+        }
+        if (entry->key.u.exif_tag.tag == 0x0510U) {
+            entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+            entry->origin.name_context_kind
+                = OMC_ENTRY_NAME_CTX_CANON_CUSTOMFUNC2_0510;
+            entry->origin.name_context_variant = 1U;
+            return;
+        }
+        if (entry->key.u.exif_tag.tag == 0x0701U) {
+            entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+            entry->origin.name_context_kind
+                = OMC_ENTRY_NAME_CTX_CANON_CUSTOMFUNC2_0701;
+            entry->origin.name_context_variant
+                = (entry->origin.wire_count > 1U) ? 2U : 1U;
+            return;
+        }
+    }
 }
 
 static const char*

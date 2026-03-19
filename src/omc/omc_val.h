@@ -71,10 +71,16 @@ OMC_API void
 omc_val_make_u8(omc_val* value, omc_u8 scalar);
 
 OMC_API void
+omc_val_make_u16(omc_val* value, omc_u16 scalar);
+
+OMC_API void
 omc_val_make_u32(omc_val* value, omc_u32 scalar);
 
 OMC_API void
 omc_val_make_u64(omc_val* value, omc_u64 scalar);
+
+OMC_API void
+omc_val_make_i16(omc_val* value, omc_s16 scalar);
 
 OMC_API void
 omc_val_make_i64(omc_val* value, omc_s64 scalar);

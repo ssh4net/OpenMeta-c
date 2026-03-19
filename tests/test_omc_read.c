@@ -1405,6 +1405,39 @@ make_test_jpeg_all(omc_u8* out)
 }
 
 static omc_size
+make_test_jpeg_irb_fields(omc_u8* out)
+{
+    omc_u8 irb[64];
+    omc_u8 angle[8];
+    omc_size irb_size;
+    omc_size angle_size;
+    omc_size size;
+    omc_u16 seg_len;
+
+    angle_size = 0U;
+    append_u32be(angle, &angle_size, 30U);
+
+    irb_size = 0U;
+    append_irb_resource(irb, &irb_size, 0x040DU, angle, angle_size);
+
+    size = 0U;
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 0xD8U);
+
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 0xEDU);
+    seg_len = (omc_u16)(2U + 14U + irb_size);
+    append_u16be(out, &size, seg_len);
+    append_text(out, &size, "Photoshop 3.0");
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, irb, irb_size);
+
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 0xD9U);
+    return size;
+}
+
+static omc_size
 make_test_jpeg_comment(omc_u8* out)
 {
     static const char comment[] = "OpenMeta JPEG comment";
@@ -3581,6 +3614,30 @@ find_irb_entry(const omc_store* store, omc_u16 resource_id)
     return (const omc_entry*)0;
 }
 
+static const omc_entry*
+find_irb_field(const omc_store* store, omc_u16 resource_id, const char* field)
+{
+    omc_size i;
+    omc_size field_len;
+
+    field_len = strlen(field);
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes view;
+
+        entry = &store->entries[i];
+        if (entry->key.kind != OMC_KEY_PHOTOSHOP_IRB_FIELD
+            || entry->key.u.photoshop_irb_field.resource_id != resource_id) {
+            continue;
+        }
+        view = omc_arena_view(&store->arena, entry->key.u.photoshop_irb_field.field);
+        if (view.size == field_len && memcmp(view.data, field, field_len) == 0) {
+            return entry;
+        }
+    }
+    return (const omc_entry*)0;
+}
+
 static const omc_block_info*
 find_block_by_kind(const omc_store* store, omc_blk_kind kind)
 {
@@ -3947,6 +4004,41 @@ test_read_jpeg_app11_jumbf_split(void)
     assert(marker != (const omc_entry*)0);
     cbor_value = find_jumbf_cbor_key(&store, "box.0.1.cbor.a");
     assert(cbor_value != (const omc_entry*)0);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_read_jpeg_irb_fields(void)
+{
+    omc_u8 file_bytes[128];
+    omc_size file_size;
+    omc_store store;
+    omc_blk_ref blocks[8];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload[256];
+    omc_u32 payload_parts[32];
+    omc_read_res res;
+    const omc_entry* entry;
+
+    file_size = make_test_jpeg_irb_fields(file_bytes);
+    omc_store_init(&store);
+    res = omc_read_simple(file_bytes, file_size, &store, blocks, 8U, ifds, 8U,
+                          payload, sizeof(payload), payload_parts, 32U,
+                          (const omc_read_opts*)0);
+
+    assert(res.scan.status == OMC_SCAN_OK);
+    assert(res.irb.status == OMC_IRB_OK);
+    assert(res.irb.resources_decoded == 1U);
+    assert(res.irb.entries_decoded == 2U);
+
+    entry = find_irb_entry(&store, 0x040DU);
+    assert(entry != (const omc_entry*)0);
+    entry = find_irb_field(&store, 0x040DU, "GlobalAngle");
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 30U);
 
     omc_store_fini(&store);
 }
@@ -6478,10 +6570,10 @@ make_apple_makernote_extended(omc_u8* out)
     append_u8(out, &size, 1U);
     append_text(out, &size, "MM");
 
-    array_off = 14U + 2U + (4U * 12U) + 4U;
+    array_off = 14U + 2U + (5U * 12U) + 4U;
     text_off = array_off + 6U;
 
-    append_u16be(out, &size, 4U);
+    append_u16be(out, &size, 5U);
 
     append_u16be(out, &size, 0x0001U);
     append_u16be(out, &size, 4U);
@@ -6503,6 +6595,12 @@ make_apple_makernote_extended(omc_u8* out)
     append_u16be(out, &size, 2U);
     append_u32be(out, &size, 6U);
     append_u32be(out, &size, text_off);
+
+    append_u16be(out, &size, 0x0045U);
+    append_u16be(out, &size, 3U);
+    append_u32be(out, &size, 1U);
+    append_u16be(out, &size, 1U);
+    append_u16be(out, &size, 0U);
 
     append_u32be(out, &size, 0U);
     append_u16be(out, &size, 1U);
@@ -6590,6 +6688,10 @@ test_read_tiff_small_vendor_makernotes(void)
     view = omc_arena_view(&store.arena, entry->value.u.ref);
     assert(view.size == 5U);
     assert(memcmp(view.data, "HELLO", 5U) == 0);
+    entry = find_exif_entry_typed(&store, "mk_apple0", 0x0045U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 1U);
     omc_store_fini(&store);
 
     makernote_size = make_nintendo_makernote(makernote);
@@ -6630,6 +6732,7 @@ main(void)
 {
     test_read_jpeg_all();
     test_read_jpeg_comment();
+    test_read_jpeg_irb_fields();
     test_read_jpeg_app11_jumbf_split();
     test_read_standalone_xmp();
     test_read_png_all();

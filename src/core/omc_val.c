@@ -30,6 +30,20 @@ omc_val_make_u8(omc_val* value, omc_u8 scalar)
 }
 
 void
+omc_val_make_u16(omc_val* value, omc_u16 scalar)
+{
+    omc_val_init(value);
+    if (value == NULL) {
+        return;
+    }
+
+    value->kind = OMC_VAL_SCALAR;
+    value->elem_type = OMC_ELEM_U16;
+    value->count = 1U;
+    value->u.u64 = scalar;
+}
+
+void
 omc_val_make_u32(omc_val* value, omc_u32 scalar)
 {
     omc_val_init(value);
@@ -55,6 +69,20 @@ omc_val_make_u64(omc_val* value, omc_u64 scalar)
     value->elem_type = OMC_ELEM_U64;
     value->count = 1U;
     value->u.u64 = scalar;
+}
+
+void
+omc_val_make_i16(omc_val* value, omc_s16 scalar)
+{
+    omc_val_init(value);
+    if (value == NULL) {
+        return;
+    }
+
+    value->kind = OMC_VAL_SCALAR;
+    value->elem_type = OMC_ELEM_I16;
+    value->count = 1U;
+    value->u.i64 = scalar;
 }
 
 void

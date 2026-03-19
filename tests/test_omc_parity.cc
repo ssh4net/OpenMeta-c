@@ -1,10 +1,12 @@
 #include <openmeta/meta_key.h>
 #include <openmeta/meta_store.h>
 #include <openmeta/meta_value.h>
+#include <openmeta/exif_tag_names.h>
 #include <openmeta/simple_meta.h>
 
 extern "C" {
 #include "omc/omc_arena.h"
+#include "omc/omc_exif_name.h"
 #include "omc/omc_key.h"
 #include "omc/omc_read.h"
 #include "omc/omc_store.h"
@@ -13,6 +15,7 @@ extern "C" {
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -345,6 +348,42 @@ build_jpeg_all_fixture()
     append_u8(file.data(), &size, 1U);
     append_u8(file.data(), &size, 1U);
     append_bytes(file.data(), &size, icc.data(), icc.size());
+
+    append_u8(file.data(), &size, 0xFFU);
+    append_u8(file.data(), &size, 0xEDU);
+    seg_len = (std::uint16_t)(2U + 14U + irb_size);
+    append_u16be(file.data(), &size, seg_len);
+    append_text(file.data(), &size, "Photoshop 3.0");
+    append_u8(file.data(), &size, 0U);
+    append_bytes(file.data(), &size, irb.data(), irb_size);
+
+    append_u8(file.data(), &size, 0xFFU);
+    append_u8(file.data(), &size, 0xD9U);
+
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_jpeg_irb_fields_fixture()
+{
+    std::array<unsigned char, 256> file {};
+    std::array<unsigned char, 32> irb {};
+    std::array<unsigned char, 8> angle {};
+    std::size_t angle_size;
+    std::size_t irb_size;
+    std::size_t size;
+    std::uint16_t seg_len;
+
+    angle_size = 0U;
+    append_u32be(angle.data(), &angle_size, 30U);
+
+    irb_size = 0U;
+    append_irb_resource_blob(irb.data(), &irb_size, 0x040DU, angle.data(),
+                             angle_size);
+
+    size = 0U;
+    append_u8(file.data(), &size, 0xFFU);
+    append_u8(file.data(), &size, 0xD8U);
 
     append_u8(file.data(), &size, 0xFFU);
     append_u8(file.data(), &size, 0xEDU);
@@ -1512,6 +1551,28 @@ build_tiff_sony_shotinfo_fixture()
 }
 
 static ByteVec
+build_tiff_apple_front_facing_makernote_fixture()
+{
+    unsigned char makernote[64];
+    std::size_t size = 0U;
+
+    append_text(makernote, &size, "Apple iOS");
+    append_u8(makernote, &size, 0U);
+    append_u8(makernote, &size, 0U);
+    append_u8(makernote, &size, 1U);
+    append_text(makernote, &size, "MM");
+    append_u16be(makernote, &size, 1U);
+    append_u16be(makernote, &size, 0x0045U);
+    append_u16be(makernote, &size, 3U);
+    append_u32be(makernote, &size, 1U);
+    append_u16be(makernote, &size, 1U);
+    append_u16be(makernote, &size, 0U);
+    append_u32be(makernote, &size, 0U);
+
+    return build_tiff_with_make_makernote_fixture("Apple", makernote, size);
+}
+
+static ByteVec
 build_tiff_flir_makernote_fixture()
 {
     unsigned char makernote[32];
@@ -2608,6 +2669,7 @@ omc_key_kind_name(omc_key_kind kind)
         case OMC_KEY_ICC_HEADER_FIELD: return "IccHeaderField";
         case OMC_KEY_ICC_TAG: return "IccTag";
         case OMC_KEY_PHOTOSHOP_IRB: return "PhotoshopIrb";
+        case OMC_KEY_PHOTOSHOP_IRB_FIELD: return "PhotoshopIrbField";
         case OMC_KEY_GEOTIFF_KEY: return "GeotiffKey";
         case OMC_KEY_PRINTIM_FIELD: return "PrintImField";
         case OMC_KEY_BMFF_FIELD: return "BmffField";
@@ -2630,6 +2692,8 @@ cpp_key_kind_name(openmeta::MetaKeyKind kind)
         case openmeta::MetaKeyKind::IccHeaderField: return "IccHeaderField";
         case openmeta::MetaKeyKind::IccTag: return "IccTag";
         case openmeta::MetaKeyKind::PhotoshopIrb: return "PhotoshopIrb";
+        case openmeta::MetaKeyKind::PhotoshopIrbField:
+            return "PhotoshopIrbField";
         case openmeta::MetaKeyKind::GeotiffKey: return "GeotiffKey";
         case openmeta::MetaKeyKind::PrintImField: return "PrintImField";
         case openmeta::MetaKeyKind::BmffField: return "BmffField";
@@ -2779,6 +2843,13 @@ canonical_omc_key(const omc_store* store, const omc_key* key)
             out += std::to_string((unsigned int)
                                   key->u.photoshop_irb.resource_id);
             break;
+        case OMC_KEY_PHOTOSHOP_IRB_FIELD:
+            out += "|id=";
+            out += std::to_string((unsigned int)
+                                  key->u.photoshop_irb_field.resource_id);
+            out += "|field=";
+            out += omc_ref_text(store, key->u.photoshop_irb_field.field);
+            break;
         case OMC_KEY_GEOTIFF_KEY:
             out += "|id=";
             out += std::to_string((unsigned int)key->u.geotiff_key.key_id);
@@ -2859,6 +2930,13 @@ canonical_cpp_key(const openmeta::MetaStore& store,
             out += "|id=";
             out += std::to_string((unsigned int)
                                   key.data.photoshop_irb.resource_id);
+            break;
+        case openmeta::MetaKeyKind::PhotoshopIrbField:
+            out += "|id=";
+            out += std::to_string((unsigned int)
+                                  key.data.photoshop_irb_field.resource_id);
+            out += "|field=";
+            out += cpp_span_text(store, key.data.photoshop_irb_field.field);
             break;
         case openmeta::MetaKeyKind::GeotiffKey:
             out += "|id=";
@@ -3040,6 +3118,9 @@ canonical_omc_flags(omc_entry_flags flags)
     if ((flags & OMC_ENTRY_FLAG_UNREADABLE) != 0U) {
         out += "Unreadable,";
     }
+    if ((flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U) {
+        out += "ContextualName,";
+    }
     if (!out.empty()) {
         out.pop_back();
     }
@@ -3068,6 +3149,9 @@ canonical_cpp_flags(openmeta::EntryFlags flags)
     }
     if (openmeta::any(flags, openmeta::EntryFlags::Unreadable)) {
         out += "Unreadable,";
+    }
+    if (openmeta::any(flags, openmeta::EntryFlags::ContextualName)) {
+        out += "ContextualName,";
     }
     if (!out.empty()) {
         out.pop_back();
@@ -3223,16 +3307,235 @@ run_case(const char* case_name, const ByteVec& file_bytes,
     return compare_records(case_name, omc, cpp);
 }
 
+struct BenchCase final {
+    const char* name;
+    ByteVec (*build)();
+    bool decode_makernote;
+};
+
+static volatile std::uint64_t g_bench_sink = 0U;
+
+static std::uint64_t
+bench_omc_iters(const ByteVec& file_bytes, bool decode_makernote,
+                std::size_t iters)
+{
+    std::uint64_t sum = 0U;
+    std::size_t i;
+
+    for (i = 0U; i < iters; ++i) {
+        omc_store store;
+        omc_read_res res;
+        omc_read_opts opts;
+        std::array<omc_blk_ref, 128> blocks {};
+        std::array<omc_exif_ifd_ref, 128> ifds {};
+        std::array<omc_u8, 65536> payload {};
+        std::array<omc_u32, 256> scratch {};
+
+        omc_store_init(&store);
+        omc_read_opts_init(&opts);
+        if (decode_makernote) {
+            opts.exif.decode_makernote = 1;
+        }
+        res = omc_read_simple(file_bytes.data(), (omc_size)file_bytes.size(),
+                              &store, blocks.data(),
+                              (omc_u32)blocks.size(), ifds.data(),
+                              (omc_u32)ifds.size(), payload.data(),
+                              (omc_size)payload.size(), scratch.data(),
+                              (omc_u32)scratch.size(), &opts);
+        if (res.scan.status == OMC_SCAN_MALFORMED) {
+            std::fprintf(stderr, "omc benchmark scan failed\n");
+            std::exit(1);
+        }
+        sum += (std::uint64_t)store.entry_count;
+        sum += (std::uint64_t)res.exif.entries_decoded;
+        omc_store_fini(&store);
+    }
+
+    return sum;
+}
+
+static std::uint64_t
+bench_cpp_iters(const ByteVec& file_bytes, bool decode_makernote,
+                std::size_t iters)
+{
+    std::uint64_t sum = 0U;
+    std::size_t i;
+
+    for (i = 0U; i < iters; ++i) {
+        openmeta::MetaStore store;
+        openmeta::SimpleMetaDecodeOptions opts {};
+        std::array<openmeta::ContainerBlockRef, 128> blocks {};
+        std::array<openmeta::ExifIfdRef, 128> ifds {};
+        std::array<std::byte, 65536> payload {};
+        std::array<std::uint32_t, 256> scratch {};
+        openmeta::SimpleMetaResult res;
+
+        if (decode_makernote) {
+            opts.exif.decode_makernote = true;
+        }
+        res = openmeta::simple_meta_read(as_byte_span(file_bytes), store, blocks,
+                                         ifds, payload, scratch, opts);
+        if (res.scan.status == openmeta::ScanStatus::Malformed) {
+            std::fprintf(stderr, "cpp benchmark scan failed\n");
+            std::exit(1);
+        }
+        sum += (std::uint64_t)store.entries().size();
+        sum += (std::uint64_t)res.exif.entries_decoded;
+    }
+
+    return sum;
+}
+
+static double
+time_omc_ns_per_iter(const ByteVec& file_bytes, bool decode_makernote,
+                     std::size_t iters)
+{
+    const auto start = std::chrono::steady_clock::now();
+    const std::uint64_t sum = bench_omc_iters(file_bytes, decode_makernote,
+                                              iters);
+    const auto stop = std::chrono::steady_clock::now();
+    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        stop - start);
+
+    g_bench_sink += sum;
+    return (double)ns.count() / (double)iters;
+}
+
+static double
+time_cpp_ns_per_iter(const ByteVec& file_bytes, bool decode_makernote,
+                     std::size_t iters)
+{
+    const auto start = std::chrono::steady_clock::now();
+    const std::uint64_t sum = bench_cpp_iters(file_bytes, decode_makernote,
+                                              iters);
+    const auto stop = std::chrono::steady_clock::now();
+    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        stop - start);
+
+    g_bench_sink += sum;
+    return (double)ns.count() / (double)iters;
+}
+
+static std::size_t
+calibrate_iters(const ByteVec& file_bytes, bool decode_makernote)
+{
+    std::size_t iters = 1U;
+    double ns_per_iter;
+    double total_ns;
+
+    for (;;) {
+        ns_per_iter = time_omc_ns_per_iter(file_bytes, decode_makernote,
+                                           iters);
+        total_ns = ns_per_iter * (double)iters;
+        if (total_ns >= 30000000.0 || iters >= 8192U) {
+            break;
+        }
+        iters *= 2U;
+    }
+    if (iters < 64U) {
+        iters = 64U;
+    }
+    return iters;
+}
+
+static double
+sorted_percentile(std::vector<double> values, std::size_t numer,
+                  std::size_t denom)
+{
+    std::size_t idx;
+
+    if (values.empty()) {
+        return 0.0;
+    }
+    std::sort(values.begin(), values.end());
+    idx = ((values.size() - 1U) * numer) / denom;
+    return values[idx];
+}
+
+static int
+run_benchmarks(void)
+{
+    static const std::array<BenchCase, 6> cases = { {
+        { "jpeg_all", build_jpeg_all_fixture, false },
+        { "png_text", build_png_text_fixture, false },
+        { "tiff_geotiff", build_tiff_geotiff_fixture, false },
+        { "tiff_printim", build_tiff_printim_fixture, false },
+        { "crw_native_projection", build_crw_native_projection_fixture, false },
+        { "tiff_fuji_makernote", build_tiff_fuji_makernote_fixture, true },
+    } };
+    std::size_t i;
+
+    std::printf("%-22s %8s %8s %14s %14s %10s\n",
+                "case", "bytes", "iters", "c_ns_p50", "cpp_ns_p50",
+                "c_speedup");
+    for (i = 0U; i < cases.size(); ++i) {
+        const ByteVec file_bytes = cases[i].build();
+        const std::size_t iters = calibrate_iters(file_bytes,
+                                                  cases[i].decode_makernote);
+        std::vector<double> omc_rounds;
+        std::vector<double> cpp_rounds;
+        std::size_t round;
+        double omc_p50;
+        double cpp_p50;
+        double omc_p95;
+        double cpp_p95;
+        double speedup;
+
+        omc_rounds.reserve(9U);
+        cpp_rounds.reserve(9U);
+
+        (void)time_omc_ns_per_iter(file_bytes, cases[i].decode_makernote,
+                                   iters);
+        (void)time_cpp_ns_per_iter(file_bytes, cases[i].decode_makernote,
+                                   iters);
+
+        for (round = 0U; round < 9U; ++round) {
+            omc_rounds.push_back(
+                time_omc_ns_per_iter(file_bytes, cases[i].decode_makernote,
+                                     iters));
+            cpp_rounds.push_back(
+                time_cpp_ns_per_iter(file_bytes, cases[i].decode_makernote,
+                                     iters));
+        }
+
+        omc_p50 = sorted_percentile(omc_rounds, 1U, 2U);
+        cpp_p50 = sorted_percentile(cpp_rounds, 1U, 2U);
+        omc_p95 = sorted_percentile(omc_rounds, 19U, 20U);
+        cpp_p95 = sorted_percentile(cpp_rounds, 19U, 20U);
+        speedup = (omc_p50 > 0.0) ? (cpp_p50 / omc_p50) : 0.0;
+
+        std::printf("%-22s %8zu %8zu %14.1f %14.1f %10.3fx\n",
+                    cases[i].name, file_bytes.size(), iters,
+                    omc_p50, cpp_p50, speedup);
+        std::printf("%-22s %8s %8s %14.1f %14.1f\n",
+                    "  p95", "", "", omc_p95, cpp_p95);
+    }
+
+    std::printf("bench_sink=%llu\n",
+                (unsigned long long)g_bench_sink);
+    return 0;
+}
+
 }  // namespace
 
 int
-main()
+main(int argc, char** argv)
 {
     bool ok;
+
+    if (argc == 2 && std::strcmp(argv[1], "--bench") == 0) {
+        return run_benchmarks();
+    }
+    if (argc != 1) {
+        std::fprintf(stderr, "usage: %s [--bench]\n", argv[0]);
+        return 2;
+    }
 
     ok = true;
     ok = run_case("jpeg_comment", build_jpeg_comment_fixture(), false) && ok;
     ok = run_case("jpeg_all", build_jpeg_all_fixture(), false) && ok;
+    ok = run_case("jpeg_irb_fields", build_jpeg_irb_fields_fixture(), false)
+         && ok;
     ok = run_case("png_text", build_png_text_fixture(), false) && ok;
     ok = run_case("tiff_geotiff", build_tiff_geotiff_fixture(), false) && ok;
     ok = run_case("tiff_printim", build_tiff_printim_fixture(), false) && ok;
@@ -3253,6 +3556,9 @@ main()
     ok = run_case("crw_shotinfo", build_crw_shotinfo_fixture(), false) && ok;
     ok = run_case("tiff_fuji_makernote",
                   build_tiff_fuji_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_apple_front_facing_makernote",
+                  build_tiff_apple_front_facing_makernote_fixture(), true)
          && ok;
     ok = run_case("tiff_flir_makernote",
                   build_tiff_flir_makernote_fixture(), true)
@@ -3344,6 +3650,5 @@ main()
     ok = run_case("tiff_nikon_preview_settings_aftune_makernote",
                   build_tiff_nikon_preview_settings_aftune_fixture(), true)
          && ok;
-
     return ok ? 0 : 1;
 }

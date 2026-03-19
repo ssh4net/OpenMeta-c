@@ -45,6 +45,7 @@ set(OMC_SOURCES
   read/omc_bmff.c
   read/omc_ciff.c
   read/omc_exif.c
+  read/omc_exif_name.c
   read/omc_icc.c
   read/omc_iptc.c
   read/omc_irb.c

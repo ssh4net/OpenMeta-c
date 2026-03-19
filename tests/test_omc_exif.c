@@ -1,4 +1,5 @@
 #include "omc/omc_exif.h"
+#include "omc/omc_exif_name.h"
 #include "omc/omc_read.h"
 
 #include <assert.h>
@@ -58,6 +59,21 @@ write_u32le_at(omc_u8* out, omc_u32 off, omc_u32 value)
     out[off + 1U] = (omc_u8)((value >> 8) & 0xFFU);
     out[off + 2U] = (omc_u8)((value >> 16) & 0xFFU);
     out[off + 3U] = (omc_u8)((value >> 24) & 0xFFU);
+}
+
+static void
+assert_exif_entry_name(const omc_store* store, const omc_entry* entry,
+                       omc_exif_name_policy policy, const char* expected)
+{
+    char name[96];
+    omc_size name_len;
+    omc_exif_name_status status;
+
+    status = omc_exif_entry_name(store, entry, policy,
+                                 name, sizeof(name), &name_len);
+    assert(status == OMC_EXIF_NAME_OK);
+    assert(name_len == strlen(expected));
+    assert(strcmp(name, expected) == 0);
 }
 
 static void
@@ -2130,6 +2146,11 @@ test_fuji_ge2_makernote(void)
     assert(entry2->value.kind == OMC_VAL_SCALAR);
     assert(entry2->value.elem_type == OMC_ELEM_U32);
     assert(entry2->value.u.u64 == 0x11223344U);
+    assert((entry2->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert_exif_entry_name(&store, entry2, OMC_EXIF_NAME_CANONICAL,
+                           "GEImageSize");
+    assert_exif_entry_name(&store, entry2, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "FujiFilm_0x1304");
 
     omc_store_fini(&store);
 }
@@ -3508,6 +3529,11 @@ test_canon_camera_info_extended_fixed_fields_makernote(void)
     assert(entry->value.kind == OMC_VAL_SCALAR);
     assert(entry->value.elem_type == OMC_ELEM_U16);
     assert(entry->value.u.u64 == 5300U);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "ColorTemperature");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Sharpness");
     omc_store_fini(&store);
 
     cam_size = make_canon_camera_info_blob_with_ascii(cam, 0x016BU,
@@ -3689,10 +3715,10 @@ make_apple_makernote_extended(omc_u8* out)
     append_u8(out, &size, 1U);
     append_bytes(out, &size, "MM");
 
-    array_off = 14U + 2U + (4U * 12U) + 4U;
+    array_off = 14U + 2U + (5U * 12U) + 4U;
     text_off = array_off + 6U;
 
-    append_u16be(out, &size, 4U);
+    append_u16be(out, &size, 5U);
 
     append_u16be(out, &size, 0x0001U);
     append_u16be(out, &size, 4U);
@@ -3714,6 +3740,12 @@ make_apple_makernote_extended(omc_u8* out)
     append_u16be(out, &size, 2U);
     append_u32be(out, &size, 6U);
     append_u32be(out, &size, text_off);
+
+    append_u16be(out, &size, 0x0045U);
+    append_u16be(out, &size, 3U);
+    append_u32be(out, &size, 1U);
+    append_u16be(out, &size, 1U);
+    append_u16be(out, &size, 0U);
 
     append_u32be(out, &size, 0U);
     append_u16be(out, &size, 1U);
@@ -3861,6 +3893,10 @@ test_small_vendor_makernotes(void)
     view = omc_arena_view(&store.arena, entry->value.u.ref);
     assert(view.size == 5U);
     assert(memcmp(view.data, "HELLO", 5U) == 0);
+    entry = find_exif_entry_typed(&store, "mk_apple0", 0x0045U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 1U);
     omc_store_fini(&store);
 
     makernote_size = make_flir_makernote(makernote);

@@ -10,6 +10,10 @@ add_executable(omc_test_exif test_omc_exif.c)
 target_link_libraries(omc_test_exif PRIVATE omc)
 add_test(NAME omc_test_exif COMMAND omc_test_exif)
 
+add_executable(omc_test_exif_name test_omc_exif_name.c)
+target_link_libraries(omc_test_exif_name PRIVATE omc)
+add_test(NAME omc_test_exif_name COMMAND omc_test_exif_name)
+
 add_executable(omc_test_icc test_omc_icc.c)
 target_link_libraries(omc_test_icc PRIVATE omc)
 add_test(NAME omc_test_icc COMMAND omc_test_icc)

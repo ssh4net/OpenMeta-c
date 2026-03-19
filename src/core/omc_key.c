@@ -102,6 +102,20 @@ omc_key_make_photoshop_irb(omc_key* key, omc_u16 resource_id)
 }
 
 void
+omc_key_make_photoshop_irb_field(omc_key* key, omc_u16 resource_id,
+                                 omc_byte_ref field)
+{
+    omc_key_init(key);
+    if (key == NULL) {
+        return;
+    }
+
+    key->kind = OMC_KEY_PHOTOSHOP_IRB_FIELD;
+    key->u.photoshop_irb_field.resource_id = resource_id;
+    key->u.photoshop_irb_field.field = field;
+}
+
+void
 omc_key_make_geotiff_key(omc_key* key, omc_u16 key_id)
 {
     omc_key_init(key);

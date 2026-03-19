@@ -16,12 +16,13 @@ typedef enum omc_key_kind {
     OMC_KEY_ICC_HEADER_FIELD = 5,
     OMC_KEY_ICC_TAG = 6,
     OMC_KEY_PHOTOSHOP_IRB = 7,
-    OMC_KEY_GEOTIFF_KEY = 8,
-    OMC_KEY_PRINTIM_FIELD = 9,
-    OMC_KEY_BMFF_FIELD = 10,
-    OMC_KEY_JUMBF_FIELD = 11,
-    OMC_KEY_JUMBF_CBOR_KEY = 12,
-    OMC_KEY_PNG_TEXT = 13
+    OMC_KEY_PHOTOSHOP_IRB_FIELD = 8,
+    OMC_KEY_GEOTIFF_KEY = 9,
+    OMC_KEY_PRINTIM_FIELD = 10,
+    OMC_KEY_BMFF_FIELD = 11,
+    OMC_KEY_JUMBF_FIELD = 12,
+    OMC_KEY_JUMBF_CBOR_KEY = 13,
+    OMC_KEY_PNG_TEXT = 14
 } omc_key_kind;
 
 typedef struct omc_key {
@@ -55,6 +56,10 @@ typedef struct omc_key {
         struct {
             omc_u16 resource_id;
         } photoshop_irb;
+        struct {
+            omc_u16 resource_id;
+            omc_byte_ref field;
+        } photoshop_irb_field;
         struct {
             omc_u16 key_id;
         } geotiff_key;
@@ -101,6 +106,10 @@ omc_key_make_icc_tag(omc_key* key, omc_u32 signature);
 
 OMC_API void
 omc_key_make_photoshop_irb(omc_key* key, omc_u16 resource_id);
+
+OMC_API void
+omc_key_make_photoshop_irb_field(omc_key* key, omc_u16 resource_id,
+                                 omc_byte_ref field);
 
 OMC_API void
 omc_key_make_geotiff_key(omc_key* key, omc_u16 key_id);
