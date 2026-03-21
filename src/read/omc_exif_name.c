@@ -127,6 +127,7 @@ omc_exif_lookup_exact_name(const char* ifd_name, omc_u16 tag)
         { "mk_nikonsettings_main_0", 0x0001U, "ISOAutoHiLimit" },
         { "mk_nikonsettings_main_0", 0x0046U, "OpticalVR" },
         { "mk_olympus_equipment0", 0x0040U, "CompressedImageSize" },
+        { "mk_olympus_equipment_0", 0x0040U, "CompressedImageSize" },
         { "mk_olympus_fetags_0", 0x0311U, "CoringValues" },
         { "mk_olympus_fetags_0", 0x1204U, "ExternalFlashBounce" },
         { "mk_olympus_focusinfo_0", 0x1600U, "ImageStabilization" },
@@ -235,6 +236,10 @@ omc_exif_tag_name_impl(const char* ifd_name, omc_u16 tag,
         return omc_exif_name_write_placeholder("Olympus", tag,
                                                out_name, out_cap, out_len);
     }
+    if (strcmp(ifd_name, "mk_olympus_main_0") == 0) {
+        return omc_exif_name_write_placeholder("Olympus", tag,
+                                               out_name, out_cap, out_len);
+    }
     if (strcmp(ifd_name, "mk_olympus_camerasettings_0") == 0) {
         return omc_exif_name_write_placeholder("Olympus_CameraSettings", tag,
                                                out_name, out_cap, out_len);
@@ -251,8 +256,16 @@ omc_exif_tag_name_impl(const char* ifd_name, omc_u16 tag,
         return omc_exif_name_write_placeholder("Olympus_ImageProcessing", tag,
                                                out_name, out_cap, out_len);
     }
+    if (strcmp(ifd_name, "mk_olympus_rawdevelopment_0") == 0) {
+        return omc_exif_name_write_placeholder("Olympus_RawDevelopment", tag,
+                                               out_name, out_cap, out_len);
+    }
     if (strcmp(ifd_name, "mk_olympus_rawdevelopment2_0") == 0) {
         return omc_exif_name_write_placeholder("Olympus_RawDevelopment2", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_olympus_rawinfo_0") == 0) {
+        return omc_exif_name_write_placeholder("Olympus_RawInfo", tag,
                                                out_name, out_cap, out_len);
     }
     if (omc_exif_name_starts_with(ifd_name, "mk_olympus_fetags_")) {

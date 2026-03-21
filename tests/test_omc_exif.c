@@ -505,6 +505,118 @@ make_casio_type2_makernote_faceinfo2(omc_u8* out, omc_u32 payload_off,
 }
 
 static omc_size
+make_samsung_stmn_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_raw(out, &size, "STMN100", 7U);
+    append_u8(out, &size, 0U);
+    append_u32le(out, &size, 0x12345678U);
+    append_u32le(out, &size, 0x00010002U);
+    while (size < 44U) {
+        append_u8(out, &size, 0U);
+    }
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 0x0004U);
+    append_u16le(out, &size, 2U);
+    append_u32le(out, &size, 6U);
+    append_u32le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+    append_raw(out, &size, "HELLO", 5U);
+    append_u8(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_samsung_type2_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 2U);
+
+    append_u16le(out, &size, 0x0004U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 4U);
+    append_raw(out, &size, "ABCD", 4U);
+
+    append_u16le(out, &size, 0x0021U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 10U);
+    append_u32le(out, &size, 30U);
+
+    append_u32le(out, &size, 0U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 2U);
+    append_u16le(out, &size, 3U);
+    append_u16le(out, &size, 4U);
+    append_u16le(out, &size, 5U);
+    return size;
+}
+
+static omc_size
+make_samsung_type2_makernote_u16_picturewizard(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+
+    append_u16le(out, &size, 0x0021U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 5U);
+    append_u32le(out, &size, 18U);
+
+    append_u32le(out, &size, 0U);
+    append_u16le(out, &size, 11U);
+    append_u16le(out, &size, 22U);
+    append_u16le(out, &size, 33U);
+    append_u16le(out, &size, 44U);
+    append_u16le(out, &size, 55U);
+    return size;
+}
+
+static omc_size
+make_samsung_type2_makernote_with_a002_and_a003(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 2U);
+
+    append_u16le(out, &size, 0xA002U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 0x1234U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0xA003U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 0x5678U);
+    append_u16le(out, &size, 0U);
+
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_samsung_makernote_compat_digits(omc_u8* out)
+{
+    memset(out, 0, 16U);
+    out[0] = (omc_u8)'B';
+    out[1] = (omc_u8)'A';
+    out[2] = (omc_u8)'D';
+    out[3] = (omc_u8)'!';
+    out[10] = (omc_u8)'2';
+    out[11] = (omc_u8)'0';
+    out[12] = (omc_u8)'2';
+    out[13] = (omc_u8)'4';
+    return 16U;
+}
+
+static omc_size
 make_pentax_makernote(omc_u8* out)
 {
     omc_size size;
@@ -842,6 +954,490 @@ make_ricoh_theta_ifd(omc_u8* out)
     append_u16le(out, &size, 9U);
     append_u16le(out, &size, 0U);
     append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_panasonic_makernote_with_subdirs(omc_u8* out, omc_u32 facedet_abs_off,
+                                      omc_u32 facerec_abs_off,
+                                      omc_u32 time_abs_off,
+                                      int truncate_next_ifd)
+{
+    static const omc_u8 facedet_raw[10] = {
+        1U, 0U, 10U, 0U, 20U, 0U, 30U, 0U, 40U, 0U
+    };
+    static const omc_u8 facerec_raw[52] = {
+        1U, 0U, 0U, 0U,
+        'B', 'o', 'b', 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        0U, 0U, 0U, 0U,
+        1U, 0U, 2U, 0U, 3U, 0U, 4U, 0U,
+        '2', '5', 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U
+    };
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 3U);
+
+    append_u16le(out, &size, 0x004EU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 10U);
+    append_u32le(out, &size, facedet_abs_off);
+
+    append_u16le(out, &size, 0x0061U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 52U);
+    append_u32le(out, &size, facerec_abs_off);
+
+    append_u16le(out, &size, 0x2003U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 20U);
+    append_u32le(out, &size, time_abs_off);
+
+    if (!truncate_next_ifd) {
+        append_u32le(out, &size, 0U);
+    }
+
+    append_raw(out, &size, facedet_raw, sizeof(facedet_raw));
+    append_raw(out, &size, facerec_raw, sizeof(facerec_raw));
+
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u32le(out, &size, 123U);
+    return size;
+}
+
+static omc_size
+make_panasonic_type2_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_bytes(out, &size, "ABCD");
+    append_u16le(out, &size, 0U);
+    append_u16le(out, &size, 42U);
+    return size;
+}
+
+static omc_size
+make_olympus_makernote_olympus_signature(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 sub_ifd_off;
+
+    size = 0U;
+    append_bytes(out, &size, "OLYMPUS");
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 3U);
+
+    append_u16le(out, &size, 1U);
+    sub_ifd_off = 12U + 18U;
+
+    append_u16le(out, &size, 0x4000U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, sub_ifd_off);
+
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0201U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 2U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_olympus_makernote_omsystem_nested_subifds(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 main_ifd_off;
+    omc_u32 main_ifd_size;
+    omc_u32 equipment_ifd_off;
+    omc_u32 equipment_ifd_size;
+    omc_u32 camera_ifd_off;
+    omc_u32 camera_ifd_size;
+    omc_u32 aftarget_ifd_off;
+    omc_u32 subjectdetect_ifd_off;
+
+    main_ifd_off = 16U;
+    main_ifd_size = 2U + (2U * 12U) + 4U;
+    equipment_ifd_off = main_ifd_off + main_ifd_size;
+    equipment_ifd_size = 18U;
+    camera_ifd_off = equipment_ifd_off + equipment_ifd_size;
+    camera_ifd_size = 2U + (3U * 12U) + 4U;
+    aftarget_ifd_off = camera_ifd_off + camera_ifd_size;
+    subjectdetect_ifd_off = aftarget_ifd_off + 18U;
+
+    size = 0U;
+    append_bytes(out, &size, "OM SYSTEM");
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 3U);
+
+    append_u16le(out, &size, 2U);
+
+    append_u16le(out, &size, 0x2010U);
+    append_u16le(out, &size, 13U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, equipment_ifd_off);
+
+    append_u16le(out, &size, 0x2020U);
+    append_u16le(out, &size, 13U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, camera_ifd_off);
+
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0100U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 7U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 3U);
+
+    append_u16le(out, &size, 0x0100U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x030AU);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, aftarget_ifd_off);
+
+    append_u16le(out, &size, 0x030BU);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, subjectdetect_ifd_off);
+
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0000U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 11U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x000AU);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 33U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_olympus_makernote_oldstyle_nested_subifds(omc_u8* out,
+                                               omc_u32 maker_note_off)
+{
+    omc_size size;
+    omc_u32 main_ifd_off;
+    omc_u32 main_ifd_size;
+    omc_u32 camera_ifd_off;
+    omc_u32 camera_ifd_size;
+    omc_u32 aftarget_ifd_off;
+    omc_u32 subjectdetect_ifd_off;
+
+    main_ifd_off = 8U;
+    main_ifd_size = 2U + 12U + 4U;
+    camera_ifd_off = main_ifd_off + main_ifd_size;
+    camera_ifd_size = 2U + (3U * 12U) + 4U;
+    aftarget_ifd_off = camera_ifd_off + camera_ifd_size;
+    subjectdetect_ifd_off = aftarget_ifd_off + 18U;
+
+    size = 0U;
+    append_bytes(out, &size, "OLYMP");
+    append_u8(out, &size, 0U);
+    append_u16le(out, &size, 1U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x2020U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, maker_note_off + camera_ifd_off);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 3U);
+
+    append_u16le(out, &size, 0x0100U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 2U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x030AU);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, maker_note_off + aftarget_ifd_off);
+
+    append_u16le(out, &size, 0x030BU);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, maker_note_off + subjectdetect_ifd_off);
+
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0000U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 22U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x000AU);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 44U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_olympus_makernote_omsystem_main_subifd_matrix(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 main_ifd_off;
+    omc_u32 main_ifd_size;
+    omc_u32 sub_ifd_size;
+    omc_u32 equipment_ifd_off;
+    omc_u32 rawdev_ifd_off;
+    omc_u32 rawdev2_ifd_off;
+    omc_u32 imageproc_ifd_off;
+    omc_u32 focusinfo_ifd_off;
+    omc_u32 fetags0_ifd_off;
+    omc_u32 fetags1_ifd_off;
+    omc_u32 rawinfo_ifd_off;
+
+    main_ifd_off = 16U;
+    main_ifd_size = 2U + (8U * 12U) + 4U;
+    sub_ifd_size = 18U;
+    equipment_ifd_off = main_ifd_off + main_ifd_size;
+    rawdev_ifd_off = equipment_ifd_off + sub_ifd_size;
+    rawdev2_ifd_off = rawdev_ifd_off + sub_ifd_size;
+    imageproc_ifd_off = rawdev2_ifd_off + sub_ifd_size;
+    focusinfo_ifd_off = imageproc_ifd_off + sub_ifd_size;
+    fetags0_ifd_off = focusinfo_ifd_off + sub_ifd_size;
+    fetags1_ifd_off = fetags0_ifd_off + sub_ifd_size;
+    rawinfo_ifd_off = fetags1_ifd_off + sub_ifd_size;
+
+    size = 0U;
+    append_bytes(out, &size, "OM SYSTEM");
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 3U);
+
+    append_u16le(out, &size, 8U);
+
+    append_u16le(out, &size, 0x2010U);
+    append_u16le(out, &size, 13U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, equipment_ifd_off);
+
+    append_u16le(out, &size, 0x2030U);
+    append_u16le(out, &size, 13U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, rawdev_ifd_off);
+
+    append_u16le(out, &size, 0x2031U);
+    append_u16le(out, &size, 13U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, rawdev2_ifd_off);
+
+    append_u16le(out, &size, 0x2040U);
+    append_u16le(out, &size, 13U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, imageproc_ifd_off);
+
+    append_u16le(out, &size, 0x2050U);
+    append_u16le(out, &size, 13U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, focusinfo_ifd_off);
+
+    append_u16le(out, &size, 0x2100U);
+    append_u16le(out, &size, 13U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, fetags0_ifd_off);
+
+    append_u16le(out, &size, 0x2200U);
+    append_u16le(out, &size, 13U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, fetags1_ifd_off);
+
+    append_u16le(out, &size, 0x3000U);
+    append_u16le(out, &size, 13U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, rawinfo_ifd_off);
+
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0100U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 7U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0000U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 3U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0100U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 4U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0000U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 5U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0209U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0100U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 6U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0100U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 8U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0614U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 321U);
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_olympus_makernote_omsystem_focusinfo_name_context(omc_u8* out,
+                                                       int with_stabilization)
+{
+    omc_size size;
+    omc_u32 main_ifd_off;
+    omc_u32 main_ifd_size;
+    omc_u32 camera_ifd_off;
+    omc_u32 focus_ifd_off;
+    omc_u32 focus_val_off;
+
+    main_ifd_off = 16U;
+    main_ifd_size = 2U + (2U * 12U) + 4U;
+    camera_ifd_off = main_ifd_off + main_ifd_size;
+    focus_ifd_off = camera_ifd_off + 18U;
+    focus_val_off = focus_ifd_off + 18U;
+
+    size = 0U;
+    append_bytes(out, &size, "OM SYSTEM");
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 3U);
+
+    append_u16le(out, &size, 2U);
+
+    append_u16le(out, &size, 0x2020U);
+    append_u16le(out, &size, 13U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, camera_ifd_off);
+
+    append_u16le(out, &size, 0x2050U);
+    append_u16le(out, &size, 13U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, focus_ifd_off);
+
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    if (with_stabilization) {
+        append_u16le(out, &size, 0x0604U);
+        append_u16le(out, &size, 4U);
+        append_u32le(out, &size, 1U);
+        append_u32le(out, &size, 1U);
+    } else {
+        append_u16le(out, &size, 0x0100U);
+        append_u16le(out, &size, 3U);
+        append_u32le(out, &size, 1U);
+        append_u16le(out, &size, 7U);
+        append_u16le(out, &size, 0U);
+    }
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x1600U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 8U);
+    append_u32le(out, &size, focus_val_off);
+    append_u32le(out, &size, 0U);
+
+    append_u8(out, &size, 1U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 3U);
+    append_u8(out, &size, 4U);
+    append_u8(out, &size, 5U);
+    append_u8(out, &size, 6U);
+    append_u8(out, &size, 7U);
+    append_u8(out, &size, 8U);
     return size;
 }
 
@@ -2835,6 +3431,214 @@ test_casio_faceinfo_subdirs(void)
 }
 
 static void
+test_samsung_stmn_makernote(void)
+{
+    omc_u8 makernote[96];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    makernote_size = make_samsung_stmn_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "SAMSUNG", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_samsung0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 7U);
+    assert(memcmp(view.data, "STMN100", 7U) == 0);
+
+    entry = find_exif_entry(&store, "mk_samsung0", 0x0002U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 0x12345678U);
+
+    entry = find_exif_entry(&store, "mk_samsung0", 0x0003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 0x00010002U);
+
+    entry = find_exif_entry(&store, "mk_samsung_ifd_0", 0x0004U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "HELLO", 5U) == 0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "Samsung_IFD_0x0004");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Samsung_IFD_0x0004");
+
+    omc_store_fini(&store);
+}
+
+static void
+test_samsung_type2_picturewizard(void)
+{
+    omc_u8 makernote[96];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_samsung_type2_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "SAMSUNG", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_samsung_type2_0", 0x0021U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_BYTES);
+
+    entry = find_exif_entry(&store, "mk_samsung_picturewizard_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 1U);
+
+    entry = find_exif_entry(&store, "mk_samsung_picturewizard_0", 0x0004U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 5U);
+
+    entry = find_exif_entry(&store, "mk_samsung_type2_0", 0x0004U);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "Samsung_Type2_0x0004");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Samsung_Type2_0x0004");
+
+    omc_store_fini(&store);
+}
+
+static void
+test_samsung_type2_picturewizard_u16_array(void)
+{
+    omc_u8 makernote[64];
+    omc_u8 tiff[192];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_samsung_type2_makernote_u16_picturewizard(
+        makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "SAMSUNG", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_samsung_type2_0", 0x0021U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.count == 5U);
+
+    entry = find_exif_entry(&store, "mk_samsung_picturewizard_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 11U);
+
+    entry = find_exif_entry(&store, "mk_samsung_picturewizard_0", 0x0004U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 55U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_samsung_compat_tag0_and_a002_names(void)
+{
+    omc_u8 makernote[64];
+    omc_u8 tiff[192];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    makernote_size = make_samsung_makernote_compat_digits(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "SAMSUNG", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_samsung0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 4U);
+    assert(memcmp(view.data, "2024", 4U) == 0);
+    omc_store_fini(&store);
+
+    makernote_size = make_samsung_type2_makernote_with_a002_and_a003(
+        makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "SAMSUNG", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_samsung_type2_0", 0xA002U);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "SerialNumber");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Samsung_Type2_0xa002");
+
+    entry = find_exif_entry(&store, "mk_samsung_type2_0", 0xA003U);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "LensType");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "LensType");
+
+    omc_store_fini(&store);
+}
+
+static void
 test_pentax_makernote_root_and_binary_subdirs(void)
 {
     omc_u8 makernote[256];
@@ -3189,6 +3993,156 @@ test_ricoh_native_makernote_and_subdirs(void)
 }
 
 static void
+test_panasonic_makernote_subdirs(void)
+{
+    omc_u8 makernote[160];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_u32 maker_off;
+    omc_u32 facedet_abs_off;
+    omc_u32 facerec_abs_off;
+    omc_u32 time_abs_off;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    maker_off = 38U + (omc_u32)(strlen("Panasonic") + 1U);
+    facedet_abs_off = maker_off + 42U;
+    facerec_abs_off = facedet_abs_off + 10U;
+    time_abs_off = facerec_abs_off + 52U;
+    makernote_size = make_panasonic_makernote_with_subdirs(
+        makernote, facedet_abs_off, facerec_abs_off, time_abs_off, 0);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Panasonic", makernote, makernote_size, (omc_u32)makernote_size);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facedetinfo_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 1U);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facedetinfo_0", 0x0001U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.count == 4U);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facerecinfo_0", 0x0004U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 3U);
+    assert(memcmp(view.data, "Bob", 3U) == 0);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facerecinfo_0", 0x0018U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.count == 4U);
+
+    entry = find_exif_entry(&store, "mk_panasonic_timeinfo_0", 0x0010U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 123U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_panasonic_makernote_truncated_next_ifd(void)
+{
+    omc_u8 makernote[160];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_u32 maker_off;
+    omc_u32 facedet_abs_off;
+    omc_u32 facerec_abs_off;
+    omc_u32 time_abs_off;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    maker_off = 38U + (omc_u32)(strlen("Panasonic") + 1U);
+    facedet_abs_off = maker_off + 38U;
+    facerec_abs_off = facedet_abs_off + 10U;
+    time_abs_off = facerec_abs_off + 52U;
+    makernote_size = make_panasonic_makernote_with_subdirs(
+        makernote, facedet_abs_off, facerec_abs_off, time_abs_off, 1);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Panasonic", makernote, makernote_size, (omc_u32)makernote_size);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facedetinfo_0", 0x0001U);
+    assert(entry != (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_panasonic_facerecinfo_0", 0x0018U);
+    assert(entry != (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_panasonic_timeinfo_0", 0x0010U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 123U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_panasonic_type2_makernote(void)
+{
+    omc_u8 makernote[32];
+    omc_u8 tiff[96];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    makernote_size = make_panasonic_type2_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Panasonic", makernote, makernote_size, (omc_u32)makernote_size);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_panasonic_type2_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 4U);
+    assert(memcmp(view.data, "ABCD", 4U) == 0);
+
+    entry = find_exif_entry(&store, "mk_panasonic_type2_0", 0x0003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 42U);
+
+    omc_store_fini(&store);
+}
+
+static void
 test_fuji_makernote_signature(void)
 {
     omc_u8 makernote[128];
@@ -3217,6 +4171,242 @@ test_fuji_makernote_signature(void)
     assert(entry->value.elem_type == OMC_ELEM_U16);
     assert(entry->value.u.u64 == 0x42U);
 
+    omc_store_fini(&store);
+}
+
+static void
+test_olympus_signature_makernote(void)
+{
+    omc_u8 makernote[64];
+    omc_u8 tiff[160];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_olympus_makernote_olympus_signature(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "OLYMPUS", makernote, makernote_size, (omc_u32)makernote_size);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_olympus_main_0", 0x0201U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 2U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "Olympus_0x0201");
+
+    omc_store_fini(&store);
+}
+
+static void
+test_olympus_omsystem_nested_subifds(void)
+{
+    omc_u8 makernote[256];
+    omc_u8 tiff[384];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_olympus_makernote_omsystem_nested_subifds(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "OMDS", makernote, makernote_size, (omc_u32)makernote_size);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_olympus_equipment_0", 0x0100U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 7U);
+
+    entry = find_exif_entry(&store, "mk_olympus_camerasettings_0", 0x0100U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 1U);
+
+    entry = find_exif_entry(&store, "mk_olympus_aftargetinfo_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 11U);
+
+    entry = find_exif_entry(&store, "mk_olympus_subjectdetectinfo_0", 0x000AU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 33U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_olympus_oldstyle_nested_subifds(void)
+{
+    omc_u8 makernote[160];
+    omc_u8 tiff[320];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_u32 maker_off;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    maker_off = 38U + (omc_u32)(strlen("OLYMPUS") + 1U);
+    makernote_size = make_olympus_makernote_oldstyle_nested_subifds(makernote,
+                                                                    maker_off);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "OLYMPUS", makernote, makernote_size, (omc_u32)makernote_size);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_olympus_camerasettings_0", 0x0100U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 2U);
+
+    entry = find_exif_entry(&store, "mk_olympus_aftargetinfo_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 22U);
+
+    entry = find_exif_entry(&store, "mk_olympus_subjectdetectinfo_0", 0x000AU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 44U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_olympus_omsystem_main_subifd_matrix(void)
+{
+    omc_u8 makernote[320];
+    omc_u8 tiff[384];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_olympus_makernote_omsystem_main_subifd_matrix(
+        makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "OMDS", makernote, makernote_size, (omc_u32)makernote_size);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_olympus_equipment_0", 0x0100U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 7U);
+
+    entry = find_exif_entry(&store, "mk_olympus_rawdevelopment_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 3U);
+
+    entry = find_exif_entry(&store, "mk_olympus_rawdevelopment2_0", 0x0100U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 4U);
+
+    entry = find_exif_entry(&store, "mk_olympus_imageprocessing_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 5U);
+
+    entry = find_exif_entry(&store, "mk_olympus_focusinfo_0", 0x0209U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 1U);
+
+    entry = find_exif_entry(&store, "mk_olympus_fetags_0", 0x0100U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 6U);
+
+    entry = find_exif_entry(&store, "mk_olympus_fetags_1", 0x0100U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 8U);
+
+    entry = find_exif_entry(&store, "mk_olympus_rawinfo_0", 0x0614U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 321U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_olympus_focusinfo_name_context(void)
+{
+    omc_u8 makernote[160];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_olympus_makernote_omsystem_focusinfo_name_context(
+        makernote, 1);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "OMDS", makernote, makernote_size, (omc_u32)makernote_size);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_olympus_focusinfo_0", 0x1600U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert(entry->origin.name_context_kind
+           == OMC_ENTRY_NAME_CTX_OLYMPUS_FOCUSINFO_1600);
+    assert(entry->origin.name_context_variant == 2U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "ImageStabilization");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Olympus_FocusInfo_0x1600");
+    omc_store_fini(&store);
+
+    makernote_size = make_olympus_makernote_omsystem_focusinfo_name_context(
+        makernote, 0);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "OMDS", makernote, makernote_size, (omc_u32)makernote_size);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_olympus_focusinfo_0", 0x1600U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert(entry->origin.name_context_kind
+           == OMC_ENTRY_NAME_CTX_OLYMPUS_FOCUSINFO_1600);
+    assert(entry->origin.name_context_variant == 1U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "ImageStabilization");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "ImageStabilization");
     omc_store_fini(&store);
 }
 
@@ -5183,12 +6373,24 @@ main(void)
     test_casio_legacy_generic_route_contextual_names();
     test_casio_out_of_line_preview();
     test_casio_faceinfo_subdirs();
+    test_samsung_stmn_makernote();
+    test_samsung_type2_picturewizard();
+    test_samsung_type2_picturewizard_u16_array();
+    test_samsung_compat_tag0_and_a002_names();
     test_pentax_makernote_root_and_binary_subdirs();
     test_pentax_makernote_type2_routing();
     test_pentax_contextual_name_and_zero_face_tables();
     test_ricoh_type2_makernote();
     test_ricoh_padded_type2_makernote();
     test_ricoh_native_makernote_and_subdirs();
+    test_panasonic_makernote_subdirs();
+    test_panasonic_makernote_truncated_next_ifd();
+    test_panasonic_type2_makernote();
+    test_olympus_signature_makernote();
+    test_olympus_omsystem_nested_subifds();
+    test_olympus_oldstyle_nested_subifds();
+    test_olympus_omsystem_main_subifd_matrix();
+    test_olympus_focusinfo_name_context();
     test_fuji_makernote_signature();
     test_fuji_makernote_extended();
     test_fuji_ge2_makernote();

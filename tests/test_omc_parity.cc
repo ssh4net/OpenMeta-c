@@ -604,6 +604,131 @@ build_tiff_casio_faceinfo2_makernote_fixture()
 }
 
 static ByteVec
+build_tiff_samsung_stmn_makernote_fixture()
+{
+    std::array<unsigned char, 96> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_bytes(makernote.data(), &size, "STMN100", 7U);
+    append_u8(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0x12345678U);
+    append_u32le(makernote.data(), &size, 0x00010002U);
+    while (size < 44U) {
+        append_u8(makernote.data(), &size, 0U);
+    }
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0004U);
+    append_u16le(makernote.data(), &size, 2U);
+    append_u32le(makernote.data(), &size, 6U);
+    append_u32le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+    append_bytes(makernote.data(), &size, "HELLO", 5U);
+    append_u8(makernote.data(), &size, 0U);
+
+    return build_tiff_with_make_makernote_fixture("SAMSUNG", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
+build_tiff_samsung_type2_makernote_fixture()
+{
+    std::array<unsigned char, 96> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_u16le(makernote.data(), &size, 2U);
+
+    append_u16le(makernote.data(), &size, 0x0004U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 4U);
+    append_bytes(makernote.data(), &size, "ABCD", 4U);
+
+    append_u16le(makernote.data(), &size, 0x0021U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 10U);
+    append_u32le(makernote.data(), &size, 30U);
+
+    append_u32le(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 2U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u16le(makernote.data(), &size, 5U);
+
+    return build_tiff_with_make_makernote_fixture("SAMSUNG", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
+build_tiff_samsung_type2_u16_picturewizard_fixture()
+{
+    std::array<unsigned char, 64> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0021U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 5U);
+    append_u32le(makernote.data(), &size, 18U);
+    append_u32le(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 11U);
+    append_u16le(makernote.data(), &size, 22U);
+    append_u16le(makernote.data(), &size, 33U);
+    append_u16le(makernote.data(), &size, 44U);
+    append_u16le(makernote.data(), &size, 55U);
+
+    return build_tiff_with_make_makernote_fixture("SAMSUNG", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
+build_tiff_samsung_compat_digits_fixture()
+{
+    std::array<unsigned char, 16> makernote {};
+
+    makernote.fill(0U);
+    makernote[0] = (unsigned char)'B';
+    makernote[1] = (unsigned char)'A';
+    makernote[2] = (unsigned char)'D';
+    makernote[3] = (unsigned char)'!';
+    makernote[10] = (unsigned char)'2';
+    makernote[11] = (unsigned char)'0';
+    makernote[12] = (unsigned char)'2';
+    makernote[13] = (unsigned char)'4';
+
+    return build_tiff_with_make_makernote_fixture("SAMSUNG", makernote.data(),
+                                                  makernote.size());
+}
+
+static ByteVec
+build_tiff_samsung_type2_a002_a003_fixture()
+{
+    std::array<unsigned char, 64> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_u16le(makernote.data(), &size, 2U);
+
+    append_u16le(makernote.data(), &size, 0xA002U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x1234U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 0xA003U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x5678U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u32le(makernote.data(), &size, 0U);
+    return build_tiff_with_make_makernote_fixture("SAMSUNG", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
 build_tiff_pentax_binary_makernote_fixture()
 {
     std::array<unsigned char, 128> makernote {};
@@ -937,6 +1062,474 @@ build_tiff_ricoh_native_makernote_fixture()
     tiff.insert(tiff.end(), theta_ifd.begin(),
                 theta_ifd.begin() + (std::ptrdiff_t)theta_size);
     return tiff;
+}
+
+static ByteVec
+build_tiff_panasonic_makernote_fixture(bool truncated_next_ifd)
+{
+    std::array<unsigned char, 160> makernote {};
+    ByteVec tiff;
+    std::size_t size;
+    std::uint32_t maker_off;
+    std::uint32_t facedet_abs_off;
+    std::uint32_t facerec_abs_off;
+    std::uint32_t time_abs_off;
+    static const unsigned char facedet_raw[10] = {
+        1U, 0U, 10U, 0U, 20U, 0U, 30U, 0U, 40U, 0U
+    };
+    static const unsigned char facerec_raw[52] = {
+        1U, 0U, 0U, 0U,
+        'B', 'o', 'b', 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        0U, 0U, 0U, 0U,
+        1U, 0U, 2U, 0U, 3U, 0U, 4U, 0U,
+        '2', '5', 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U
+    };
+
+    maker_off = 38U + (std::uint32_t)std::strlen("Panasonic") + 1U;
+    facedet_abs_off = maker_off + (truncated_next_ifd ? 38U : 42U);
+    facerec_abs_off = facedet_abs_off + 10U;
+    time_abs_off = facerec_abs_off + 52U;
+
+    size = 0U;
+    append_u16le(makernote.data(), &size, 3U);
+
+    append_u16le(makernote.data(), &size, 0x004EU);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 10U);
+    append_u32le(makernote.data(), &size, facedet_abs_off);
+
+    append_u16le(makernote.data(), &size, 0x0061U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 52U);
+    append_u32le(makernote.data(), &size, facerec_abs_off);
+
+    append_u16le(makernote.data(), &size, 0x2003U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 20U);
+    append_u32le(makernote.data(), &size, time_abs_off);
+
+    if (!truncated_next_ifd) {
+        append_u32le(makernote.data(), &size, 0U);
+    }
+
+    append_bytes(makernote.data(), &size, facedet_raw, sizeof(facedet_raw));
+    append_bytes(makernote.data(), &size, facerec_raw, sizeof(facerec_raw));
+    for (std::size_t i = 0; i < 16U; ++i) {
+        append_u8(makernote.data(), &size, 0U);
+    }
+    append_u32le(makernote.data(), &size, 123U);
+
+    tiff = build_tiff_with_make_makernote_fixture("Panasonic", makernote.data(),
+                                                  size);
+    return tiff;
+}
+
+static ByteVec
+build_tiff_panasonic_type2_fixture()
+{
+    std::array<unsigned char, 16> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_text(makernote.data(), &size, "ABCD");
+    append_u16le(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 42U);
+
+    return build_tiff_with_make_makernote_fixture("Panasonic", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
+build_tiff_olympus_signature_fixture()
+{
+    std::array<unsigned char, 64> makernote {};
+    std::size_t size;
+    std::uint32_t sub_ifd_off;
+
+    size = 0U;
+    append_text(makernote.data(), &size, "OLYMPUS");
+    append_u8(makernote.data(), &size, 0U);
+    append_text(makernote.data(), &size, "II");
+    append_u16le(makernote.data(), &size, 3U);
+
+    append_u16le(makernote.data(), &size, 1U);
+    sub_ifd_off = 12U + 18U;
+
+    append_u16le(makernote.data(), &size, 0x4000U);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, sub_ifd_off);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0201U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 2U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+
+    return build_tiff_with_make_makernote_fixture("OLYMPUS",
+                                                  makernote.data(), size);
+}
+
+static ByteVec
+build_tiff_olympus_omsystem_nested_fixture()
+{
+    std::array<unsigned char, 256> makernote {};
+    std::size_t size;
+    std::uint32_t main_ifd_off;
+    std::uint32_t main_ifd_size;
+    std::uint32_t equipment_ifd_off;
+    std::uint32_t equipment_ifd_size;
+    std::uint32_t camera_ifd_off;
+    std::uint32_t camera_ifd_size;
+    std::uint32_t aftarget_ifd_off;
+    std::uint32_t subjectdetect_ifd_off;
+
+    main_ifd_off = 16U;
+    main_ifd_size = 2U + (2U * 12U) + 4U;
+    equipment_ifd_off = main_ifd_off + main_ifd_size;
+    equipment_ifd_size = 18U;
+    camera_ifd_off = equipment_ifd_off + equipment_ifd_size;
+    camera_ifd_size = 2U + (3U * 12U) + 4U;
+    aftarget_ifd_off = camera_ifd_off + camera_ifd_size;
+    subjectdetect_ifd_off = aftarget_ifd_off + 18U;
+
+    size = 0U;
+    append_text(makernote.data(), &size, "OM SYSTEM");
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_text(makernote.data(), &size, "II");
+    append_u16le(makernote.data(), &size, 3U);
+
+    append_u16le(makernote.data(), &size, 2U);
+    append_u16le(makernote.data(), &size, 0x2010U);
+    append_u16le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, equipment_ifd_off);
+    append_u16le(makernote.data(), &size, 0x2020U);
+    append_u16le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, camera_ifd_off);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0100U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 3U);
+    append_u16le(makernote.data(), &size, 0x0100U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 0x030AU);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, aftarget_ifd_off);
+    append_u16le(makernote.data(), &size, 0x030BU);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, subjectdetect_ifd_off);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0000U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 11U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x000AU);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 33U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+
+    return build_tiff_with_make_makernote_fixture("OMDS", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
+build_tiff_olympus_oldstyle_nested_fixture()
+{
+    std::array<unsigned char, 160> makernote {};
+    std::size_t size;
+    std::uint32_t maker_off;
+    std::uint32_t main_ifd_off;
+    std::uint32_t main_ifd_size;
+    std::uint32_t camera_ifd_off;
+    std::uint32_t camera_ifd_size;
+    std::uint32_t aftarget_ifd_off;
+    std::uint32_t subjectdetect_ifd_off;
+
+    maker_off = 38U + (std::uint32_t)std::strlen("OLYMPUS") + 1U;
+    main_ifd_off = 8U;
+    main_ifd_size = 2U + 12U + 4U;
+    camera_ifd_off = main_ifd_off + main_ifd_size;
+    camera_ifd_size = 2U + (3U * 12U) + 4U;
+    aftarget_ifd_off = camera_ifd_off + camera_ifd_size;
+    subjectdetect_ifd_off = aftarget_ifd_off + 18U;
+
+    size = 0U;
+    append_text(makernote.data(), &size, "OLYMP");
+    append_u8(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 1U);
+
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x2020U);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, maker_off + camera_ifd_off);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 3U);
+    append_u16le(makernote.data(), &size, 0x0100U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 2U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 0x030AU);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, maker_off + aftarget_ifd_off);
+    append_u16le(makernote.data(), &size, 0x030BU);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, maker_off + subjectdetect_ifd_off);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0000U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 22U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x000AU);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 44U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+
+    return build_tiff_with_make_makernote_fixture("OLYMPUS",
+                                                  makernote.data(), size);
+}
+
+static ByteVec
+build_tiff_olympus_main_subifd_matrix_fixture()
+{
+    std::array<unsigned char, 320> makernote {};
+    std::size_t size;
+    std::uint32_t main_ifd_off;
+    std::uint32_t main_ifd_size;
+    std::uint32_t sub_ifd_size;
+    std::uint32_t equipment_ifd_off;
+    std::uint32_t rawdev_ifd_off;
+    std::uint32_t rawdev2_ifd_off;
+    std::uint32_t imageproc_ifd_off;
+    std::uint32_t focusinfo_ifd_off;
+    std::uint32_t fetags0_ifd_off;
+    std::uint32_t fetags1_ifd_off;
+    std::uint32_t rawinfo_ifd_off;
+
+    main_ifd_off = 16U;
+    main_ifd_size = 2U + (8U * 12U) + 4U;
+    sub_ifd_size = 18U;
+    equipment_ifd_off = main_ifd_off + main_ifd_size;
+    rawdev_ifd_off = equipment_ifd_off + sub_ifd_size;
+    rawdev2_ifd_off = rawdev_ifd_off + sub_ifd_size;
+    imageproc_ifd_off = rawdev2_ifd_off + sub_ifd_size;
+    focusinfo_ifd_off = imageproc_ifd_off + sub_ifd_size;
+    fetags0_ifd_off = focusinfo_ifd_off + sub_ifd_size;
+    fetags1_ifd_off = fetags0_ifd_off + sub_ifd_size;
+    rawinfo_ifd_off = fetags1_ifd_off + sub_ifd_size;
+
+    size = 0U;
+    append_text(makernote.data(), &size, "OM SYSTEM");
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_text(makernote.data(), &size, "II");
+    append_u16le(makernote.data(), &size, 3U);
+    append_u16le(makernote.data(), &size, 8U);
+
+    append_u16le(makernote.data(), &size, 0x2010U);
+    append_u16le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, equipment_ifd_off);
+    append_u16le(makernote.data(), &size, 0x2030U);
+    append_u16le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, rawdev_ifd_off);
+    append_u16le(makernote.data(), &size, 0x2031U);
+    append_u16le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, rawdev2_ifd_off);
+    append_u16le(makernote.data(), &size, 0x2040U);
+    append_u16le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, imageproc_ifd_off);
+    append_u16le(makernote.data(), &size, 0x2050U);
+    append_u16le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, focusinfo_ifd_off);
+    append_u16le(makernote.data(), &size, 0x2100U);
+    append_u16le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, fetags0_ifd_off);
+    append_u16le(makernote.data(), &size, 0x2200U);
+    append_u16le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, fetags1_ifd_off);
+    append_u16le(makernote.data(), &size, 0x3000U);
+    append_u16le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, rawinfo_ifd_off);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0100U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0000U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0100U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0000U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 5U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0209U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0100U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 6U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0100U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 8U);
+    append_u16le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0614U);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, 321U);
+    append_u32le(makernote.data(), &size, 0U);
+
+    return build_tiff_with_make_makernote_fixture("OMDS", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
+build_tiff_olympus_focusinfo_context_fixture(bool with_stabilization)
+{
+    std::array<unsigned char, 160> makernote {};
+    std::size_t size;
+    std::uint32_t main_ifd_off;
+    std::uint32_t main_ifd_size;
+    std::uint32_t camera_ifd_off;
+    std::uint32_t focus_ifd_off;
+    std::uint32_t focus_val_off;
+
+    main_ifd_off = 16U;
+    main_ifd_size = 2U + (2U * 12U) + 4U;
+    camera_ifd_off = main_ifd_off + main_ifd_size;
+    focus_ifd_off = camera_ifd_off + 18U;
+    focus_val_off = focus_ifd_off + 18U;
+
+    size = 0U;
+    append_text(makernote.data(), &size, "OM SYSTEM");
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_text(makernote.data(), &size, "II");
+    append_u16le(makernote.data(), &size, 3U);
+    append_u16le(makernote.data(), &size, 2U);
+
+    append_u16le(makernote.data(), &size, 0x2020U);
+    append_u16le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, camera_ifd_off);
+    append_u16le(makernote.data(), &size, 0x2050U);
+    append_u16le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, focus_ifd_off);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 1U);
+    if (with_stabilization) {
+        append_u16le(makernote.data(), &size, 0x0604U);
+        append_u16le(makernote.data(), &size, 4U);
+        append_u32le(makernote.data(), &size, 1U);
+        append_u32le(makernote.data(), &size, 1U);
+    } else {
+        append_u16le(makernote.data(), &size, 0x0100U);
+        append_u16le(makernote.data(), &size, 3U);
+        append_u32le(makernote.data(), &size, 1U);
+        append_u16le(makernote.data(), &size, 7U);
+        append_u16le(makernote.data(), &size, 0U);
+    }
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x1600U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 8U);
+    append_u32le(makernote.data(), &size, focus_val_off);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u8(makernote.data(), &size, 1U);
+    append_u8(makernote.data(), &size, 2U);
+    append_u8(makernote.data(), &size, 3U);
+    append_u8(makernote.data(), &size, 4U);
+    append_u8(makernote.data(), &size, 5U);
+    append_u8(makernote.data(), &size, 6U);
+    append_u8(makernote.data(), &size, 7U);
+    append_u8(makernote.data(), &size, 8U);
+
+    return build_tiff_with_make_makernote_fixture("OMDS", makernote.data(),
+                                                  size);
 }
 
 struct CiffValueEntry final {
@@ -5193,6 +5786,21 @@ main(int argc, char** argv)
     ok = run_case("tiff_casio_faceinfo2_makernote",
                   build_tiff_casio_faceinfo2_makernote_fixture(), true)
          && ok;
+    ok = run_case("tiff_samsung_stmn_makernote",
+                  build_tiff_samsung_stmn_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_samsung_type2_makernote",
+                  build_tiff_samsung_type2_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_samsung_type2_u16_picturewizard_makernote",
+                  build_tiff_samsung_type2_u16_picturewizard_fixture(), true)
+         && ok;
+    ok = run_case("tiff_samsung_compat_digits_makernote",
+                  build_tiff_samsung_compat_digits_fixture(), true)
+         && ok;
+    ok = run_case("tiff_samsung_type2_a002_a003_makernote",
+                  build_tiff_samsung_type2_a002_a003_fixture(), true)
+         && ok;
     ok = run_case("tiff_pentax_binary_makernote",
                   build_tiff_pentax_binary_makernote_fixture(), true)
          && ok;
@@ -5207,6 +5815,30 @@ main(int argc, char** argv)
          && ok;
     ok = run_case("tiff_ricoh_native_makernote",
                   build_tiff_ricoh_native_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_panasonic_makernote",
+                  build_tiff_panasonic_makernote_fixture(false), true)
+         && ok;
+    ok = run_case("tiff_panasonic_truncated_next_ifd_makernote",
+                  build_tiff_panasonic_makernote_fixture(true), true)
+         && ok;
+    ok = run_case("tiff_panasonic_type2_makernote",
+                  build_tiff_panasonic_type2_fixture(), true)
+         && ok;
+    ok = run_case("tiff_olympus_signature_makernote",
+                  build_tiff_olympus_signature_fixture(), true)
+         && ok;
+    ok = run_case("tiff_olympus_omsystem_nested_makernote",
+                  build_tiff_olympus_omsystem_nested_fixture(), true)
+         && ok;
+    ok = run_case("tiff_olympus_oldstyle_nested_makernote",
+                  build_tiff_olympus_oldstyle_nested_fixture(), true)
+         && ok;
+    ok = run_case("tiff_olympus_main_subifd_matrix_makernote",
+                  build_tiff_olympus_main_subifd_matrix_fixture(), true)
+         && ok;
+    ok = run_case("tiff_olympus_focusinfo_context_makernote",
+                  build_tiff_olympus_focusinfo_context_fixture(true), true)
          && ok;
     ok = run_case("tiff_fuji_makernote",
                   build_tiff_fuji_makernote_fixture(), true)

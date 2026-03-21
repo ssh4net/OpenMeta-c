@@ -134,17 +134,24 @@ test_tag_name_basics(void)
     expect_tag_name("mk_motorola0", 0x5500U, "BuildNumber");
     expect_tag_name("mk_motorola0", 0x6703U, "Motorola_0x6703");
     expect_tag_name("mk_olympus_equipment0", 0x0040U, "CompressedImageSize");
+    expect_tag_name("mk_olympus_equipment_0", 0x0040U,
+                    "CompressedImageSize");
     expect_tag_name("mk_olympus_fetags_0", 0x0101U,
                     "Olympus_FETags_0x0101");
     expect_tag_name("mk_olympus_fetags_0", 0x0311U, "CoringValues");
+    expect_tag_name("mk_olympus_main_0", 0x0201U, "Olympus_0x0201");
     expect_tag_name("mk_olympus_camerasettings_0", 0x0402U,
                     "Olympus_CameraSettings_0x0402");
     expect_tag_name("mk_olympus_unknowninfo_0", 0x2100U,
                     "Olympus_UnknownInfo_0x2100");
     expect_tag_name("mk_olympus_imageprocessing_0", 0x1000U,
                     "Olympus_ImageProcessing_0x1000");
+    expect_tag_name("mk_olympus_rawdevelopment_0", 0x0000U,
+                    "Olympus_RawDevelopment_0x0000");
     expect_tag_name("mk_olympus_rawdevelopment2_0", 0x0114U,
                     "Olympus_RawDevelopment2_0x0114");
+    expect_tag_name("mk_olympus_rawinfo_0", 0x0614U,
+                    "Olympus_RawInfo_0x0614");
     expect_tag_name("mk_olympus0", 0x0225U, "Olympus_0x0225");
     expect_tag_name("mk_panasonic0", 0x0022U, "Panasonic_0x0022");
     expect_tag_name("mk_panasonic0", 0x0058U, "ThumbnailWidth");
@@ -160,7 +167,9 @@ test_tag_name_basics(void)
     expect_tag_name("mk_ricoh_thetasubdir_0", 0x1001U,
                     "Ricoh_ThetaSubdir_0x1001");
     expect_tag_name("mk_ricoh_type2_0", 0x0104U, "Ricoh_Type2_0x0104");
+    expect_tag_name("mk_samsung_ifd_0", 0x0004U, "Samsung_IFD_0x0004");
     expect_tag_name("mk_samsung_ifd_0", 0x0002U, "Samsung_IFD_0x0002");
+    expect_tag_name("mk_samsung_type2_0", 0x0004U, "Samsung_Type2_0x0004");
     expect_tag_name("mk_samsung_type2_0", 0xA002U, "SerialNumber");
     expect_tag_name("unknown_ifd", 0x010FU, (const char*)0);
 }
