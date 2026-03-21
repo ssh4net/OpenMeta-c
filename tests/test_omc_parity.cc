@@ -603,6 +603,342 @@ build_tiff_casio_faceinfo2_makernote_fixture()
     return tiff;
 }
 
+static ByteVec
+build_tiff_pentax_binary_makernote_fixture()
+{
+    std::array<unsigned char, 128> makernote {};
+    std::size_t size;
+    std::uint32_t aeinfo_off;
+    std::uint32_t shot_off;
+    std::uint8_t i;
+
+    size = 0U;
+    append_bytes(makernote.data(), &size, "AOC", 3U);
+    append_u8(makernote.data(), &size, 0U);
+    append_text(makernote.data(), &size, "II");
+    append_u16le(makernote.data(), &size, 4U);
+
+    aeinfo_off = 8U + (4U * 12U) + 4U;
+    shot_off = aeinfo_off + 21U;
+
+    append_u16le(makernote.data(), &size, 0x005CU);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 0x44332211U);
+
+    append_u16le(makernote.data(), &size, 0x0060U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, 3U);
+
+    append_u16le(makernote.data(), &size, 0x0206U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 21U);
+    append_u32le(makernote.data(), &size, aeinfo_off);
+
+    append_u16le(makernote.data(), &size, 0x0226U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 6U);
+    append_u32le(makernote.data(), &size, shot_off);
+
+    append_u32le(makernote.data(), &size, 0U);
+    for (i = 0U; i < 21U; ++i) {
+        append_u8(makernote.data(), &size, (std::uint8_t)(i + 1U));
+    }
+    for (i = 0U; i < 6U; ++i) {
+        append_u8(makernote.data(), &size, (std::uint8_t)(0xA0U + i));
+    }
+
+    return build_tiff_with_make_makernote_fixture("PENTAX", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
+build_tiff_pentax_type2_makernote_fixture()
+{
+    std::array<unsigned char, 128> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_bytes(makernote.data(), &size, "AOC", 3U);
+    append_u8(makernote.data(), &size, 0U);
+    append_text(makernote.data(), &size, "II");
+    append_u16le(makernote.data(), &size, 4U);
+
+    append_u16le(makernote.data(), &size, 0x0001U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 2U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 0x0004U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 0x0005U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 0x1000U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x1234U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u32le(makernote.data(), &size, 0U);
+    return build_tiff_with_make_model_makernote_fixture(
+        "PENTAX", "PENTAX Optio 330", makernote.data(), size);
+}
+
+static ByteVec
+build_tiff_pentax_placeholder_makernote_fixture()
+{
+    std::array<unsigned char, 64> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_bytes(makernote.data(), &size, "AOC", 3U);
+    append_u8(makernote.data(), &size, 0U);
+    append_text(makernote.data(), &size, "II");
+    append_u16le(makernote.data(), &size, 1U);
+
+    append_u16le(makernote.data(), &size, 0x0062U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u32le(makernote.data(), &size, 0U);
+    return build_tiff_with_make_makernote_fixture("EASTMAN KODAK COMPANY",
+                                                  makernote.data(), size);
+}
+
+static ByteVec
+build_tiff_pentax_zero_faces_makernote_fixture()
+{
+    std::array<unsigned char, 96> makernote {};
+    std::size_t size;
+    std::uint32_t facepos_off;
+    std::uint32_t facesize_off;
+
+    size = 0U;
+    append_bytes(makernote.data(), &size, "AOC", 3U);
+    append_u8(makernote.data(), &size, 0U);
+    append_text(makernote.data(), &size, "II");
+    append_u16le(makernote.data(), &size, 3U);
+
+    facepos_off = 8U + (3U * 12U) + 4U;
+    facesize_off = facepos_off + 4U;
+
+    append_u16le(makernote.data(), &size, 0x0060U);
+    append_u16le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 0x0227U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, facepos_off);
+
+    append_u16le(makernote.data(), &size, 0x0228U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, facesize_off);
+
+    append_u32le(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0x10U);
+    append_u8(makernote.data(), &size, 0x11U);
+    append_u8(makernote.data(), &size, 0x12U);
+    append_u8(makernote.data(), &size, 0x13U);
+    append_u8(makernote.data(), &size, 0x20U);
+    append_u8(makernote.data(), &size, 0x21U);
+    append_u8(makernote.data(), &size, 0x22U);
+    append_u8(makernote.data(), &size, 0x23U);
+
+    return build_tiff_with_make_makernote_fixture("PENTAX", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
+build_tiff_ricoh_type2_makernote_fixture()
+{
+    std::array<unsigned char, 128> makernote {};
+    std::size_t size;
+    std::uint32_t model_off_pos;
+    std::uint32_t make_off_pos;
+    std::uint32_t model_off;
+    std::uint32_t make_off;
+
+    size = 0U;
+    append_text(makernote.data(), &size, "RICOH");
+    append_u8(makernote.data(), &size, 0U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 2U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 0x0207U);
+    append_u16le(makernote.data(), &size, 2U);
+    append_u32le(makernote.data(), &size, 6U);
+    model_off_pos = (std::uint32_t)size;
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 0x0300U);
+    append_u16le(makernote.data(), &size, 2U);
+    append_u32le(makernote.data(), &size, 6U);
+    make_off_pos = (std::uint32_t)size;
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u32le(makernote.data(), &size, 0U);
+
+    model_off = (std::uint32_t)size;
+    write_u32le_at(makernote.data(), model_off_pos, model_off);
+    append_text(makernote.data(), &size, "GRIII");
+    append_u8(makernote.data(), &size, 0U);
+
+    make_off = (std::uint32_t)size;
+    write_u32le_at(makernote.data(), make_off_pos, make_off);
+    append_text(makernote.data(), &size, "RICOH");
+    append_u8(makernote.data(), &size, 0U);
+
+    return build_tiff_with_make_makernote_fixture("RICOH", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
+build_tiff_ricoh_padded_type2_makernote_fixture()
+{
+    std::array<unsigned char, 128> makernote {};
+    std::size_t size;
+    std::uint32_t model_off_pos;
+    std::uint32_t make_off_pos;
+    std::uint32_t model_off;
+    std::uint32_t make_off;
+
+    size = 0U;
+    append_text(makernote.data(), &size, "II");
+    append_u16le(makernote.data(), &size, 42U);
+    append_u32le(makernote.data(), &size, 8U);
+
+    append_u16le(makernote.data(), &size, 3U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 0x0104U);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, 1U);
+
+    model_off_pos = (std::uint32_t)size + 8U;
+    append_u16le(makernote.data(), &size, 0x0207U);
+    append_u16le(makernote.data(), &size, 2U);
+    append_u32le(makernote.data(), &size, 5U);
+    append_u32le(makernote.data(), &size, 0U);
+
+    make_off_pos = (std::uint32_t)size + 8U;
+    append_u16le(makernote.data(), &size, 0x0300U);
+    append_u16le(makernote.data(), &size, 2U);
+    append_u32le(makernote.data(), &size, 6U);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_u32le(makernote.data(), &size, 0U);
+
+    model_off = (std::uint32_t)size;
+    write_u32le_at(makernote.data(), model_off_pos, model_off);
+    append_text(makernote.data(), &size, "HZ15");
+    append_u8(makernote.data(), &size, 0U);
+
+    make_off = (std::uint32_t)size;
+    write_u32le_at(makernote.data(), make_off_pos, make_off);
+    append_text(makernote.data(), &size, "RICOH");
+    append_u8(makernote.data(), &size, 0U);
+
+    return build_tiff_with_make_makernote_fixture("RICOH", makernote.data(),
+                                                  size);
+}
+
+static ByteVec
+build_tiff_ricoh_native_makernote_fixture()
+{
+    static const unsigned char imageinfo_bytes[4] = { 1U, 2U, 3U, 4U };
+    static const char subdir_hdr[] = "[Ricoh Camera Info]";
+    std::array<unsigned char, 256> makernote {};
+    std::array<unsigned char, 32> theta_ifd {};
+    ByteVec tiff;
+    std::size_t size;
+    std::uint32_t imageinfo_off;
+    std::uint32_t subdir_off;
+    std::uint32_t subdir_size;
+    std::uint32_t theta_abs_off;
+    std::size_t theta_size;
+
+    size = 0U;
+    append_text(makernote.data(), &size, "Ricoh");
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 4U);
+
+    imageinfo_off = 8U + 2U + (4U * 12U) + 4U;
+    subdir_size = 20U + 2U + 12U + 4U;
+    subdir_off = imageinfo_off + (std::uint32_t)sizeof(imageinfo_bytes);
+    theta_abs_off = 44U + (std::uint32_t)(subdir_off + subdir_size);
+
+    append_u16le(makernote.data(), &size, 0x1001U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size,
+                 (std::uint32_t)sizeof(imageinfo_bytes));
+    append_u32le(makernote.data(), &size, imageinfo_off);
+
+    append_u16le(makernote.data(), &size, 0x1002U);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, 7U);
+
+    append_u16le(makernote.data(), &size, 0x1003U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 2U);
+    append_u16le(makernote.data(), &size, 0U);
+
+    append_u16le(makernote.data(), &size, 0x4001U);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, theta_abs_off);
+
+    append_u32le(makernote.data(), &size, 0U);
+    append_bytes(makernote.data(), &size, imageinfo_bytes,
+                 sizeof(imageinfo_bytes));
+
+    append_text(makernote.data(), &size, subdir_hdr);
+    append_u8(makernote.data(), &size, 0U);
+    append_u16be(makernote.data(), &size, 1U);
+    append_u16be(makernote.data(), &size, 0x0007U);
+    append_u16be(makernote.data(), &size, 4U);
+    append_u32be(makernote.data(), &size, 1U);
+    append_u32be(makernote.data(), &size, 5U);
+    append_u32be(makernote.data(), &size, 0U);
+
+    theta_size = 0U;
+    append_u16le(theta_ifd.data(), &theta_size, 1U);
+    append_u16le(theta_ifd.data(), &theta_size, 0x0003U);
+    append_u16le(theta_ifd.data(), &theta_size, 3U);
+    append_u32le(theta_ifd.data(), &theta_size, 1U);
+    append_u16le(theta_ifd.data(), &theta_size, 9U);
+    append_u16le(theta_ifd.data(), &theta_size, 0U);
+    append_u32le(theta_ifd.data(), &theta_size, 0U);
+
+    tiff = build_tiff_with_make_makernote_fixture("RICOH", makernote.data(),
+                                                  size);
+    tiff.insert(tiff.end(), theta_ifd.begin(),
+                theta_ifd.begin() + (std::ptrdiff_t)theta_size);
+    return tiff;
+}
+
 struct CiffValueEntry final {
     std::uint16_t tag = 0U;
     ByteVec value;
@@ -4856,6 +5192,21 @@ main(int argc, char** argv)
          && ok;
     ok = run_case("tiff_casio_faceinfo2_makernote",
                   build_tiff_casio_faceinfo2_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_pentax_binary_makernote",
+                  build_tiff_pentax_binary_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_pentax_placeholder_makernote",
+                  build_tiff_pentax_placeholder_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_ricoh_type2_makernote",
+                  build_tiff_ricoh_type2_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_ricoh_padded_type2_makernote",
+                  build_tiff_ricoh_padded_type2_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_ricoh_native_makernote",
+                  build_tiff_ricoh_native_makernote_fixture(), true)
          && ok;
     ok = run_case("tiff_fuji_makernote",
                   build_tiff_fuji_makernote_fixture(), true)

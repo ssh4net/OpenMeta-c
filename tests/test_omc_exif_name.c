@@ -106,6 +106,8 @@ test_tag_name_basics(void)
     expect_tag_name("ifd0", 0x010FU, "Make");
     expect_tag_name("mk_apple0", 0x0045U, "FrontFacingCamera");
     expect_tag_name("mk_casio0", 0x0E00U, "PrintIM");
+    expect_tag_name("mk_casio_qvci_0", 0x002CU, "CasioQuality");
+    expect_tag_name("mk_casio_qvci_0", 0x004DU, "DateTimeOriginal");
     expect_tag_name("mk_casio_type2_0", 0x0002U, "PreviewImageSize");
     expect_tag_name("mk_casio_type2_0", 0x2002U, "Casio_Type2_0x2002");
     expect_tag_name("mk_canon0", 0x0038U, "BatteryType");

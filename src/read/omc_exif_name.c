@@ -105,6 +105,12 @@ omc_exif_lookup_exact_name(const char* ifd_name, omc_u16 tag)
         { "mk_apple0", 0x0001U, "MakerNoteVersion" },
         { "mk_apple0", 0x0045U, "FrontFacingCamera" },
         { "mk_casio0", 0x0E00U, "PrintIM" },
+        { "mk_casio_qvci_0", 0x002CU, "CasioQuality" },
+        { "mk_casio_qvci_0", 0x0037U, "FocalRange" },
+        { "mk_casio_qvci_0", 0x004DU, "DateTimeOriginal" },
+        { "mk_casio_qvci_0", 0x0062U, "ModelType" },
+        { "mk_casio_qvci_0", 0x0072U, "ManufactureIndex" },
+        { "mk_casio_qvci_0", 0x007CU, "ManufactureCode" },
         { "mk_casio_type2_0", 0x0002U, "PreviewImageSize" },
         { "mk_casio_type2_0", 0x0008U, "QualityMode" },
         { "mk_fuji0", 0x1304U, "GEImageSize" },
@@ -132,6 +138,8 @@ omc_exif_lookup_exact_name(const char* ifd_name, omc_u16 tag)
         { "mk_panasonic0", 0x00DEU, "AFAreaSize" },
         { "mk_pentax0", 0x003EU, "PreviewImageBorders" },
         { "mk_pentax0", 0x0062U, "RawDevelopmentProcess" },
+        { "mk_pentax_type2_0", 0x0001U, "RecordingMode" },
+        { "mk_pentax_type2_0", 0x1000U, "HometownCityCode" },
         { "mk_ricoh0", 0x1002U, "DriveMode" },
         { "mk_ricoh0", 0x1003U, "Sharpness" },
         { "mk_ricoh_thetasubdir_0", 0x0003U, "Accelerometer" },
@@ -283,9 +291,7 @@ omc_exif_tag_name_impl(const char* ifd_name, omc_u16 tag,
         return omc_exif_name_write_placeholder("Pentax_Type2", tag,
                                                out_name, out_cap, out_len);
     }
-    if (strcmp(ifd_name, "mk_pentax_faceinfo_0") == 0
-        || strcmp(ifd_name, "mk_pentax_facepos_0") == 0
-        || strcmp(ifd_name, "mk_pentax_colorinfo_0") == 0) {
+    if (omc_exif_name_starts_with(ifd_name, "mk_pentax_")) {
         return omc_exif_name_write_placeholder("Pentax", tag,
                                                out_name, out_cap, out_len);
     }

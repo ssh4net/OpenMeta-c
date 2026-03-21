@@ -677,6 +677,19 @@ omc_scan_jpeg(const omc_u8* bytes, omc_size size,
                 block.data_size = seg_payload_size - 29U;
                 block.id = marker;
                 omc_scan_sink_emit(&sink, &block);
+            } else if (seg_payload_size >= 4U
+                       && omc_scan_match(bytes, size, seg_payload_off,
+                                         "QVCI", 4U)) {
+                omc_scan_init_block(&block);
+                block.format = OMC_SCAN_FMT_JPEG;
+                block.kind = OMC_BLK_MAKERNOTE;
+                block.outer_offset = marker_off;
+                block.outer_size = seg_total_size;
+                block.data_offset = seg_payload_off;
+                block.data_size = seg_payload_size;
+                block.id = marker;
+                block.aux_u32 = OMC_FOURCC('Q', 'V', 'C', 'I');
+                omc_scan_sink_emit(&sink, &block);
             }
         } else if (marker == 0xFFE2U) {
             if (seg_payload_size >= 14U

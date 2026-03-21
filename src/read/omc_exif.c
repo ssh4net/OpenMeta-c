@@ -49,6 +49,10 @@ typedef struct omc_exif_geotiff_tag_ref {
 static void
 omc_exif_maybe_mark_contextual_name(const omc_exif_ctx* ctx, omc_entry* entry);
 
+static int
+omc_exif_entry_ifd_equals(const omc_store* store, const omc_entry* entry,
+                          const char* ifd_name);
+
 static void
 omc_exif_res_init(omc_exif_res* res)
 {
@@ -332,6 +336,66 @@ omc_exif_ascii_starts_with_nocase(const omc_u8* text, omc_u32 text_size,
         }
     }
     return 1;
+}
+
+static int
+omc_exif_ascii_contains_nocase(const omc_u8* text, omc_u32 text_size,
+                               const char* needle)
+{
+    omc_u32 needle_size;
+    omc_u32 i;
+
+    if (text == (const omc_u8*)0 || needle == (const char*)0) {
+        return 0;
+    }
+
+    needle_size = (omc_u32)strlen(needle);
+    if (needle_size == 0U) {
+        return 1;
+    }
+    if (text_size < needle_size) {
+        return 0;
+    }
+
+    for (i = 0U; i + needle_size <= text_size; ++i) {
+        omc_u32 j;
+        int matched;
+
+        matched = 1;
+        for (j = 0U; j < needle_size; ++j) {
+            if (omc_exif_ascii_tolower((int)text[i + j])
+                != omc_exif_ascii_tolower((int)(unsigned char)needle[j])) {
+                matched = 0;
+                break;
+            }
+        }
+        if (matched) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
+omc_exif_ascii_equals_nocase(const omc_u8* text, omc_u32 text_size,
+                             const char* expected)
+{
+    omc_u32 i;
+
+    if (text == (const omc_u8*)0 || expected == (const char*)0) {
+        return 0;
+    }
+
+    for (i = 0U; expected[i] != '\0'; ++i) {
+        if (i >= text_size) {
+            return 0;
+        }
+        if (omc_exif_ascii_tolower((int)text[i])
+            != omc_exif_ascii_tolower((int)(unsigned char)expected[i])) {
+            return 0;
+        }
+    }
+    return i == text_size;
 }
 
 static omc_u32
@@ -2067,7 +2131,9 @@ typedef enum omc_exif_mn_vendor {
     OMC_EXIF_MN_HP = 8,
     OMC_EXIF_MN_NINTENDO = 9,
     OMC_EXIF_MN_RECONYX = 10,
-    OMC_EXIF_MN_CASIO = 11
+    OMC_EXIF_MN_CASIO = 11,
+    OMC_EXIF_MN_PENTAX = 12,
+    OMC_EXIF_MN_RICOH = 13
 } omc_exif_mn_vendor;
 
 static omc_exif_cfg
@@ -2196,6 +2262,62 @@ omc_exif_set_casio_tokens(omc_exif_opts* opts)
     opts->tokens.exif_ifd_token = "mk_casio_type2_exififd";
     opts->tokens.gps_ifd_token = "mk_casio_type2_gpsifd";
     opts->tokens.interop_ifd_token = "mk_casio_type2_interopifd";
+}
+
+static void
+omc_exif_set_pentax_tokens(omc_exif_opts* opts)
+{
+    if (opts == (omc_exif_opts*)0) {
+        return;
+    }
+
+    opts->tokens.ifd_prefix = "mk_pentax";
+    opts->tokens.subifd_prefix = "mk_pentax_subifd";
+    opts->tokens.exif_ifd_token = "mk_pentax_exififd";
+    opts->tokens.gps_ifd_token = "mk_pentax_gpsifd";
+    opts->tokens.interop_ifd_token = "mk_pentax_interopifd";
+}
+
+static void
+omc_exif_set_pentax_type2_tokens(omc_exif_opts* opts)
+{
+    if (opts == (omc_exif_opts*)0) {
+        return;
+    }
+
+    opts->tokens.ifd_prefix = "mk_pentax_type2_";
+    opts->tokens.subifd_prefix = "mk_pentax_type2_subifd_";
+    opts->tokens.exif_ifd_token = "mk_pentax_type2_exififd";
+    opts->tokens.gps_ifd_token = "mk_pentax_type2_gpsifd";
+    opts->tokens.interop_ifd_token = "mk_pentax_type2_interopifd";
+}
+
+static void
+omc_exif_set_ricoh_tokens(omc_exif_opts* opts)
+{
+    if (opts == (omc_exif_opts*)0) {
+        return;
+    }
+
+    opts->tokens.ifd_prefix = "mk_ricoh";
+    opts->tokens.subifd_prefix = "mk_ricoh_subifd";
+    opts->tokens.exif_ifd_token = "mk_ricoh_exififd";
+    opts->tokens.gps_ifd_token = "mk_ricoh_gpsifd";
+    opts->tokens.interop_ifd_token = "mk_ricoh_interopifd";
+}
+
+static void
+omc_exif_set_ricoh_type2_tokens(omc_exif_opts* opts)
+{
+    if (opts == (omc_exif_opts*)0) {
+        return;
+    }
+
+    opts->tokens.ifd_prefix = "mk_ricoh_type2_";
+    opts->tokens.subifd_prefix = "mk_ricoh_type2_subifd_";
+    opts->tokens.exif_ifd_token = "mk_ricoh_type2_exififd";
+    opts->tokens.gps_ifd_token = "mk_ricoh_type2_gpsifd";
+    opts->tokens.interop_ifd_token = "mk_ricoh_type2_interopifd";
 }
 
 static void
@@ -2601,6 +2723,347 @@ omc_exif_sony_ifd_candidate(const omc_u8* raw, omc_u64 raw_size,
     return has_known_root_tag;
 }
 
+static int
+omc_exif_pentax_ifd_has_type2_signature(omc_exif_cfg cfg, const omc_u8* raw,
+                                        omc_u64 raw_size, omc_u64 ifd_off)
+{
+    omc_u16 entry_count16;
+    omc_u64 entries_off;
+    omc_u64 table_bytes;
+    omc_u32 i;
+
+    if (raw == (const omc_u8*)0) {
+        return 0;
+    }
+    if (!omc_exif_read_u16(cfg, raw, (omc_size)raw_size, ifd_off,
+                           &entry_count16)
+        || entry_count16 == 0U) {
+        return 0;
+    }
+
+    entries_off = ifd_off + 2U;
+    if (!omc_exif_mul_u64((omc_u64)entry_count16, 12U, &table_bytes)
+        || entries_off > raw_size || table_bytes > (raw_size - entries_off)) {
+        return 0;
+    }
+
+    for (i = 0U; i < (omc_u32)entry_count16; ++i) {
+        omc_u16 tag16;
+
+        if (!omc_exif_read_u16(cfg, raw, (omc_size)raw_size,
+                               entries_off + ((omc_u64)i * 12U), &tag16)) {
+            return 0;
+        }
+        if (tag16 == 0x1000U || tag16 == 0x1001U) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
+omc_exif_pentax_makernote_has_type2_signature(const omc_u8* raw,
+                                              omc_u64 raw_size)
+{
+    omc_exif_cfg cfg;
+
+    if (raw == (const omc_u8*)0) {
+        return 0;
+    }
+
+    if (raw_size >= 8U && memcmp(raw, "AOC\0", 4U) == 0) {
+        cfg = omc_exif_make_classic_cfg(1);
+        cfg.little_endian = (raw[4U] == (omc_u8)'I'
+                             && raw[5U] == (omc_u8)'I');
+        return omc_exif_pentax_ifd_has_type2_signature(cfg, raw, raw_size, 6U);
+    }
+
+    cfg = omc_exif_make_classic_cfg(1);
+    if (omc_exif_pentax_ifd_has_type2_signature(cfg, raw, raw_size, 0U)) {
+        return 1;
+    }
+    cfg.little_endian = 0;
+    return omc_exif_pentax_ifd_has_type2_signature(cfg, raw, raw_size, 0U);
+}
+
+static int
+omc_exif_pentax_model_uses_type2(const omc_u8* model_text, omc_u32 model_size)
+{
+    return omc_exif_ascii_equals_nocase(model_text, model_size,
+                                        "PENTAX Optio 330")
+           || omc_exif_ascii_equals_nocase(model_text, model_size,
+                                           "PENTAX Optio 430")
+           || omc_exif_ascii_equals_nocase(model_text, model_size,
+                                           "Optio 330")
+           || omc_exif_ascii_equals_nocase(model_text, model_size,
+                                           "Optio 430");
+}
+
+static int
+omc_exif_pentax_model_uses_type2_store(const omc_exif_ctx* ctx)
+{
+    const omc_u8* model_text;
+    omc_u32 model_size;
+
+    model_text = (const omc_u8*)0;
+    model_size = 0U;
+    if (ctx == (const omc_exif_ctx*)0) {
+        return 0;
+    }
+    if (!omc_exif_find_first_text(ctx->store, "ifd0", 0x0110U, &model_text,
+                                  &model_size)
+        && !omc_exif_find_outer_ifd0_ascii(ctx, 0x0110U, &model_text,
+                                           &model_size)) {
+        return 0;
+    }
+    return omc_exif_pentax_model_uses_type2(model_text, model_size);
+}
+
+typedef struct omc_exif_pentax_subdir_candidate {
+    omc_u16 tag;
+    int scalar_u8_valid;
+    omc_u8 scalar_u8;
+    omc_byte_ref raw_ref;
+} omc_exif_pentax_subdir_candidate;
+
+static int
+omc_exif_pentax_has_detected_faces(const omc_store* store,
+                                   const omc_exif_pentax_subdir_candidate* cands,
+                                   omc_u32 cand_count)
+{
+    omc_u32 i;
+
+    if (store == (const omc_store*)0
+        || cands == (const omc_exif_pentax_subdir_candidate*)0) {
+        return 0;
+    }
+
+    for (i = 0U; i < cand_count; ++i) {
+        const omc_exif_pentax_subdir_candidate* cand;
+
+        cand = &cands[i];
+        if (cand->tag != 0x0060U) {
+            continue;
+        }
+        if (cand->scalar_u8_valid) {
+            return cand->scalar_u8 != 0U;
+        }
+        if (cand->raw_ref.size != 0U) {
+            omc_const_bytes raw;
+
+            raw = omc_arena_view(&store->arena, cand->raw_ref);
+            if (raw.size != 0U) {
+                return raw.data[0U] != 0U;
+            }
+        }
+    }
+    return 0;
+}
+
+static int
+omc_exif_decode_pentax_u8_table_ref(omc_exif_ctx* ctx, const char* ifd_name,
+                                    omc_byte_ref raw_ref)
+{
+    omc_const_bytes raw;
+    omc_u32 i;
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0
+        || ifd_name == (const char*)0) {
+        return 1;
+    }
+
+    raw = omc_arena_view(&ctx->store->arena, raw_ref);
+    if (raw.size == 0U) {
+        return 1;
+    }
+    if (ctx->opts.limits.max_entries_per_ifd != 0U
+        && raw.size > ctx->opts.limits.max_entries_per_ifd) {
+        return 1;
+    }
+
+    for (i = 0U; i < (omc_u32)raw.size; ++i) {
+        omc_exif_status status;
+
+        raw = omc_arena_view(&ctx->store->arena, raw_ref);
+        if (i >= (omc_u32)raw.size) {
+            break;
+        }
+        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, (omc_u16)i, i,
+                                               raw.data[i]);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+omc_exif_decode_pentax_binary_subdirs(omc_exif_ctx* ctx, const char* mk_ifd0)
+{
+    omc_exif_pentax_subdir_candidate cands[16];
+    omc_u32 cand_count;
+    omc_size i;
+    int have_detected_faces;
+    omc_u32 idx_srinfo;
+    omc_u32 idx_faceinfo;
+    omc_u32 idx_aeinfo2;
+    omc_u32 idx_shotinfo;
+    omc_u32 idx_facepos;
+    omc_u32 idx_facesize;
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0
+        || mk_ifd0 == (const char*)0) {
+        return 1;
+    }
+
+    cand_count = 0U;
+    for (i = 0U; i < ctx->store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_exif_pentax_subdir_candidate* cand;
+
+        entry = &ctx->store->entries[i];
+        if (entry->key.kind != OMC_KEY_EXIF_TAG
+            || !omc_exif_entry_ifd_equals(ctx->store, entry, mk_ifd0)) {
+            continue;
+        }
+
+        switch (entry->key.u.exif_tag.tag) {
+        case 0x005CU:
+        case 0x0060U:
+        case 0x0206U:
+        case 0x0226U:
+        case 0x0227U:
+        case 0x0228U:
+            break;
+        default:
+            continue;
+        }
+
+        if (cand_count >= (omc_u32)(sizeof(cands) / sizeof(cands[0]))) {
+            break;
+        }
+
+        cand = &cands[cand_count];
+        memset(cand, 0, sizeof(*cand));
+        cand->tag = entry->key.u.exif_tag.tag;
+        if (entry->value.kind == OMC_VAL_SCALAR
+            && entry->value.elem_type == OMC_ELEM_U8
+            && cand->tag == 0x0060U) {
+            cand->scalar_u8_valid = 1;
+            cand->scalar_u8 = (omc_u8)entry->value.u.u64;
+        } else if (entry->value.kind == OMC_VAL_BYTES
+                   || entry->value.kind == OMC_VAL_ARRAY) {
+            cand->raw_ref = entry->value.u.ref;
+        } else {
+            continue;
+        }
+        cand_count += 1U;
+    }
+
+    if (cand_count == 0U) {
+        return 1;
+    }
+
+    have_detected_faces = omc_exif_pentax_has_detected_faces(ctx->store, cands,
+                                                             cand_count);
+    idx_srinfo = 0U;
+    idx_faceinfo = 0U;
+    idx_aeinfo2 = 0U;
+    idx_shotinfo = 0U;
+    idx_facepos = 0U;
+    idx_facesize = 0U;
+
+    for (i = 0U; i < cand_count; ++i) {
+        const omc_exif_pentax_subdir_candidate* cand;
+        char ifd_name[64];
+
+        cand = &cands[i];
+        if (cand->tag == 0x0060U && cand->scalar_u8_valid) {
+            omc_exif_status status;
+
+            if (!omc_exif_make_subifd_name("mk_pentax", "faceinfo",
+                                           idx_faceinfo++, ifd_name,
+                                           sizeof(ifd_name))) {
+                continue;
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0000U, 0U,
+                                                   cand->scalar_u8);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            continue;
+        }
+
+        if (cand->raw_ref.size == 0U) {
+            continue;
+        }
+
+        switch (cand->tag) {
+        case 0x005CU: {
+            omc_const_bytes raw;
+            const char* subtable;
+
+            raw = omc_arena_view(&ctx->store->arena, cand->raw_ref);
+            subtable = (raw.size == 4U) ? "srinfo" : "srinfo2";
+            if (!omc_exif_make_subifd_name("mk_pentax", subtable,
+                                           idx_srinfo++, ifd_name,
+                                           sizeof(ifd_name))) {
+                continue;
+            }
+            break;
+        }
+        case 0x0060U:
+            if (!omc_exif_make_subifd_name("mk_pentax", "faceinfo",
+                                           idx_faceinfo++, ifd_name,
+                                           sizeof(ifd_name))) {
+                continue;
+            }
+            break;
+        case 0x0206U:
+            if (!omc_exif_make_subifd_name("mk_pentax", "aeinfo2",
+                                           idx_aeinfo2++, ifd_name,
+                                           sizeof(ifd_name))) {
+                continue;
+            }
+            break;
+        case 0x0226U:
+            if (!omc_exif_make_subifd_name("mk_pentax", "shotinfo",
+                                           idx_shotinfo++, ifd_name,
+                                           sizeof(ifd_name))) {
+                continue;
+            }
+            break;
+        case 0x0227U:
+            if (!have_detected_faces
+                || !omc_exif_make_subifd_name("mk_pentax", "facepos",
+                                              idx_facepos++, ifd_name,
+                                              sizeof(ifd_name))) {
+                continue;
+            }
+            break;
+        case 0x0228U:
+            if (!have_detected_faces
+                || !omc_exif_make_subifd_name("mk_pentax", "facesize",
+                                              idx_facesize++, ifd_name,
+                                              sizeof(ifd_name))) {
+                continue;
+            }
+            break;
+        default:
+            continue;
+        }
+
+        if (!omc_exif_decode_pentax_u8_table_ref(ctx, ifd_name,
+                                                 cand->raw_ref)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static omc_exif_mn_vendor
 omc_exif_detect_makernote_vendor(omc_exif_ctx* ctx, const omc_u8* raw,
                                  omc_u64 raw_size)
@@ -2615,6 +3078,25 @@ omc_exif_detect_makernote_vendor(omc_exif_ctx* ctx, const omc_u8* raw,
     if (raw != (const omc_u8*)0 && raw_size >= 4U
         && (memcmp(raw, "SONY", 4U) == 0 || memcmp(raw, "VHAB", 4U) == 0)) {
         return OMC_EXIF_MN_SONY;
+    }
+    if (raw != (const omc_u8*)0 && raw_size >= 8U
+        && memcmp(raw, "RICOH\0", 6U) == 0
+        && ((raw[6U] == (omc_u8)'I' && raw[7U] == (omc_u8)'I')
+            || (raw[6U] == (omc_u8)'M' && raw[7U] == (omc_u8)'M'))) {
+        return OMC_EXIF_MN_PENTAX;
+    }
+    if (raw != (const omc_u8*)0 && raw_size >= 5U
+        && (memcmp(raw, "Ricoh", 5U) == 0
+            || memcmp(raw, "RICOH", 5U) == 0)) {
+        return OMC_EXIF_MN_RICOH;
+    }
+    if (raw != (const omc_u8*)0 && raw_size >= 4U
+        && memcmp(raw, "AOC\0", 4U) == 0) {
+        return OMC_EXIF_MN_PENTAX;
+    }
+    if (raw != (const omc_u8*)0 && raw_size >= 7U
+        && memcmp(raw, "PENTAX ", 7U) == 0) {
+        return OMC_EXIF_MN_PENTAX;
     }
     if (raw != (const omc_u8*)0 && raw_size >= 8U
         && (memcmp(raw, "FUJIFILM", 8U) == 0
@@ -2664,6 +3146,9 @@ omc_exif_detect_makernote_vendor(omc_exif_ctx* ctx, const omc_u8* raw,
     if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "Nikon")) {
         return OMC_EXIF_MN_NIKON;
     }
+    if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "PENTAX")) {
+        return OMC_EXIF_MN_PENTAX;
+    }
     if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "Canon")) {
         return OMC_EXIF_MN_CANON;
     }
@@ -2681,6 +3166,9 @@ omc_exif_detect_makernote_vendor(omc_exif_ctx* ctx, const omc_u8* raw,
     }
     if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "FLIR")) {
         return OMC_EXIF_MN_FLIR;
+    }
+    if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "RICOH")) {
+        return OMC_EXIF_MN_RICOH;
     }
     if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "HP")) {
         return OMC_EXIF_MN_HP;
@@ -4305,6 +4793,43 @@ omc_exif_maybe_mark_contextual_name(const omc_exif_ctx* ctx, omc_entry* entry)
         entry->origin.name_context_variant = 1U;
         return;
     }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_ricoh0")) {
+        if ((entry->key.u.exif_tag.tag == 0x1002U
+             || entry->key.u.exif_tag.tag == 0x1004U)
+            && !(entry->origin.wire_type.family == OMC_WIRE_TIFF
+                 && entry->origin.wire_type.code == 3U)) {
+            entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+            entry->origin.name_context_kind
+                = OMC_ENTRY_NAME_CTX_RICOH_MAIN_COMPAT;
+            entry->origin.name_context_variant = 1U;
+            return;
+        }
+        if (entry->key.u.exif_tag.tag == 0x1003U
+            && entry->origin.wire_type.family == OMC_WIRE_TIFF
+            && entry->origin.wire_type.code == 3U) {
+            entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+            entry->origin.name_context_kind
+                = OMC_ENTRY_NAME_CTX_RICOH_MAIN_COMPAT;
+            entry->origin.name_context_variant = 2U;
+            return;
+        }
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_pentax0")
+        && entry->key.u.exif_tag.tag == 0x0062U
+        && omc_exif_ascii_contains_nocase(make_text, make_size, "kodak")) {
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_PENTAX_MAIN_0062;
+        entry->origin.name_context_variant = 1U;
+        return;
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_pentax0")
+        && entry->key.u.exif_tag.tag == 0x0062U
+        && omc_exif_ascii_contains_nocase(make_text, make_size, "samsung")) {
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_PENTAX_MAIN_0062;
+        entry->origin.name_context_variant = 1U;
+        return;
+    }
     if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_canon0")
         && entry->key.u.exif_tag.tag == 0x0038U
         && entry->value.kind == OMC_VAL_BYTES) {
@@ -4540,8 +5065,7 @@ typedef struct omc_exif_canon_camerainfo_field {
 static int
 omc_exif_emit_canon_camerainfo_common_fields(omc_exif_ctx* ctx,
                                              const char* ifd_name,
-                                             const omc_u8* raw,
-                                             omc_u64 raw_size,
+                                             omc_byte_ref raw_ref,
                                              omc_u32* io_order)
 {
     static const omc_exif_canon_camerainfo_field fields[] = {
@@ -4690,17 +5214,15 @@ omc_exif_emit_canon_camerainfo_common_fields(omc_exif_ctx* ctx,
     };
     omc_u32 order;
     omc_u32 i;
+    omc_const_bytes raw_view;
+    const omc_u8* raw;
+    omc_u64 raw_size;
     omc_size raw_size_narrow;
 
     if (ctx == (omc_exif_ctx*)0 || ifd_name == (const char*)0
-        || raw == (const omc_u8*)0 || io_order == (omc_u32*)0) {
+        || io_order == (omc_u32*)0 || ctx->store == (omc_store*)0) {
         return 1;
     }
-    if (raw_size > (omc_u64)(~(omc_size)0)) {
-        return 1;
-    }
-
-    raw_size_narrow = (omc_size)raw_size;
     order = *io_order;
     for (i = 0U; i < (omc_u32)(sizeof(fields) / sizeof(fields[0])); ++i) {
         const omc_exif_canon_camerainfo_field* field;
@@ -4709,6 +5231,13 @@ omc_exif_emit_canon_camerainfo_common_fields(omc_exif_ctx* ctx,
         omc_u32 value32;
         omc_u32 text_size;
 
+        raw_view = omc_arena_view(&ctx->store->arena, raw_ref);
+        raw = raw_view.data;
+        raw_size = raw_view.size;
+        if (raw == (const omc_u8*)0 || raw_size > (omc_u64)(~(omc_size)0)) {
+            return 1;
+        }
+        raw_size_narrow = (omc_size)raw_size;
         field = &fields[i];
         if (((omc_u64)field->tag + field->bytes) > raw_size) {
             continue;
@@ -4783,23 +5312,39 @@ omc_exif_emit_canon_camerainfo_common_fields(omc_exif_ctx* ctx,
 static int
 omc_exif_emit_canon_camerainfo_fixed_fields(omc_exif_ctx* ctx,
                                             const char* ifd_name,
-                                            const omc_u8* raw, omc_u64 raw_size,
+                                            omc_byte_ref raw_ref,
                                             omc_u32 order_base)
 {
+    omc_const_bytes raw_view;
+    const omc_u8* raw;
+    omc_u64 raw_size;
     omc_u16 value16;
     omc_u32 value32;
     omc_exif_status status;
     omc_u32 order;
 
-    if (ifd_name == (const char*)0 || raw == (const omc_u8*)0) {
+    if (ifd_name == (const char*)0 || ctx == (omc_exif_ctx*)0
+        || ctx->store == (omc_store*)0) {
         return 1;
     }
 
+    raw_view = omc_arena_view(&ctx->store->arena, raw_ref);
+    raw = raw_view.data;
+    raw_size = raw_view.size;
+    if (raw == (const omc_u8*)0) {
+        return 1;
+    }
     order = order_base;
     if (strstr(ifd_name, "camerainfo") != (char*)0) {
-        if (!omc_exif_emit_canon_camerainfo_common_fields(ctx, ifd_name, raw,
-                                                          raw_size, &order)) {
+        if (!omc_exif_emit_canon_camerainfo_common_fields(ctx, ifd_name,
+                                                          raw_ref, &order)) {
             return 0;
+        }
+        raw_view = omc_arena_view(&ctx->store->arena, raw_ref);
+        raw = raw_view.data;
+        raw_size = raw_view.size;
+        if (raw == (const omc_u8*)0) {
+            return 1;
         }
     }
 
@@ -4896,9 +5441,12 @@ omc_exif_emit_canon_camerainfo_fixed_fields(omc_exif_ctx* ctx,
 
 static int
 omc_exif_emit_canon_psinfo_table(omc_exif_ctx* ctx, const char* ifd_name,
-                                 const omc_u8* raw, omc_u64 raw_size,
+                                 omc_byte_ref raw_ref,
                                  int is_psinfo2)
 {
+    omc_const_bytes raw_view;
+    const omc_u8* raw;
+    omc_u64 raw_size;
     omc_u16 regular_max_tag;
     omc_u16 userdef1_tag;
     omc_u16 userdef2_tag;
@@ -4909,7 +5457,15 @@ omc_exif_emit_canon_psinfo_table(omc_exif_ctx* ctx, const char* ifd_name,
     omc_u32 order;
     omc_exif_status status;
 
-    if (ifd_name == (const char*)0 || raw == (const omc_u8*)0) {
+    if (ifd_name == (const char*)0 || ctx == (omc_exif_ctx*)0
+        || ctx->store == (omc_store*)0) {
+        return 1;
+    }
+
+    raw_view = omc_arena_view(&ctx->store->arena, raw_ref);
+    raw = raw_view.data;
+    raw_size = raw_view.size;
+    if (raw == (const omc_u8*)0) {
         return 1;
     }
 
@@ -4927,6 +5483,12 @@ omc_exif_emit_canon_psinfo_table(omc_exif_ctx* ctx, const char* ifd_name,
 
     order = 0U;
     for (tag16 = 0U; tag16 <= regular_max_tag; tag16 = (omc_u16)(tag16 + 4U)) {
+        raw_view = omc_arena_view(&ctx->store->arena, raw_ref);
+        raw = raw_view.data;
+        raw_size = raw_view.size;
+        if (raw == (const omc_u8*)0) {
+            return 1;
+        }
         if (!omc_exif_read_u32le_raw(raw, raw_size, 0x025BU + tag16,
                                      &value32)) {
             break;
@@ -4940,6 +5502,9 @@ omc_exif_emit_canon_psinfo_table(omc_exif_ctx* ctx, const char* ifd_name,
         }
     }
 
+    raw_view = omc_arena_view(&ctx->store->arena, raw_ref);
+    raw = raw_view.data;
+    raw_size = raw_view.size;
     if (omc_exif_read_u16le_raw(raw, raw_size, 0x025BU + userdef1_tag,
                                 &value16)) {
         status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, userdef1_tag,
@@ -4949,6 +5514,9 @@ omc_exif_emit_canon_psinfo_table(omc_exif_ctx* ctx, const char* ifd_name,
             return 0;
         }
     }
+    raw_view = omc_arena_view(&ctx->store->arena, raw_ref);
+    raw = raw_view.data;
+    raw_size = raw_view.size;
     if (omc_exif_read_u16le_raw(raw, raw_size, 0x025BU + userdef2_tag,
                                 &value16)) {
         status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, userdef2_tag,
@@ -4958,6 +5526,9 @@ omc_exif_emit_canon_psinfo_table(omc_exif_ctx* ctx, const char* ifd_name,
             return 0;
         }
     }
+    raw_view = omc_arena_view(&ctx->store->arena, raw_ref);
+    raw = raw_view.data;
+    raw_size = raw_view.size;
     if (omc_exif_read_u16le_raw(raw, raw_size, 0x025BU + userdef3_tag,
                                 &value16)) {
         status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, userdef3_tag,
@@ -4973,16 +5544,16 @@ omc_exif_emit_canon_psinfo_table(omc_exif_ctx* ctx, const char* ifd_name,
 
 static int
 omc_exif_emit_canon_psinfo_old(omc_exif_ctx* ctx, const char* ifd_name,
-                               const omc_u8* raw, omc_u64 raw_size)
+                               omc_byte_ref raw_ref)
 {
-    return omc_exif_emit_canon_psinfo_table(ctx, ifd_name, raw, raw_size, 0);
+    return omc_exif_emit_canon_psinfo_table(ctx, ifd_name, raw_ref, 0);
 }
 
 static int
 omc_exif_emit_canon_psinfo2(omc_exif_ctx* ctx, const char* ifd_name,
-                            const omc_u8* raw, omc_u64 raw_size)
+                            omc_byte_ref raw_ref)
 {
-    return omc_exif_emit_canon_psinfo_table(ctx, ifd_name, raw, raw_size, 1);
+    return omc_exif_emit_canon_psinfo_table(ctx, ifd_name, raw_ref, 1);
 }
 
 static int
@@ -5006,6 +5577,7 @@ omc_exif_decode_canon_camerainfo(omc_exif_ctx* ctx)
     const omc_u8* model_text;
     omc_u32 model_size;
     omc_const_bytes raw;
+    omc_byte_ref raw_ref;
     const char* subtable;
     char ifd_name[64];
     char ps_ifd_name[64];
@@ -5036,6 +5608,7 @@ omc_exif_decode_canon_camerainfo(omc_exif_ctx* ctx)
         || raw.size == 0U) {
         return 1;
     }
+    raw_ref = entry->value.u.ref;
 
     subtable = omc_exif_canon_camerainfo_subtable(
         model_text, model_size, raw.data, raw.size,
@@ -5058,6 +5631,7 @@ omc_exif_decode_canon_camerainfo(omc_exif_ctx* ctx)
             omc_exif_status status;
 
             entry_off = 2U + ((omc_u64)i * 12U);
+            raw = omc_arena_view(&ctx->store->arena, raw_ref);
             if (!omc_exif_read_u16le_raw(raw.data, raw.size, entry_off + 0U,
                                          &tag16)
                 || !omc_exif_read_u16le_raw(raw.data, raw.size, entry_off + 2U,
@@ -5122,8 +5696,8 @@ omc_exif_decode_canon_camerainfo(omc_exif_ctx* ctx)
         }
     }
 
-    if (!omc_exif_emit_canon_camerainfo_fixed_fields(ctx, ifd_name, raw.data,
-                                                     raw.size, order)) {
+    if (!omc_exif_emit_canon_camerainfo_fixed_fields(ctx, ifd_name, raw_ref,
+                                                     order)) {
         return 0;
     }
 
@@ -5131,6 +5705,7 @@ omc_exif_decode_canon_camerainfo(omc_exif_ctx* ctx)
         return 1;
     }
 
+    raw = omc_arena_view(&ctx->store->arena, raw_ref);
     use_psinfo2 = omc_exif_canon_psinfo2_tail_valid(raw.data, raw.size);
     if (is_model_1000d) {
         use_psinfo2 = 0;
@@ -5139,8 +5714,7 @@ omc_exif_decode_canon_camerainfo(omc_exif_ctx* ctx)
                                            ps_ifd_name, sizeof(ps_ifd_name))) {
                 return 1;
             }
-            return omc_exif_emit_canon_psinfo_old(ctx, ps_ifd_name, raw.data,
-                                                  raw.size);
+            return omc_exif_emit_canon_psinfo_old(ctx, ps_ifd_name, raw_ref);
         }
     }
 
@@ -5149,15 +5723,13 @@ omc_exif_decode_canon_camerainfo(omc_exif_ctx* ctx)
                                        sizeof(ps_ifd_name))) {
             return 1;
         }
-        return omc_exif_emit_canon_psinfo2(ctx, ps_ifd_name, raw.data,
-                                           raw.size);
+        return omc_exif_emit_canon_psinfo2(ctx, ps_ifd_name, raw_ref);
     }
 
     if (raw.size > (0x025BU + 8U)
         && omc_exif_make_subifd_name("mk_canon", "psinfo", 0U, ps_ifd_name,
                                      sizeof(ps_ifd_name))) {
-        return omc_exif_emit_canon_psinfo_old(ctx, ps_ifd_name, raw.data,
-                                              raw.size);
+        return omc_exif_emit_canon_psinfo_old(ctx, ps_ifd_name, raw_ref);
     }
 
     return 1;
@@ -8578,6 +9150,622 @@ omc_exif_decode_casio_makernote(omc_exif_ctx* ctx, omc_u64 maker_note_off,
 }
 
 static int
+omc_exif_decode_pentax_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
+                                 omc_u64 raw_size)
+{
+    omc_exif_opts mn_opts;
+    omc_exif_cfg cfg;
+    int use_type2;
+    omc_u64 ifd_off;
+    const char* ifd_name;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 8U) {
+        return 1;
+    }
+
+    use_type2 = omc_exif_pentax_makernote_has_type2_signature(raw, raw_size)
+                || omc_exif_pentax_model_uses_type2_store(ctx);
+    mn_opts = ctx->opts;
+    if (use_type2) {
+        omc_exif_set_pentax_type2_tokens(&mn_opts);
+        ifd_name = "mk_pentax_type2_0";
+    } else {
+        omc_exif_set_pentax_tokens(&mn_opts);
+        ifd_name = "mk_pentax0";
+    }
+
+    cfg = omc_exif_make_classic_cfg(1);
+    ifd_off = 0U;
+    if (memcmp(raw, "AOC\0", 4U) == 0) {
+        ifd_off = 6U;
+        cfg.little_endian = (raw[4U] == (omc_u8)'I'
+                             && raw[5U] == (omc_u8)'I');
+    }
+
+    if (!omc_exif_decode_ifd_blob_loose_cfg(ctx, raw, raw_size, ifd_off,
+                                            &mn_opts, cfg)) {
+        return 0;
+    }
+    if (!use_type2
+        && omc_exif_find_first_entry(ctx->store, ifd_name, 0x0000U)
+               == (const omc_entry*)0) {
+        omc_exif_status status;
+
+        status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x0000U, 0U,
+                                                0U);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            return 0;
+        }
+    }
+    if (!use_type2 && !omc_exif_decode_pentax_binary_subdirs(ctx, ifd_name)) {
+        return 0;
+    }
+    return 1;
+}
+
+static int
+omc_exif_decode_ricoh_type2_table(omc_exif_ctx* parent, const omc_u8* bytes,
+                                  omc_u64 size, omc_u64 count_off,
+                                  omc_u64 entry_table_off,
+                                  omc_u16 entry_count16,
+                                  const omc_exif_opts* opts,
+                                  omc_exif_cfg cfg)
+{
+    omc_exif_ctx child;
+    omc_u64 table_bytes;
+    omc_u32 entry_count32;
+    omc_byte_ref token_ref;
+    omc_exif_status tok_status;
+    omc_u32 i;
+
+    if (bytes == (const omc_u8*)0 || opts == (const omc_exif_opts*)0
+        || size > (omc_u64)(~(omc_size)0) || entry_count16 == 0U
+        || entry_count16 > opts->limits.max_entries_per_ifd) {
+        return 0;
+    }
+
+    omc_exif_init_child_cfg(&child, parent, bytes, (omc_size)size, opts, cfg);
+    entry_count32 = entry_count16;
+    if (!omc_exif_mul_u64((omc_u64)entry_count32, 12U, &table_bytes)) {
+        return 0;
+    }
+    if (entry_table_off > size || table_bytes > (size - entry_table_off)
+        || 4U > ((size - entry_table_off) - table_bytes)) {
+        return 0;
+    }
+    if (child.res.entries_decoded > child.opts.limits.max_total_entries
+        || entry_count32
+               > (child.opts.limits.max_total_entries
+                  - child.res.entries_decoded)) {
+        omc_exif_mark_limit(&child, OMC_EXIF_LIM_MAX_ENTRIES_TOTAL, count_off,
+                            0U);
+        omc_exif_merge_makernote_child(parent, &child);
+        return 0;
+    }
+
+    memset(&token_ref, 0, sizeof(token_ref));
+    omc_exif_emit_ifd(&child, OMC_EXIF_IFD, 0U, count_off);
+    if (!child.measure_only) {
+        tok_status = omc_exif_make_token(&child, OMC_EXIF_IFD, 0U, &token_ref);
+        if (tok_status != OMC_EXIF_OK) {
+            omc_exif_update_status(&child.res, tok_status);
+            omc_exif_merge_makernote_child(parent, &child);
+            return 0;
+        }
+    }
+
+    for (i = 0U; i < entry_count32; ++i) {
+        omc_u64 entry_off;
+        omc_u16 tag;
+        omc_u16 type;
+        omc_u32 count32;
+        omc_u64 count64;
+        omc_u32 elem_size;
+        omc_u64 raw_size;
+        omc_u64 value_off;
+        omc_exif_status status;
+
+        entry_off = entry_table_off + ((omc_u64)i * 12U);
+        if (!omc_exif_read_u16(child.cfg, child.bytes, child.size, entry_off,
+                               &tag)
+            || !omc_exif_read_u16(child.cfg, child.bytes, child.size,
+                                  entry_off + 2U, &type)
+            || !omc_exif_read_u32(child.cfg, child.bytes, child.size,
+                                  entry_off + 4U, &count32)) {
+            continue;
+        }
+        if (!omc_exif_elem_size(type, &elem_size)
+            || !omc_exif_mul_u64((omc_u64)elem_size, (omc_u64)count32,
+                                 &raw_size)) {
+            continue;
+        }
+
+        count64 = count32;
+        if (raw_size <= 4U) {
+            value_off = entry_off + 8U;
+        } else {
+            omc_u32 off32;
+
+            if (!omc_exif_read_u32(child.cfg, child.bytes, child.size,
+                                   entry_off + 8U, &off32)) {
+                continue;
+            }
+            value_off = off32;
+        }
+        if (value_off > size || raw_size > (size - value_off)) {
+            continue;
+        }
+
+        if (!child.measure_only) {
+            status = omc_exif_add_entry(&child, &token_ref, tag, type,
+                                        count64,
+                                        child.bytes + (omc_size)value_off,
+                                        raw_size, i, OMC_ENTRY_FLAG_NONE);
+            if (status != OMC_EXIF_OK) {
+                if (status == OMC_EXIF_LIMIT) {
+                    omc_exif_mark_limit(&child, OMC_EXIF_LIM_VALUE_COUNT,
+                                        count_off, tag);
+                } else {
+                    omc_exif_update_status(&child.res, status);
+                }
+                omc_exif_merge_makernote_child(parent, &child);
+                return 0;
+            }
+        }
+        child.res.entries_decoded += 1U;
+    }
+
+    omc_exif_merge_makernote_child(parent, &child);
+    return 1;
+}
+
+static int
+omc_exif_decode_ricoh_type2_ricoh_header_ifd(omc_exif_ctx* ctx,
+                                             const omc_u8* raw,
+                                             omc_u64 raw_size)
+{
+    omc_exif_opts mn_opts;
+    omc_exif_cfg cfg;
+    omc_u16 entry_count16;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 16U) {
+        return 1;
+    }
+    if (memcmp(raw, "RICOH", 5U) != 0) {
+        return 1;
+    }
+    if (!omc_exif_read_u16le_raw(raw, raw_size, 8U, &entry_count16)
+        || entry_count16 == 0U
+        || entry_count16 > ctx->opts.limits.max_entries_per_ifd) {
+        return 1;
+    }
+
+    mn_opts = ctx->opts;
+    mn_opts.decode_printim = 0;
+    mn_opts.decode_geotiff = 0;
+    mn_opts.decode_makernote = 0;
+    mn_opts.decode_embedded_containers = 0;
+    omc_exif_set_ricoh_type2_tokens(&mn_opts);
+
+    cfg = omc_exif_make_classic_cfg(1);
+    return omc_exif_decode_ricoh_type2_table(ctx, raw, raw_size, 8U, 12U,
+                                             entry_count16, &mn_opts, cfg);
+}
+
+static int
+omc_exif_decode_ricoh_type2_padded_ifd(omc_exif_ctx* ctx, const omc_u8* raw,
+                                       omc_u64 raw_size)
+{
+    omc_exif_opts mn_opts;
+    omc_exif_cfg cfg;
+    omc_u16 version;
+    omc_u32 ifd0_off32;
+    omc_u64 ifd0_off;
+    omc_u16 entry_count16;
+    omc_u64 entry_table_off;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 16U) {
+        return 1;
+    }
+    if (!((raw[0U] == (omc_u8)'I' && raw[1U] == (omc_u8)'I')
+          || (raw[0U] == (omc_u8)'M' && raw[1U] == (omc_u8)'M'))) {
+        return 1;
+    }
+
+    cfg = omc_exif_make_classic_cfg(raw[0U] == (omc_u8)'I');
+    if (!omc_exif_read_u16(cfg, raw, (omc_size)raw_size, 2U, &version)
+        || version != 42U
+        || !omc_exif_read_u32(cfg, raw, (omc_size)raw_size, 4U, &ifd0_off32)) {
+        return 1;
+    }
+
+    ifd0_off = ifd0_off32;
+    if (ifd0_off == 0U || ifd0_off + 8U > raw_size
+        || !omc_exif_read_u16(cfg, raw, (omc_size)raw_size, ifd0_off,
+                              &entry_count16)
+        || entry_count16 == 0U
+        || entry_count16 > ctx->opts.limits.max_entries_per_ifd) {
+        return 1;
+    }
+
+    entry_table_off = ifd0_off + 2U;
+    if (raw[(omc_size)(ifd0_off + 2U)] == 0U
+        && raw[(omc_size)(ifd0_off + 3U)] == 0U) {
+        entry_table_off = ifd0_off + 4U;
+    }
+
+    mn_opts = ctx->opts;
+    mn_opts.decode_printim = 0;
+    mn_opts.decode_geotiff = 0;
+    mn_opts.decode_makernote = 0;
+    mn_opts.decode_embedded_containers = 0;
+    omc_exif_set_ricoh_type2_tokens(&mn_opts);
+
+    return omc_exif_decode_ricoh_type2_table(ctx, raw, raw_size, ifd0_off,
+                                             entry_table_off, entry_count16,
+                                             &mn_opts, cfg);
+}
+
+static int
+omc_exif_ricoh_native_ifd_candidate(const omc_u8* raw, omc_u64 raw_size,
+                                    omc_u64 ifd_off, omc_exif_cfg cfg,
+                                    omc_u32 max_entries_per_ifd)
+{
+    omc_u16 entry_count16;
+    omc_u64 entry_table_off;
+    omc_u64 table_bytes;
+
+    if (raw == (const omc_u8*)0 || ifd_off >= raw_size
+        || !omc_exif_read_u16(cfg, raw, (omc_size)raw_size, ifd_off,
+                              &entry_count16)
+        || entry_count16 == 0U
+        || entry_count16 > max_entries_per_ifd) {
+        return 0;
+    }
+
+    entry_table_off = ifd_off + 2U;
+    if (!omc_exif_mul_u64((omc_u64)entry_count16, 12U, &table_bytes)) {
+        return 0;
+    }
+    return entry_table_off <= raw_size
+           && table_bytes <= (raw_size - entry_table_off)
+           && 4U <= ((raw_size - entry_table_off) - table_bytes);
+}
+
+static int
+omc_exif_ricoh_find_subdir_header(const omc_u8* bytes, omc_u64 size,
+                                  omc_u64* out_off)
+{
+    static const char header[] = "[Ricoh Camera Info]";
+    omc_u64 i;
+
+    if (bytes == (const omc_u8*)0 || out_off == (omc_u64*)0) {
+        return 0;
+    }
+
+    *out_off = 0U;
+    if (size < (sizeof(header) - 1U)) {
+        return 0;
+    }
+
+    for (i = 0U; i + (sizeof(header) - 1U) <= size; ++i) {
+        if (memcmp(bytes + (omc_size)i, header, sizeof(header) - 1U) == 0) {
+            *out_off = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
+omc_exif_decode_ricoh_imageinfo_ref(omc_exif_ctx* ctx, omc_byte_ref raw_ref)
+{
+    char ifd_name[64];
+    omc_const_bytes raw;
+    omc_u32 i;
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0) {
+        return 1;
+    }
+
+    raw = omc_arena_view(&ctx->store->arena, raw_ref);
+    if (raw.size == 0U) {
+        return 1;
+    }
+    if (ctx->opts.limits.max_entries_per_ifd != 0U
+        && raw.size > ctx->opts.limits.max_entries_per_ifd) {
+        return 1;
+    }
+    if (!omc_exif_make_subifd_name("mk_ricoh", "imageinfo", 0U,
+                                   ifd_name, sizeof(ifd_name))) {
+        return 0;
+    }
+
+    for (i = 0U; i < (omc_u32)raw.size && i <= 0xFFFFU; ++i) {
+        omc_exif_status status;
+
+        raw = omc_arena_view(&ctx->store->arena, raw_ref);
+        if (i >= (omc_u32)raw.size) {
+            break;
+        }
+        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, (omc_u16)i, i,
+                                               raw.data[i]);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+omc_exif_decode_ricoh_subdir_bytes(omc_exif_ctx* ctx, const omc_u8* bytes,
+                                   omc_u64 size)
+{
+    omc_exif_opts mn_opts;
+    omc_exif_cfg cfg;
+    omc_u64 hdr_off;
+
+    if (ctx == (omc_exif_ctx*)0 || bytes == (const omc_u8*)0 || size < 24U) {
+        return 1;
+    }
+    if (!omc_exif_ricoh_find_subdir_header(bytes, size, &hdr_off)
+        || hdr_off > size || (size - hdr_off) < 24U) {
+        return 1;
+    }
+
+    mn_opts = ctx->opts;
+    mn_opts.decode_printim = 0;
+    mn_opts.decode_geotiff = 0;
+    mn_opts.decode_makernote = 0;
+    mn_opts.decode_embedded_containers = 0;
+    mn_opts.tokens.ifd_prefix = "mk_ricoh_subdir_";
+    mn_opts.tokens.subifd_prefix = "mk_ricoh_subdir_subifd_";
+    mn_opts.tokens.exif_ifd_token = "mk_ricoh_subdir_exififd";
+    mn_opts.tokens.gps_ifd_token = "mk_ricoh_subdir_gpsifd";
+    mn_opts.tokens.interop_ifd_token = "mk_ricoh_subdir_interopifd";
+
+    cfg = omc_exif_make_classic_cfg(0);
+    return omc_exif_decode_ifd_blob_loose_cfg(ctx, bytes, size, hdr_off + 20U,
+                                              &mn_opts, cfg);
+}
+
+static int
+omc_exif_decode_ricoh_theta_ifd(omc_exif_ctx* ctx, omc_u32 abs_off)
+{
+    omc_exif_opts mn_opts;
+    omc_exif_cfg cfg;
+
+    if (ctx == (omc_exif_ctx*)0 || abs_off >= (omc_u32)ctx->size) {
+        return 1;
+    }
+
+    mn_opts = ctx->opts;
+    mn_opts.decode_printim = 0;
+    mn_opts.decode_geotiff = 0;
+    mn_opts.decode_makernote = 0;
+    mn_opts.decode_embedded_containers = 0;
+    mn_opts.tokens.ifd_prefix = "mk_ricoh_thetasubdir_";
+    mn_opts.tokens.subifd_prefix = "mk_ricoh_thetasubdir_subifd_";
+    mn_opts.tokens.exif_ifd_token = "mk_ricoh_thetasubdir_exififd";
+    mn_opts.tokens.gps_ifd_token = "mk_ricoh_thetasubdir_gpsifd";
+    mn_opts.tokens.interop_ifd_token = "mk_ricoh_thetasubdir_interopifd";
+
+    cfg = omc_exif_make_classic_cfg(ctx->cfg.little_endian);
+    return omc_exif_decode_ifd_blob_loose_cfg(ctx, ctx->bytes,
+                                              (omc_u64)ctx->size,
+                                              (omc_u64)abs_off, &mn_opts, cfg);
+}
+
+static int
+omc_exif_decode_ricoh_main_postpass(omc_exif_ctx* ctx, const omc_u8* raw,
+                                    omc_u64 raw_size, omc_size entry_start)
+{
+    omc_byte_ref imageinfo_refs[4];
+    omc_byte_ref subdir_refs[4];
+    omc_u32 subdir_abs_offs[4];
+    omc_u32 theta_abs_offs[4];
+    omc_u32 imageinfo_count;
+    omc_u32 subdir_ref_count;
+    omc_u32 subdir_abs_count;
+    omc_u32 theta_count;
+    int have_subdir;
+    omc_size i;
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0
+        || entry_start >= ctx->store->entry_count) {
+        return 1;
+    }
+
+    imageinfo_count = 0U;
+    subdir_ref_count = 0U;
+    subdir_abs_count = 0U;
+    theta_count = 0U;
+    have_subdir = 0;
+
+    if (raw != (const omc_u8*)0 && raw_size > 8U
+        && omc_exif_decode_ricoh_subdir_bytes(ctx, raw + 8U, raw_size - 8U)) {
+        have_subdir = 1;
+    }
+
+    for (i = entry_start; i < ctx->store->entry_count; ++i) {
+        const omc_entry* entry;
+
+        entry = &ctx->store->entries[i];
+        if (!omc_exif_entry_ifd_equals(ctx->store, entry, "mk_ricoh0")) {
+            continue;
+        }
+
+        if (entry->key.u.exif_tag.tag == 0x1001U
+            && entry->origin.wire_type.family == OMC_WIRE_TIFF
+            && entry->origin.wire_type.code != 3U
+            && (entry->value.kind == OMC_VAL_BYTES
+                || entry->value.kind == OMC_VAL_ARRAY)
+            && imageinfo_count < 4U) {
+            imageinfo_refs[imageinfo_count++] = entry->value.u.ref;
+        } else if (entry->key.u.exif_tag.tag == 0x2001U) {
+            if ((entry->value.kind == OMC_VAL_BYTES
+                 || entry->value.kind == OMC_VAL_ARRAY)
+                && subdir_ref_count < 4U) {
+                subdir_refs[subdir_ref_count++] = entry->value.u.ref;
+            } else if (entry->value.kind == OMC_VAL_SCALAR
+                       && entry->value.elem_type == OMC_ELEM_U32
+                       && subdir_abs_count < 4U) {
+                subdir_abs_offs[subdir_abs_count++] = (omc_u32)entry->value.u.u64;
+            }
+        } else if (entry->key.u.exif_tag.tag == 0x4001U
+                   && entry->value.kind == OMC_VAL_SCALAR
+                   && entry->value.elem_type == OMC_ELEM_U32
+                   && theta_count < 4U) {
+            theta_abs_offs[theta_count++] = (omc_u32)entry->value.u.u64;
+        }
+    }
+
+    for (i = 0U; i < imageinfo_count; ++i) {
+        if (!omc_exif_decode_ricoh_imageinfo_ref(ctx, imageinfo_refs[i])) {
+            return 0;
+        }
+    }
+    if (!have_subdir) {
+        for (i = 0U; i < subdir_ref_count; ++i) {
+            omc_const_bytes raw_view;
+
+            raw_view = omc_arena_view(&ctx->store->arena, subdir_refs[i]);
+            if (!omc_exif_decode_ricoh_subdir_bytes(ctx, raw_view.data,
+                                                    raw_view.size)) {
+                return 0;
+            }
+        }
+        for (i = 0U; i < subdir_abs_count; ++i) {
+            omc_u32 abs_off;
+
+            abs_off = subdir_abs_offs[i];
+            if (abs_off >= (omc_u32)ctx->size) {
+                continue;
+            }
+            if (!omc_exif_decode_ricoh_subdir_bytes(ctx,
+                                                    ctx->bytes
+                                                        + (omc_size)abs_off,
+                                                    (omc_u64)ctx->size
+                                                        - (omc_u64)abs_off)) {
+                return 0;
+            }
+        }
+    }
+    for (i = 0U; i < theta_count; ++i) {
+        if (!omc_exif_decode_ricoh_theta_ifd(ctx, theta_abs_offs[i])) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int
+omc_exif_decode_ricoh_native_main_makernote(omc_exif_ctx* ctx,
+                                            const omc_u8* raw,
+                                            omc_u64 raw_size)
+{
+    static const omc_u64 k_offsets[2] = { 8U, 10U };
+    omc_exif_opts mn_opts;
+    omc_u32 i;
+    omc_u32 endian_i;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 12U) {
+        return 1;
+    }
+
+    mn_opts = ctx->opts;
+    mn_opts.decode_printim = 0;
+    mn_opts.decode_geotiff = 0;
+    mn_opts.decode_makernote = 0;
+    mn_opts.decode_embedded_containers = 0;
+    omc_exif_set_ricoh_tokens(&mn_opts);
+
+    for (i = 0U; i < 2U; ++i) {
+        for (endian_i = 0U; endian_i < 2U; ++endian_i) {
+            omc_exif_cfg cfg;
+            omc_size entry_start;
+            omc_exif_status status_before;
+
+            cfg = omc_exif_make_classic_cfg(endian_i == 0U);
+            if (!omc_exif_ricoh_native_ifd_candidate(
+                    raw, raw_size, k_offsets[i], cfg,
+                    ctx->opts.limits.max_entries_per_ifd)) {
+                continue;
+            }
+
+            entry_start = (ctx->store != (omc_store*)0) ? ctx->store->entry_count
+                                                        : 0U;
+            status_before = ctx->res.status;
+            if (!omc_exif_decode_ifd_blob_loose_cfg(ctx, raw, raw_size,
+                                                    k_offsets[i], &mn_opts,
+                                                    cfg)) {
+                if (ctx->res.status != status_before
+                    && ctx->res.status != OMC_EXIF_OK
+                    && ctx->res.status != OMC_EXIF_TRUNCATED) {
+                    return 0;
+                }
+                continue;
+            }
+            if (!omc_exif_decode_ricoh_main_postpass(ctx, raw, raw_size,
+                                                     entry_start)) {
+                return 0;
+            }
+            return 1;
+        }
+    }
+
+    return 1;
+}
+
+static int
+omc_exif_decode_ricoh_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
+                                omc_u64 raw_size)
+{
+    omc_u16 entry_count16;
+    omc_exif_cfg cfg;
+    omc_u16 version;
+    omc_u32 ifd0_off32;
+    omc_u64 ifd0_off;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 8U) {
+        return 1;
+    }
+
+    if (raw_size >= 16U && memcmp(raw, "RICOH", 5U) == 0
+        && omc_exif_read_u16le_raw(raw, raw_size, 8U, &entry_count16)
+        && entry_count16 != 0U
+        && entry_count16 <= ctx->opts.limits.max_entries_per_ifd) {
+        return omc_exif_decode_ricoh_type2_ricoh_header_ifd(ctx, raw,
+                                                            raw_size);
+    }
+
+    if (raw_size >= 16U
+        && ((raw[0U] == (omc_u8)'I' && raw[1U] == (omc_u8)'I')
+            || (raw[0U] == (omc_u8)'M' && raw[1U] == (omc_u8)'M'))) {
+        cfg = omc_exif_make_classic_cfg(raw[0U] == (omc_u8)'I');
+        if (omc_exif_read_u16(cfg, raw, (omc_size)raw_size, 2U, &version)
+            && version == 42U
+            && omc_exif_read_u32(cfg, raw, (omc_size)raw_size, 4U,
+                                 &ifd0_off32)) {
+            ifd0_off = ifd0_off32;
+            if (ifd0_off != 0U && ifd0_off + 8U <= raw_size
+                && omc_exif_read_u16(cfg, raw, (omc_size)raw_size, ifd0_off,
+                                     &entry_count16)
+                && entry_count16 != 0U
+                && entry_count16 <= ctx->opts.limits.max_entries_per_ifd) {
+                return omc_exif_decode_ricoh_type2_padded_ifd(ctx, raw,
+                                                              raw_size);
+            }
+        }
+    }
+
+    return omc_exif_decode_ricoh_native_main_makernote(ctx, raw, raw_size);
+}
+
+static int
 omc_exif_decode_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
                           omc_u64 raw_size)
 {
@@ -8636,6 +9824,12 @@ omc_exif_decode_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
     if (vendor == OMC_EXIF_MN_CASIO) {
         return omc_exif_decode_casio_makernote(ctx, maker_note_off, raw,
                                                raw_size);
+    }
+    if (vendor == OMC_EXIF_MN_PENTAX) {
+        return omc_exif_decode_pentax_makernote(ctx, raw, raw_size);
+    }
+    if (vendor == OMC_EXIF_MN_RICOH) {
+        return omc_exif_decode_ricoh_makernote(ctx, raw, raw_size);
     }
     return 1;
 }

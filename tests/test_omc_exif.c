@@ -505,6 +505,347 @@ make_casio_type2_makernote_faceinfo2(omc_u8* out, omc_u32 payload_off,
 }
 
 static omc_size
+make_pentax_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_bytes(out, &size, "AOC");
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 1U);
+
+    append_u16le(out, &size, 0x0001U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 2U);
+    append_u16le(out, &size, 0U);
+
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_pentax_makernote_with_binary_subdirs(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 aeinfo_off;
+    omc_u32 shot_off;
+    omc_u8 i;
+
+    size = 0U;
+    append_bytes(out, &size, "AOC");
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 4U);
+
+    aeinfo_off = 8U + (4U * 12U) + 4U;
+    shot_off = aeinfo_off + 21U;
+
+    append_u16le(out, &size, 0x005CU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 4U);
+    append_u32le(out, &size, 0x44332211U);
+
+    append_u16le(out, &size, 0x0060U);
+    append_u16le(out, &size, 1U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 3U);
+
+    append_u16le(out, &size, 0x0206U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 21U);
+    append_u32le(out, &size, aeinfo_off);
+
+    append_u16le(out, &size, 0x0226U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 6U);
+    append_u32le(out, &size, shot_off);
+
+    append_u32le(out, &size, 0U);
+
+    for (i = 0U; i < 21U; ++i) {
+        append_u8(out, &size, (omc_u8)(i + 1U));
+    }
+    for (i = 0U; i < 6U; ++i) {
+        append_u8(out, &size, (omc_u8)(0xA0U + i));
+    }
+    return size;
+}
+
+static omc_size
+make_pentax_type2_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_bytes(out, &size, "AOC");
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 4U);
+
+    append_u16le(out, &size, 0x0001U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 2U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0004U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0005U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 7U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x1000U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 0x1234U);
+    append_u16le(out, &size, 0U);
+
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_pentax_makernote_with_main_0062(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_bytes(out, &size, "AOC");
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 1U);
+
+    append_u16le(out, &size, 0x0062U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 7U);
+    append_u16le(out, &size, 0U);
+
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_pentax_makernote_with_zero_face_tables(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 facepos_off;
+    omc_u32 facesize_off;
+
+    size = 0U;
+    append_bytes(out, &size, "AOC");
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 3U);
+
+    facepos_off = 8U + (3U * 12U) + 4U;
+    facesize_off = facepos_off + 4U;
+
+    append_u16le(out, &size, 0x0060U);
+    append_u16le(out, &size, 1U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0227U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 4U);
+    append_u32le(out, &size, facepos_off);
+
+    append_u16le(out, &size, 0x0228U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 4U);
+    append_u32le(out, &size, facesize_off);
+
+    append_u32le(out, &size, 0U);
+    append_u8(out, &size, 0x10U);
+    append_u8(out, &size, 0x11U);
+    append_u8(out, &size, 0x12U);
+    append_u8(out, &size, 0x13U);
+    append_u8(out, &size, 0x20U);
+    append_u8(out, &size, 0x21U);
+    append_u8(out, &size, 0x22U);
+    append_u8(out, &size, 0x23U);
+    return size;
+}
+
+static omc_size
+make_ricoh_type2_makernote(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 model_off_pos;
+    omc_u32 make_off_pos;
+    omc_u32 model_off;
+    omc_u32 make_off;
+
+    size = 0U;
+    append_bytes(out, &size, "RICOH");
+    append_u8(out, &size, 0U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 2U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0207U);
+    append_u16le(out, &size, 2U);
+    append_u32le(out, &size, 6U);
+    model_off_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0300U);
+    append_u16le(out, &size, 2U);
+    append_u32le(out, &size, 6U);
+    make_off_pos = (omc_u32)size;
+    append_u32le(out, &size, 0U);
+
+    append_u32le(out, &size, 0U);
+
+    model_off = (omc_u32)size;
+    write_u32le_at(out, model_off_pos, model_off);
+    append_bytes(out, &size, "GRIII");
+    append_u8(out, &size, 0U);
+
+    make_off = (omc_u32)size;
+    write_u32le_at(out, make_off_pos, make_off);
+    append_bytes(out, &size, "RICOH");
+    append_u8(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_ricoh_type2_padded_ifd_makernote(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 model_off_pos;
+    omc_u32 make_off_pos;
+    omc_u32 model_off;
+    omc_u32 make_off;
+
+    size = 0U;
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+
+    append_u16le(out, &size, 3U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0104U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 1U);
+
+    model_off_pos = (omc_u32)size + 8U;
+    append_u16le(out, &size, 0x0207U);
+    append_u16le(out, &size, 2U);
+    append_u32le(out, &size, 5U);
+    append_u32le(out, &size, 0U);
+
+    make_off_pos = (omc_u32)size + 8U;
+    append_u16le(out, &size, 0x0300U);
+    append_u16le(out, &size, 2U);
+    append_u32le(out, &size, 6U);
+    append_u32le(out, &size, 0U);
+
+    append_u32le(out, &size, 0U);
+
+    model_off = (omc_u32)size;
+    write_u32le_at(out, model_off_pos, model_off);
+    append_bytes(out, &size, "HZ15");
+    append_u8(out, &size, 0U);
+
+    make_off = (omc_u32)size;
+    write_u32le_at(out, make_off_pos, make_off);
+    append_bytes(out, &size, "RICOH");
+    append_u8(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_ricoh_native_makernote(omc_u8* out, omc_u32 theta_abs_off)
+{
+    static const omc_u8 imageinfo_bytes[4] = { 1U, 2U, 3U, 4U };
+    static const char subdir_hdr[] = "[Ricoh Camera Info]";
+    omc_size size;
+    omc_u32 imageinfo_off;
+    omc_u32 subdir_off;
+    omc_u32 subdir_size;
+
+    size = 0U;
+    append_bytes(out, &size, "Ricoh");
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+
+    append_u16le(out, &size, 5U);
+
+    imageinfo_off = 8U + 2U + (5U * 12U) + 4U;
+    subdir_size = 20U + 2U + 12U + 4U;
+    subdir_off = imageinfo_off + (omc_u32)sizeof(imageinfo_bytes);
+
+    append_u16le(out, &size, 0x1001U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, (omc_u32)sizeof(imageinfo_bytes));
+    append_u32le(out, &size, imageinfo_off);
+
+    append_u16le(out, &size, 0x1002U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 7U);
+
+    append_u16le(out, &size, 0x1003U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 2U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x2001U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, subdir_size);
+    append_u32le(out, &size, subdir_off);
+
+    append_u16le(out, &size, 0x4001U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, theta_abs_off);
+
+    append_u32le(out, &size, 0U);
+    append_raw(out, &size, imageinfo_bytes, sizeof(imageinfo_bytes));
+
+    append_bytes(out, &size, subdir_hdr);
+    append_u8(out, &size, 0U);
+    append_u16be(out, &size, 1U);
+    append_u16be(out, &size, 0x0007U);
+    append_u16be(out, &size, 4U);
+    append_u32be(out, &size, 1U);
+    append_u32be(out, &size, 5U);
+    append_u32be(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_ricoh_theta_ifd(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0003U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 9U);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
 make_fuji_makernote_extended(omc_u8* out)
 {
     omc_size size;
@@ -2494,6 +2835,360 @@ test_casio_faceinfo_subdirs(void)
 }
 
 static void
+test_pentax_makernote_root_and_binary_subdirs(void)
+{
+    omc_u8 makernote[256];
+    omc_u8 tiff[512];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_pentax_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "PENTAX", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_pentax0", 0x0001U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 2U);
+    omc_store_fini(&store);
+
+    makernote_size = make_pentax_makernote_with_binary_subdirs(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "PENTAX", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_pentax_srinfo_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.u.u64 == 0x11U);
+
+    entry = find_exif_entry(&store, "mk_pentax_srinfo_0", 0x0003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.u.u64 == 0x44U);
+
+    entry = find_exif_entry(&store, "mk_pentax_faceinfo_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.u.u64 == 3U);
+
+    entry = find_exif_entry(&store, "mk_pentax_aeinfo2_0", 0x0001U);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "Pentax_0x0001");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Pentax_0x0001");
+
+    entry = find_exif_entry(&store, "mk_pentax_aeinfo2_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.u.u64 == 1U);
+
+    entry = find_exif_entry(&store, "mk_pentax_aeinfo2_0", 0x0014U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.u.u64 == 21U);
+
+    entry = find_exif_entry(&store, "mk_pentax_shotinfo_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.u.u64 == 0xA0U);
+
+    entry = find_exif_entry(&store, "mk_pentax_shotinfo_0", 0x0005U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.u.u64 == 0xA5U);
+    omc_store_fini(&store);
+}
+
+static void
+test_pentax_makernote_type2_routing(void)
+{
+    omc_u8 makernote[256];
+    omc_u8 tiff[512];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_pentax_type2_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "PENTAX", "PENTAX Optio 330", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    assert(find_exif_entry(&store, "mk_pentax0", 0x0001U)
+           == (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_pentax_type2_0", 0x0001U);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "RecordingMode");
+    omc_store_fini(&store);
+
+    makernote_size = make_pentax_type2_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "PENTAX", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    assert(find_exif_entry(&store, "mk_pentax0", 0x0001U)
+           == (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_pentax_type2_0", 0x1000U);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "HometownCityCode");
+    omc_store_fini(&store);
+}
+
+static void
+test_pentax_contextual_name_and_zero_face_tables(void)
+{
+    omc_u8 makernote[256];
+    omc_u8 tiff[512];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_pentax_makernote_with_main_0062(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "EASTMAN KODAK COMPANY", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_pentax0", 0x0062U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert(entry->origin.name_context_kind
+           == OMC_ENTRY_NAME_CTX_PENTAX_MAIN_0062);
+    assert(entry->origin.name_context_variant == 1U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "RawDevelopmentProcess");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Pentax_0x0062");
+    omc_store_fini(&store);
+
+    makernote_size = make_pentax_makernote_with_zero_face_tables(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "PENTAX", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    assert(find_exif_entry(&store, "mk_pentax0", 0x0227U)
+           != (const omc_entry*)0);
+    assert(find_exif_entry(&store, "mk_pentax0", 0x0228U)
+           != (const omc_entry*)0);
+    assert(find_exif_entry(&store, "mk_pentax_facepos_0", 0x0000U)
+           == (const omc_entry*)0);
+    assert(find_exif_entry(&store, "mk_pentax_facesize_0", 0x0000U)
+           == (const omc_entry*)0);
+    omc_store_fini(&store);
+}
+
+static void
+test_ricoh_type2_makernote(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    makernote_size = make_ricoh_type2_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "RICOH", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_ricoh_type2_0", 0x0207U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "GRIII", 5U) == 0);
+
+    entry = find_exif_entry(&store, "mk_ricoh_type2_0", 0x0300U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 5U);
+    assert(memcmp(view.data, "RICOH", 5U) == 0);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_ricoh_padded_type2_makernote(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    makernote_size = make_ricoh_type2_padded_ifd_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "RICOH", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_ricoh_type2_0", 0x0104U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 1U);
+
+    entry = find_exif_entry(&store, "mk_ricoh_type2_0", 0x0207U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 4U);
+    assert(memcmp(view.data, "HZ15", 4U) == 0);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_ricoh_native_makernote_and_subdirs(void)
+{
+    omc_u8 makernote[256];
+    omc_u8 theta_ifd[32];
+    omc_u8 tiff[512];
+    omc_size makernote_size;
+    omc_size theta_size;
+    omc_size tiff_size;
+    omc_u32 theta_abs_off;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_ricoh_native_makernote(makernote, 0U);
+    theta_abs_off = 38U + (omc_u32)(strlen("RICOH") + 1U)
+                    + (omc_u32)makernote_size;
+    makernote_size = make_ricoh_native_makernote(makernote, theta_abs_off);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "RICOH", makernote, makernote_size, (omc_u32)makernote_size);
+    assert(tiff_size == theta_abs_off);
+    theta_size = make_ricoh_theta_ifd(theta_ifd);
+    append_raw(tiff, &tiff_size, theta_ifd, theta_size);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_ricoh0", 0x1002U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 7U);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert(entry->origin.name_context_kind == OMC_ENTRY_NAME_CTX_RICOH_MAIN_COMPAT);
+    assert(entry->origin.name_context_variant == 1U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "DriveMode");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Ricoh_0x1002");
+
+    entry = find_exif_entry(&store, "mk_ricoh0", 0x1003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 2U);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert(entry->origin.name_context_kind == OMC_ENTRY_NAME_CTX_RICOH_MAIN_COMPAT);
+    assert(entry->origin.name_context_variant == 2U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "Sharpness");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "WhiteBalance");
+
+    entry = find_exif_entry(&store, "mk_ricoh_imageinfo_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 74U);
+
+    entry = find_exif_entry(&store, "mk_ricoh_imageinfo_0", 0x0003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "Ricoh_ImageInfo_0x0003");
+
+    entry = find_exif_entry(&store, "mk_ricoh_subdir_0", 0x0007U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 5U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "Ricoh_Subdir_0x0007");
+
+    entry = find_exif_entry(&store, "mk_ricoh_thetasubdir_0", 0x0003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 9U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "Accelerometer");
+
+    omc_store_fini(&store);
+}
+
+static void
 test_fuji_makernote_signature(void)
 {
     omc_u8 makernote[128];
@@ -3625,6 +4320,17 @@ test_canon_camera_info_psinfo_makernote(void)
     assert(entry->value.elem_type == OMC_ELEM_U16);
     assert(entry->value.u.u64 == 129U);
 
+    entry = find_exif_entry(&store, "mk_canon_camerainfo_0", 0x0189U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 0U);
+
+    entry = find_exif_entry(&store, "mk_canon_camerainfo_0", 0x01ACU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    assert(omc_arena_view(&store.arena, entry->value.u.ref).size == 0U);
+
     omc_store_fini(&store);
 }
 
@@ -4477,6 +5183,12 @@ main(void)
     test_casio_legacy_generic_route_contextual_names();
     test_casio_out_of_line_preview();
     test_casio_faceinfo_subdirs();
+    test_pentax_makernote_root_and_binary_subdirs();
+    test_pentax_makernote_type2_routing();
+    test_pentax_contextual_name_and_zero_face_tables();
+    test_ricoh_type2_makernote();
+    test_ricoh_padded_type2_makernote();
+    test_ricoh_native_makernote_and_subdirs();
     test_fuji_makernote_signature();
     test_fuji_makernote_extended();
     test_fuji_ge2_makernote();

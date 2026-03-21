@@ -167,6 +167,30 @@ make_test_jpeg_app11_jumbf_scan(omc_u8* out, int header_only_first,
     return size;
 }
 
+static omc_size
+make_test_jpeg_qvci_scan(omc_u8* out)
+{
+    omc_u8 payload[0x90];
+    omc_size size;
+
+    memset(payload, 0, sizeof(payload));
+    memcpy(payload + 0x0000U, "QVCI", 4U);
+    payload[0x002CU] = 3U;
+    payload[0x0037U] = 2U;
+    memcpy(payload + 0x004DU, "2025.01.02.03.04.05", 19U);
+    memcpy(payload + 0x0062U, "QV7000", 6U);
+    memcpy(payload + 0x0072U, "IDX12345", 8U);
+    memcpy(payload + 0x007CU, "CODE1234", 8U);
+
+    size = 0U;
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 0xD8U);
+    append_jpeg_segment(out, &size, 0xFFE1U, payload, sizeof(payload));
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 0xD9U);
+    return size;
+}
+
 static void
 append_png_chunk(omc_u8* out, omc_size* io_size, const char* type,
                  const omc_u8* payload, omc_size payload_size)
@@ -1084,6 +1108,37 @@ test_scan_jpeg_app11_jumbf(void)
 }
 
 static void
+test_scan_jpeg_qvci(void)
+{
+    omc_u8 jpeg_bytes[256];
+    omc_size jpeg_size;
+    omc_blk_ref blocks[2];
+    omc_scan_res res;
+
+    jpeg_size = make_test_jpeg_qvci_scan(jpeg_bytes);
+    memset(blocks, 0, sizeof(blocks));
+    res = omc_scan_jpeg(jpeg_bytes, jpeg_size, blocks, 2U);
+
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 1U);
+    assert(res.needed == 1U);
+    assert(blocks[0].format == OMC_SCAN_FMT_JPEG);
+    assert(blocks[0].kind == OMC_BLK_MAKERNOTE);
+    assert(blocks[0].aux_u32 == fourcc('Q', 'V', 'C', 'I'));
+    assert(blocks[0].data_size == 0x90U);
+
+    res = omc_scan_auto(jpeg_bytes, jpeg_size, blocks, 2U);
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 1U);
+    assert(res.needed == 1U);
+
+    res = omc_scan_meas_jpeg(jpeg_bytes, jpeg_size);
+    assert(res.status == OMC_SCAN_OK);
+    assert(res.written == 0U);
+    assert(res.needed == 1U);
+}
+
+static void
 test_scan_png(void)
 {
     omc_u8 png_bytes[256];
@@ -1560,6 +1615,7 @@ int
 main(void)
 {
     test_scan_jpeg();
+    test_scan_jpeg_qvci();
     test_scan_jpeg_app11_jumbf();
     test_scan_png();
     test_scan_png_text();
