@@ -729,6 +729,105 @@ build_tiff_samsung_type2_a002_a003_fixture()
 }
 
 static ByteVec
+build_tiff_minolta_makernote_fixture()
+{
+    std::array<unsigned char, 32> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x0100U);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, 13U);
+    append_u32le(makernote.data(), &size, 0U);
+    return build_tiff_with_make_makernote_fixture("KONICA MINOLTA",
+                                                  makernote.data(), size);
+}
+
+static ByteVec
+build_tiff_minolta_binary_makernote_fixture()
+{
+    std::array<unsigned char, 96> makernote {};
+    std::size_t size;
+    std::uint32_t cs_off;
+    std::uint32_t cs7d_off;
+    std::uint32_t cs5d_off;
+
+    size = 0U;
+    append_u16le(makernote.data(), &size, 3U);
+    cs_off = 2U + (3U * 12U) + 4U;
+    cs7d_off = cs_off + 16U;
+    cs5d_off = cs7d_off + 8U;
+
+    append_u16le(makernote.data(), &size, 0x0001U);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, cs_off);
+
+    append_u16le(makernote.data(), &size, 0x0004U);
+    append_u16le(makernote.data(), &size, 3U);
+    append_u32le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, cs7d_off);
+
+    append_u16le(makernote.data(), &size, 0x0114U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 8U);
+    append_u32le(makernote.data(), &size, cs5d_off);
+
+    append_u32le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, 2U);
+    append_u32le(makernote.data(), &size, 0x12345678U);
+    append_u32le(makernote.data(), &size, 9U);
+    append_u16le(makernote.data(), &size, 0x1111U);
+    append_u16le(makernote.data(), &size, 0x2222U);
+    append_u16le(makernote.data(), &size, 0x3333U);
+    append_u16le(makernote.data(), &size, 0x4444U);
+    append_u16be(makernote.data(), &size, 0x0102U);
+    append_u16be(makernote.data(), &size, 0x0304U);
+    append_u16be(makernote.data(), &size, 0x0506U);
+    append_u16be(makernote.data(), &size, 0x0708U);
+
+    return build_tiff_with_make_makernote_fixture("KONICA MINOLTA",
+                                                  makernote.data(), size);
+}
+
+static ByteVec
+build_tiff_motorola_legacy_makernote_fixture()
+{
+    std::array<unsigned char, 32> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x6420U);
+    append_u16le(makernote.data(), &size, 9U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+    return build_tiff_with_make_model_makernote_fixture(
+        "Motorola", "XT1060", makernote.data(), size);
+}
+
+static ByteVec
+build_tiff_motorola_modern_makernote_fixture()
+{
+    std::array<unsigned char, 32> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_u16le(makernote.data(), &size, 1U);
+    append_u16le(makernote.data(), &size, 0x6420U);
+    append_u16le(makernote.data(), &size, 9U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, 0U);
+    append_u32le(makernote.data(), &size, 0U);
+    return build_tiff_with_make_model_makernote_fixture(
+        "Motorola", "motorola edge 50 neo", makernote.data(), size);
+}
+
+static ByteVec
 build_tiff_pentax_binary_makernote_fixture()
 {
     std::array<unsigned char, 128> makernote {};
@@ -1138,6 +1237,109 @@ build_tiff_panasonic_type2_fixture()
 
     return build_tiff_with_make_makernote_fixture("Panasonic", makernote.data(),
                                                   size);
+}
+
+static ByteVec
+build_tiff_panasonic_extended_makernote_fixture(bool truncated_next_ifd)
+{
+    static const std::uint16_t k_face_offsets[5] = {
+        0x0001U, 0x0005U, 0x0009U, 0x000DU, 0x0011U
+    };
+    static const std::uint16_t k_face_data[5][4] = {
+        { 10U, 20U, 30U, 40U },     { 50U, 60U, 70U, 80U },
+        { 90U, 100U, 110U, 120U },  { 130U, 140U, 150U, 160U },
+        { 170U, 180U, 190U, 200U }
+    };
+    static const char* k_names[3] = { "Bob", "Ana", "Eve" };
+    static const char* k_ages[3] = { "25", "30", "19" };
+    static const std::uint16_t k_pos[3][4] = {
+        { 1U, 2U, 3U, 4U }, { 5U, 6U, 7U, 8U }, { 9U, 10U, 11U, 12U }
+    };
+    std::array<unsigned char, 320> makernote {};
+    std::array<unsigned char, 42> facedet {};
+    std::array<unsigned char, 148> facerec {};
+    std::array<unsigned char, 20> timeinfo {};
+    ByteVec tiff;
+    std::size_t size;
+    std::uint32_t maker_off;
+    std::uint32_t facedet_abs_off;
+    std::uint32_t facerec_abs_off;
+    std::uint32_t time_abs_off;
+    std::uint32_t i;
+    std::uint32_t j;
+
+    facedet.fill(0U);
+    facerec.fill(0U);
+    timeinfo.fill(0xFFU);
+
+    write_u16le_at(facedet.data(), 0U, 5U);
+    for (i = 0U; i < 5U; ++i) {
+        const std::size_t byte_off = (std::size_t)k_face_offsets[i] * 2U;
+        for (j = 0U; j < 4U; ++j) {
+            write_u16le_at(facedet.data(),
+                           (std::uint32_t)(byte_off + (std::size_t)j * 2U),
+                           k_face_data[i][j]);
+        }
+    }
+
+    write_u16le_at(facerec.data(), 0U, 3U);
+    for (i = 0U; i < 3U; ++i) {
+        const std::size_t name_off = 4U + (std::size_t)i * 48U;
+        const std::size_t pos_off = 24U + (std::size_t)i * 48U;
+        const std::size_t age_off = 32U + (std::size_t)i * 48U;
+
+        std::memcpy(facerec.data() + name_off, k_names[i], std::strlen(k_names[i]));
+        for (j = 0U; j < 4U; ++j) {
+            write_u16le_at(facerec.data(),
+                           (std::uint32_t)(pos_off + (std::size_t)j * 2U),
+                           k_pos[i][j]);
+        }
+        std::memcpy(facerec.data() + age_off, k_ages[i], std::strlen(k_ages[i]));
+    }
+
+    timeinfo[0] = 0x20U;
+    timeinfo[1] = 0x24U;
+    timeinfo[2] = 0x06U;
+    timeinfo[3] = 0x27U;
+    timeinfo[4] = 0x12U;
+    timeinfo[5] = 0x53U;
+    timeinfo[6] = 0x52U;
+    timeinfo[7] = 0x54U;
+    write_u32le_at(timeinfo.data(), 16U, 321U);
+
+    maker_off = 38U + (std::uint32_t)std::strlen("Panasonic") + 1U;
+    facedet_abs_off = maker_off + (truncated_next_ifd ? 38U : 42U);
+    facerec_abs_off = facedet_abs_off + 42U;
+    time_abs_off = facerec_abs_off + 148U;
+
+    size = 0U;
+    append_u16le(makernote.data(), &size, 3U);
+    append_u16le(makernote.data(), &size, 0x004EU);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, (std::uint32_t)facedet.size());
+    append_u32le(makernote.data(), &size, facedet_abs_off);
+
+    append_u16le(makernote.data(), &size, 0x0061U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, (std::uint32_t)facerec.size());
+    append_u32le(makernote.data(), &size, facerec_abs_off);
+
+    append_u16le(makernote.data(), &size, 0x2003U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, (std::uint32_t)timeinfo.size());
+    append_u32le(makernote.data(), &size, time_abs_off);
+
+    if (!truncated_next_ifd) {
+        append_u32le(makernote.data(), &size, 0U);
+    }
+
+    append_bytes(makernote.data(), &size, facedet.data(), facedet.size());
+    append_bytes(makernote.data(), &size, facerec.data(), facerec.size());
+    append_bytes(makernote.data(), &size, timeinfo.data(), timeinfo.size());
+
+    tiff = build_tiff_with_make_makernote_fixture("Panasonic", makernote.data(),
+                                                  size);
+    return tiff;
 }
 
 static ByteVec
@@ -2697,6 +2899,176 @@ build_tiff_hp_type6_makernote_fixture()
 
     return build_tiff_with_make_makernote_fixture("HP", makernote,
                                                   sizeof(makernote));
+}
+
+static ByteVec
+build_tiff_kodak_kdk_makernote_fixture()
+{
+    unsigned char makernote[0x70];
+
+    std::memset(makernote, 0, sizeof(makernote));
+    makernote[0U] = (unsigned char)'K';
+    makernote[1U] = (unsigned char)'D';
+    makernote[2U] = (unsigned char)'K';
+    std::memcpy(makernote + 0x08U, "CX6330", 6U);
+    makernote[0x11U] = 3U;
+    makernote[0x12U] = 4U;
+    write_u16le_at(makernote, 0x14U, 800U);
+    write_u16le_at(makernote, 0x16U, 600U);
+    write_u16le_at(makernote, 0x18U, 2025U);
+    makernote[0x1AU] = 1U;
+    makernote[0x1BU] = 2U;
+    makernote[0x1CU] = 3U;
+    makernote[0x1DU] = 4U;
+    makernote[0x1EU] = 5U;
+    makernote[0x1FU] = 6U;
+
+    return build_tiff_with_make_makernote_fixture("KODAK", makernote,
+                                                  sizeof(makernote));
+}
+
+static ByteVec
+build_tiff_kodak_type2_makernote_fixture()
+{
+    unsigned char makernote[0x74];
+
+    std::memset(makernote, 0, sizeof(makernote));
+    std::memcpy(makernote + 0x08U, "Hewlett-Packard", 15U);
+    std::memcpy(makernote + 0x28U, "HP PhotoSmart 618", 17U);
+    write_u32be_at(makernote, 0x6CU, 800U);
+    write_u32be_at(makernote, 0x70U, 600U);
+
+    return build_tiff_with_make_makernote_fixture("KODAK", makernote,
+                                                  sizeof(makernote));
+}
+
+static ByteVec
+build_tiff_kodak_serial_only_makernote_fixture()
+{
+    unsigned char makernote[16];
+
+    std::memset(makernote, 0, sizeof(makernote));
+    std::memcpy(makernote, "C33000641478", 12U);
+    return build_tiff_with_make_makernote_fixture("KODAK", makernote, 12U);
+}
+
+static ByteVec
+build_tiff_kodak_type5_makernote_fixture()
+{
+    unsigned char makernote[0x2c];
+
+    std::memset(makernote, 0, sizeof(makernote));
+    write_u32be_at(makernote, 0x14U, 33333U);
+    makernote[0x1AU] = 4U;
+    write_u16be_at(makernote, 0x1CU, 45U);
+    write_u16be_at(makernote, 0x1EU, 140U);
+    write_u16be_at(makernote, 0x20U, 1U);
+    write_u16be_at(makernote, 0x22U, 2U);
+    makernote[0x27U] = 1U;
+    makernote[0x2AU] = 0U;
+    makernote[0x2BU] = 1U;
+
+    return build_tiff_with_make_model_makernote_fixture("KODAK", "CX4200",
+                                                        makernote,
+                                                        sizeof(makernote));
+}
+
+static ByteVec
+build_tiff_kodak_absolute_type8_makernote_fixture(const char* model)
+{
+    unsigned char makernote[64];
+    std::size_t size;
+
+    size = 0U;
+    append_u16le(makernote, &size, 4U);
+
+    append_u16le(makernote, &size, 0x0104U);
+    append_u16le(makernote, &size, 3U);
+    append_u32le(makernote, &size, 1U);
+    append_u16le(makernote, &size, 9U);
+    append_u16le(makernote, &size, 0U);
+
+    append_u16le(makernote, &size, 0x0200U);
+    append_u16le(makernote, &size, 3U);
+    append_u32le(makernote, &size, 1U);
+    append_u16le(makernote, &size, 1U);
+    append_u16le(makernote, &size, 0U);
+
+    append_u16le(makernote, &size, 0x0203U);
+    append_u16le(makernote, &size, 3U);
+    append_u32le(makernote, &size, 1U);
+    append_u16le(makernote, &size, 2U);
+    append_u16le(makernote, &size, 0U);
+
+    append_u16le(makernote, &size, 0x0300U);
+    append_u16le(makernote, &size, 3U);
+    append_u32le(makernote, &size, 1U);
+    append_u16le(makernote, &size, 3U);
+    append_u16le(makernote, &size, 0U);
+
+    append_u32le(makernote, &size, 0U);
+    return build_tiff_with_make_model_makernote_fixture("KODAK", model,
+                                                        makernote, size);
+}
+
+static ByteVec
+build_tiff_kodak_absolute_type11_makernote_fixture()
+{
+    return build_tiff_kodak_absolute_type8_makernote_fixture("PIXPRO 4KVR360");
+}
+
+static ByteVec
+build_tiff_sigma_main_u16_makernote_fixture(const char* model,
+                                            std::uint16_t tag,
+                                            std::uint16_t value)
+{
+    unsigned char makernote[32];
+    std::size_t size;
+
+    size = 0U;
+    append_u16le(makernote, &size, 1U);
+    append_u16le(makernote, &size, tag);
+    append_u16le(makernote, &size, 3U);
+    append_u32le(makernote, &size, 1U);
+    append_u16le(makernote, &size, value);
+    append_u16le(makernote, &size, 0U);
+    append_u32le(makernote, &size, 0U);
+
+    return build_tiff_with_make_model_makernote_fixture("SIGMA", model,
+                                                        makernote, size);
+}
+
+static ByteVec
+build_tiff_sigma_wb_makernote_fixture()
+{
+    unsigned char makernote[320];
+    std::size_t size;
+    std::uint32_t i;
+
+    size = 0U;
+    append_u16le(makernote, &size, 2U);
+
+    append_u16le(makernote, &size, 0x0120U);
+    append_u16le(makernote, &size, 11U);
+    append_u32le(makernote, &size, 30U);
+    append_u32le(makernote, &size, 30U);
+
+    append_u16le(makernote, &size, 0x0121U);
+    append_u16le(makernote, &size, 11U);
+    append_u32le(makernote, &size, 30U);
+    append_u32le(makernote, &size, 150U);
+
+    append_u32le(makernote, &size, 0U);
+
+    for (i = 0U; i < 30U; ++i) {
+        append_u32le(makernote, &size, f32_bits((float)(i + 1U)));
+    }
+    for (i = 0U; i < 30U; ++i) {
+        append_u32le(makernote, &size, f32_bits((float)(i + 41U)));
+    }
+
+    return build_tiff_with_make_model_makernote_fixture("SIGMA", "SIGMA fp L",
+                                                        makernote, size);
 }
 
 static ByteVec
@@ -5801,6 +6173,18 @@ main(int argc, char** argv)
     ok = run_case("tiff_samsung_type2_a002_a003_makernote",
                   build_tiff_samsung_type2_a002_a003_fixture(), true)
          && ok;
+    ok = run_case("tiff_minolta_makernote",
+                  build_tiff_minolta_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_minolta_binary_makernote",
+                  build_tiff_minolta_binary_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_motorola_legacy_makernote",
+                  build_tiff_motorola_legacy_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_motorola_modern_makernote",
+                  build_tiff_motorola_modern_makernote_fixture(), true)
+         && ok;
     ok = run_case("tiff_pentax_binary_makernote",
                   build_tiff_pentax_binary_makernote_fixture(), true)
          && ok;
@@ -5824,6 +6208,65 @@ main(int argc, char** argv)
          && ok;
     ok = run_case("tiff_panasonic_type2_makernote",
                   build_tiff_panasonic_type2_fixture(), true)
+         && ok;
+    ok = run_case("tiff_panasonic_extended_makernote",
+                  build_tiff_panasonic_extended_makernote_fixture(false), true)
+         && ok;
+    ok = run_case("tiff_panasonic_extended_truncated_makernote",
+                  build_tiff_panasonic_extended_makernote_fixture(true), true)
+         && ok;
+    ok = run_case("tiff_kodak_kdk_makernote",
+                  build_tiff_kodak_kdk_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_kodak_type2_makernote",
+                  build_tiff_kodak_type2_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_kodak_serial_only_makernote",
+                  build_tiff_kodak_serial_only_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_kodak_type5_makernote",
+                  build_tiff_kodak_type5_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_kodak_absolute_type8_makernote",
+                  build_tiff_kodak_absolute_type8_makernote_fixture(
+                      "KODAK P712 ZOOM DIGITAL CAMERA"),
+                  true)
+         && ok;
+    ok = run_case("tiff_kodak_absolute_pixpro_type8_makernote",
+                  build_tiff_kodak_absolute_type8_makernote_fixture(
+                      "PIXPRO AZ251"),
+                  true)
+         && ok;
+    ok = run_case("tiff_kodak_absolute_type11_makernote",
+                  build_tiff_kodak_absolute_type11_makernote_fixture(), true)
+         && ok;
+    ok = run_case("tiff_sigma_dp2_quattro_tag0033_makernote",
+                  build_tiff_sigma_main_u16_makernote_fixture(
+                      "SIGMA dp2 Quattro", 0x0033U, 41U),
+                  true)
+         && ok;
+    ok = run_case("tiff_sigma_fp_l_tag0033_makernote",
+                  build_tiff_sigma_main_u16_makernote_fixture(
+                      "SIGMA fp L", 0x0033U, 41U),
+                  true)
+         && ok;
+    ok = run_case("tiff_sigma_fp_l_tag0026_makernote",
+                  build_tiff_sigma_main_u16_makernote_fixture(
+                      "SIGMA fp L", 0x0026U, 41U),
+                  true)
+         && ok;
+    ok = run_case("tiff_sigma_sd_quattro_h_tag0034_makernote",
+                  build_tiff_sigma_main_u16_makernote_fixture(
+                      "sd Quattro H", 0x0034U, 41U),
+                  true)
+         && ok;
+    ok = run_case("tiff_sigma_sd_quattro_h_tag004b_makernote",
+                  build_tiff_sigma_main_u16_makernote_fixture(
+                      "sd Quattro H", 0x004BU, 41U),
+                  true)
+         && ok;
+    ok = run_case("tiff_sigma_wb_makernote",
+                  build_tiff_sigma_wb_makernote_fixture(), true)
          && ok;
     ok = run_case("tiff_olympus_signature_makernote",
                   build_tiff_olympus_signature_fixture(), true)

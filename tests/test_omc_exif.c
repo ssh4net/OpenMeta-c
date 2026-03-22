@@ -62,6 +62,32 @@ write_u32le_at(omc_u8* out, omc_u32 off, omc_u32 value)
 }
 
 static void
+write_u16be_at(omc_u8* out, omc_u32 off, omc_u16 value)
+{
+    out[off + 0U] = (omc_u8)((value >> 8) & 0xFFU);
+    out[off + 1U] = (omc_u8)((value >> 0) & 0xFFU);
+}
+
+static void
+write_u32be_at(omc_u8* out, omc_u32 off, omc_u32 value)
+{
+    out[off + 0U] = (omc_u8)((value >> 24) & 0xFFU);
+    out[off + 1U] = (omc_u8)((value >> 16) & 0xFFU);
+    out[off + 2U] = (omc_u8)((value >> 8) & 0xFFU);
+    out[off + 3U] = (omc_u8)((value >> 0) & 0xFFU);
+}
+
+static omc_u32
+f32_bits(float value)
+{
+    omc_u32 bits;
+
+    bits = 0U;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+static void
 assert_exif_entry_name(const omc_store* store, const omc_entry* entry,
                        omc_exif_name_policy policy, const char* expected)
 {
@@ -617,6 +643,82 @@ make_samsung_makernote_compat_digits(omc_u8* out)
 }
 
 static omc_size
+make_minolta_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x0100U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 13U);
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_motorola_makernote_custom_rendered(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0x6420U);
+    append_u16le(out, &size, 9U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_minolta_makernote_with_binary_subdirs(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 cs_off;
+    omc_u32 cs7d_off;
+    omc_u32 cs5d_off;
+
+    size = 0U;
+    append_u16le(out, &size, 3U);
+
+    cs_off = 2U + (3U * 12U) + 4U;
+    cs7d_off = cs_off + 16U;
+    cs5d_off = cs7d_off + 8U;
+
+    append_u16le(out, &size, 0x0001U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 4U);
+    append_u32le(out, &size, cs_off);
+
+    append_u16le(out, &size, 0x0004U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 4U);
+    append_u32le(out, &size, cs7d_off);
+
+    append_u16le(out, &size, 0x0114U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 8U);
+    append_u32le(out, &size, cs5d_off);
+
+    append_u32le(out, &size, 0U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 2U);
+    append_u32le(out, &size, 0x12345678U);
+    append_u32le(out, &size, 9U);
+    append_u16le(out, &size, 0x1111U);
+    append_u16le(out, &size, 0x2222U);
+    append_u16le(out, &size, 0x3333U);
+    append_u16le(out, &size, 0x4444U);
+    append_u16be(out, &size, 0x0102U);
+    append_u16be(out, &size, 0x0304U);
+    append_u16be(out, &size, 0x0506U);
+    append_u16be(out, &size, 0x0708U);
+    return size;
+}
+
+static omc_size
 make_pentax_makernote(omc_u8* out)
 {
     omc_size size;
@@ -1030,6 +1132,106 @@ make_panasonic_type2_makernote(omc_u8* out)
     append_bytes(out, &size, "ABCD");
     append_u16le(out, &size, 0U);
     append_u16le(out, &size, 42U);
+    return size;
+}
+
+static omc_size
+make_panasonic_makernote_with_extended_subdirs(omc_u8* out,
+                                               omc_u32 facedet_abs_off,
+                                               omc_u32 facerec_abs_off,
+                                               omc_u32 time_abs_off,
+                                               int truncate_next_ifd)
+{
+    static const omc_u16 k_face_offsets[5] = {
+        0x0001U, 0x0005U, 0x0009U, 0x000DU, 0x0011U
+    };
+    static const omc_u16 k_face_data[5][4] = {
+        { 10U, 20U, 30U, 40U },     { 50U, 60U, 70U, 80U },
+        { 90U, 100U, 110U, 120U },  { 130U, 140U, 150U, 160U },
+        { 170U, 180U, 190U, 200U }
+    };
+    static const char* k_names[3] = { "Bob", "Ana", "Eve" };
+    static const char* k_ages[3] = { "25", "30", "19" };
+    static const omc_u16 k_pos[3][4] = {
+        { 1U, 2U, 3U, 4U }, { 5U, 6U, 7U, 8U }, { 9U, 10U, 11U, 12U }
+    };
+    omc_u8 facedet[42];
+    omc_u8 facerec[148];
+    omc_u8 timeinfo[20];
+    omc_size size;
+    omc_u32 i;
+    omc_u32 j;
+
+    memset(facedet, 0, sizeof(facedet));
+    memset(facerec, 0, sizeof(facerec));
+    memset(timeinfo, 0xFF, sizeof(timeinfo));
+
+    write_u16le_at(facedet, 0U, 5U);
+    for (i = 0U; i < 5U; ++i) {
+        omc_u32 byte_off;
+
+        byte_off = (omc_u32)k_face_offsets[i] * 2U;
+        for (j = 0U; j < 4U; ++j) {
+            write_u16le_at(facedet, byte_off + (j * 2U), k_face_data[i][j]);
+        }
+    }
+
+    write_u16le_at(facerec, 0U, 3U);
+    for (i = 0U; i < 3U; ++i) {
+        omc_size name_off;
+        omc_size pos_off;
+        omc_size age_off;
+        omc_size name_len;
+        omc_size age_len;
+
+        name_off = 4U + ((omc_size)i * 48U);
+        pos_off = 24U + ((omc_size)i * 48U);
+        age_off = 32U + ((omc_size)i * 48U);
+        name_len = strlen(k_names[i]);
+        age_len = strlen(k_ages[i]);
+        memcpy(facerec + name_off, k_names[i], name_len);
+        for (j = 0U; j < 4U; ++j) {
+            write_u16le_at(facerec, (omc_u32)pos_off + (j * 2U),
+                           k_pos[i][j]);
+        }
+        memcpy(facerec + age_off, k_ages[i], age_len);
+    }
+
+    timeinfo[0] = 0x20U;
+    timeinfo[1] = 0x24U;
+    timeinfo[2] = 0x06U;
+    timeinfo[3] = 0x27U;
+    timeinfo[4] = 0x12U;
+    timeinfo[5] = 0x53U;
+    timeinfo[6] = 0x52U;
+    timeinfo[7] = 0x54U;
+    write_u32le_at(timeinfo, 16U, 321U);
+
+    size = 0U;
+    append_u16le(out, &size, 3U);
+
+    append_u16le(out, &size, 0x004EU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, (omc_u32)sizeof(facedet));
+    append_u32le(out, &size, facedet_abs_off);
+
+    append_u16le(out, &size, 0x0061U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, (omc_u32)sizeof(facerec));
+    append_u32le(out, &size, facerec_abs_off);
+
+    append_u16le(out, &size, 0x2003U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, (omc_u32)sizeof(timeinfo));
+    append_u32le(out, &size, time_abs_off);
+
+    if (!truncate_next_ifd) {
+        append_u32le(out, &size, 0U);
+    }
+
+    append_raw(out, &size, facedet, sizeof(facedet));
+    append_raw(out, &size, facerec, sizeof(facerec));
+    append_raw(out, &size, timeinfo, sizeof(timeinfo));
     return size;
 }
 
@@ -3639,6 +3841,126 @@ test_samsung_compat_tag0_and_a002_names(void)
 }
 
 static void
+test_minolta_makernote_and_binary_subdirs(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_minolta_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "KONICA MINOLTA", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_minolta0", 0x0100U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 13U);
+    omc_store_fini(&store);
+
+    makernote_size = make_minolta_makernote_with_binary_subdirs(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "KONICA MINOLTA", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_minolta_camerasettings_0", 0x0002U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 0x12345678U);
+    assert((entry->flags & OMC_ENTRY_FLAG_DERIVED) != 0U);
+
+    entry = find_exif_entry(&store, "mk_minolta_camerasettings7d_0", 0x0003U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 0x4444U);
+    assert((entry->flags & OMC_ENTRY_FLAG_DERIVED) != 0U);
+
+    entry = find_exif_entry(&store, "mk_minolta_camerasettings5d_0", 0x0001U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 0x0304U);
+    assert((entry->flags & OMC_ENTRY_FLAG_DERIVED) != 0U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_motorola_makernote_context(void)
+{
+    omc_u8 makernote[64];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_motorola_makernote_custom_rendered(makernote);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Motorola", "XT1060", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_motorola0", 0x6420U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert(entry->origin.name_context_kind
+           == OMC_ENTRY_NAME_CTX_MOTOROLA_MAIN_6420);
+    assert(entry->origin.name_context_variant == 1U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "CustomRendered");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Motorola_0x6420");
+    omc_store_fini(&store);
+
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Motorola", "motorola edge 50 neo", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_motorola0", 0x6420U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) == 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "CustomRendered");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "CustomRendered");
+    omc_store_fini(&store);
+}
+
+static void
 test_pentax_makernote_root_and_binary_subdirs(void)
 {
     omc_u8 makernote[256];
@@ -4138,6 +4460,160 @@ test_panasonic_type2_makernote(void)
     assert(entry->value.kind == OMC_VAL_SCALAR);
     assert(entry->value.elem_type == OMC_ELEM_U16);
     assert(entry->value.u.u64 == 42U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_panasonic_extended_makernote_subdirs(void)
+{
+    omc_u8 makernote[320];
+    omc_u8 tiff[512];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_u32 maker_off;
+    omc_u32 facedet_abs_off;
+    omc_u32 facerec_abs_off;
+    omc_u32 time_abs_off;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    maker_off = 38U + (omc_u32)(strlen("Panasonic") + 1U);
+    facedet_abs_off = maker_off + 42U;
+    facerec_abs_off = facedet_abs_off + 42U;
+    time_abs_off = facerec_abs_off + 148U;
+    makernote_size = make_panasonic_makernote_with_extended_subdirs(
+        makernote, facedet_abs_off, facerec_abs_off, time_abs_off, 0);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Panasonic", makernote, makernote_size, (omc_u32)makernote_size);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facedetinfo_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 5U);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facedetinfo_0", 0x0005U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.count == 4U);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size >= 8U);
+    assert(view.data[0] == 50U);
+    assert(view.data[1] == 0U);
+    assert(view.data[6] == 80U);
+    assert(view.data[7] == 0U);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facedetinfo_0", 0x0011U);
+    assert(entry != (const omc_entry*)0);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size >= 8U);
+    assert(view.data[0] == 170U);
+    assert(view.data[1] == 0U);
+    assert(view.data[6] == 200U);
+    assert(view.data[7] == 0U);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facerecinfo_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 3U);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facerecinfo_0", 0x0034U);
+    assert(entry != (const omc_entry*)0);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 3U);
+    assert(memcmp(view.data, "Ana", 3U) == 0);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facerecinfo_0", 0x0048U);
+    assert(entry != (const omc_entry*)0);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size >= 8U);
+    assert(view.data[0] == 5U);
+    assert(view.data[6] == 8U);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facerecinfo_0", 0x0050U);
+    assert(entry != (const omc_entry*)0);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 2U);
+    assert(memcmp(view.data, "30", 2U) == 0);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facerecinfo_0", 0x0064U);
+    assert(entry != (const omc_entry*)0);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 3U);
+    assert(memcmp(view.data, "Eve", 3U) == 0);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facerecinfo_0", 0x0078U);
+    assert(entry != (const omc_entry*)0);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size >= 8U);
+    assert(view.data[0] == 9U);
+    assert(view.data[6] == 12U);
+
+    entry = find_exif_entry(&store, "mk_panasonic_facerecinfo_0", 0x0080U);
+    assert(entry != (const omc_entry*)0);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 2U);
+    assert(memcmp(view.data, "19", 2U) == 0);
+
+    entry = find_exif_entry(&store, "mk_panasonic_timeinfo_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 22U);
+    assert(memcmp(view.data, "2024:06:27 12:53:52.54", 22U) == 0);
+
+    entry = find_exif_entry(&store, "mk_panasonic_timeinfo_0", 0x0010U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 321U);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_panasonic_extended_truncated_next_ifd(void)
+{
+    omc_u8 makernote[320];
+    omc_u8 tiff[512];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_u32 maker_off;
+    omc_u32 facedet_abs_off;
+    omc_u32 facerec_abs_off;
+    omc_u32 time_abs_off;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+
+    maker_off = 38U + (omc_u32)(strlen("Panasonic") + 1U);
+    facedet_abs_off = maker_off + 38U;
+    facerec_abs_off = facedet_abs_off + 42U;
+    time_abs_off = facerec_abs_off + 148U;
+    makernote_size = make_panasonic_makernote_with_extended_subdirs(
+        makernote, facedet_abs_off, facerec_abs_off, time_abs_off, 1);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Panasonic", makernote, makernote_size, (omc_u32)makernote_size);
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    assert(find_exif_entry(&store, "mk_panasonic_facedetinfo_0", 0x0011U)
+           != (const omc_entry*)0);
+    assert(find_exif_entry(&store, "mk_panasonic_facerecinfo_0", 0x0080U)
+           != (const omc_entry*)0);
+    assert(find_exif_entry(&store, "mk_panasonic_timeinfo_0", 0x0010U)
+           != (const omc_entry*)0);
 
     omc_store_fini(&store);
 }
@@ -6199,6 +6675,127 @@ make_kodak_kdk_makernote(omc_u8* out)
 }
 
 static omc_size
+make_kodak_type2_makernote(omc_u8* out)
+{
+    memset(out, 0, 0x74U);
+    memcpy(out + 0x08U, "Hewlett-Packard", 15U);
+    memcpy(out + 0x28U, "HP PhotoSmart 618", 17U);
+    write_u32be_at(out, 0x6CU, 800U);
+    write_u32be_at(out, 0x70U, 600U);
+    return 0x74U;
+}
+
+static omc_size
+make_kodak_type5_makernote(omc_u8* out)
+{
+    memset(out, 0, 0x2CU);
+    write_u32be_at(out, 0x14U, 33333U);
+    out[0x1AU] = 4U;
+    write_u16be_at(out, 0x1CU, 45U);
+    write_u16be_at(out, 0x1EU, 140U);
+    write_u16be_at(out, 0x20U, 1U);
+    write_u16be_at(out, 0x22U, 2U);
+    out[0x27U] = 1U;
+    out[0x2AU] = 0U;
+    out[0x2BU] = 1U;
+    return 0x2CU;
+}
+
+static omc_size
+make_kodak_serial_only_makernote(omc_u8* out)
+{
+    memcpy(out, "C33000641478", 12U);
+    return 12U;
+}
+
+static omc_size
+make_kodak_absolute_ifd_makernote(omc_u8* out)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 4U);
+
+    append_u16le(out, &size, 0x0104U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 9U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0200U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0203U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 2U);
+    append_u16le(out, &size, 0U);
+
+    append_u16le(out, &size, 0x0300U);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, 3U);
+    append_u16le(out, &size, 0U);
+
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_sigma_makernote_main_u16(omc_u8* out, omc_u16 tag, omc_u16 value)
+{
+    omc_size size;
+
+    size = 0U;
+    append_u16le(out, &size, 1U);
+    append_u16le(out, &size, tag);
+    append_u16le(out, &size, 3U);
+    append_u32le(out, &size, 1U);
+    append_u16le(out, &size, value);
+    append_u16le(out, &size, 0U);
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_sigma_wb_makernote(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 data1_off;
+    omc_u32 data2_off;
+    omc_u32 i;
+
+    size = 0U;
+    append_u16le(out, &size, 2U);
+
+    append_u16le(out, &size, 0x0120U);
+    append_u16le(out, &size, 11U);
+    append_u32le(out, &size, 30U);
+    data1_off = 30U;
+    append_u32le(out, &size, data1_off);
+
+    append_u16le(out, &size, 0x0121U);
+    append_u16le(out, &size, 11U);
+    append_u32le(out, &size, 30U);
+    data2_off = data1_off + 120U;
+    append_u32le(out, &size, data2_off);
+
+    append_u32le(out, &size, 0U);
+
+    for (i = 0U; i < 30U; ++i) {
+        append_u32le(out, &size, f32_bits((float)(i + 1U)));
+    }
+    for (i = 0U; i < 30U; ++i) {
+        append_u32le(out, &size, f32_bits((float)(i + 41U)));
+    }
+
+    return size;
+}
+
+static omc_size
 make_reconyx_h2_makernote(omc_u8* out)
 {
     memset(out, 0, 0x009CU);
@@ -6360,6 +6957,241 @@ test_small_vendor_makernotes(void)
     omc_store_fini(&store);
 }
 
+static void
+test_kodak_makernote_variants(void)
+{
+    omc_u8 tiff[2048];
+    omc_u8 makernote[256];
+    omc_size tiff_size;
+    omc_size makernote_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_ifd_ref ifds[8];
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    makernote_size = make_kodak_type2_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "KODAK", makernote, makernote_size, (omc_u32)makernote_size);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_kodak_type2_0", 0x0028U);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "KodakModel");
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 17U);
+    assert(memcmp(view.data, "HP PhotoSmart 618", 17U) == 0);
+
+    omc_store_reset(&store);
+    makernote_size = make_kodak_serial_only_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "KODAK", makernote, makernote_size, (omc_u32)makernote_size);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_kodak_type7_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "SerialNumber");
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 12U);
+    assert(memcmp(view.data, "C33000641478", 12U) == 0);
+
+    omc_store_reset(&store);
+    makernote_size = make_kodak_type5_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "KODAK", "CX4200", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry_typed(&store, "mk_kodak_type5_0", 0x0014U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U32);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "ExposureTime");
+    assert(entry->value.u.u64 == 33333U);
+
+    omc_store_reset(&store);
+    makernote_size = make_kodak_absolute_ifd_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "KODAK", "KODAK P712 ZOOM DIGITAL CAMERA", makernote,
+        makernote_size, (omc_u32)makernote_size);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry_typed(&store, "mk_kodak_type8_0", 0x0200U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 1U);
+
+    omc_store_reset(&store);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "KODAK", "PIXPRO AZ251", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry_typed(&store, "mk_kodak_type8_0", 0x0200U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 1U);
+    assert(find_exif_entry(&store, "mk_kodak_camerainfo_0", 0x0200U)
+           == (const omc_entry*)0);
+
+    omc_store_reset(&store);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "KODAK", "PIXPRO 4KVR360", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry_typed(&store, "mk_kodak_type11_0", 0x0200U,
+                                  OMC_VAL_SCALAR, OMC_ELEM_U16);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.u.u64 == 1U);
+    assert(find_exif_entry(&store, "mk_kodak_type8_0", 0x0200U)
+           == (const omc_entry*)0);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sigma_makernote_variants(void)
+{
+    omc_u8 tiff[2048];
+    omc_u8 makernote[512];
+    omc_size tiff_size;
+    omc_size makernote_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_ifd_ref ifds[8];
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+    omc_u32 bits;
+
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+
+    makernote_size = make_sigma_makernote_main_u16(makernote, 0x0033U, 41U);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "SIGMA", "SIGMA dp2 Quattro", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_sigma0", 0x0033U);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "ExposureTime2");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Sigma_0x0033");
+
+    omc_store_reset(&store);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "SIGMA", "SIGMA fp L", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_sigma0", 0x0033U);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "ExposureTime2");
+
+    omc_store_reset(&store);
+    makernote_size = make_sigma_makernote_main_u16(makernote, 0x0026U, 41U);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "SIGMA", "SIGMA fp L", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_sigma0", 0x0026U);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "FileFormat");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Sigma_0x0026");
+
+    omc_store_reset(&store);
+    makernote_size = make_sigma_makernote_main_u16(makernote, 0x0034U, 41U);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "SIGMA", "sd Quattro H", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_sigma0", 0x0034U);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "BurstShot");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Sigma_0x0034");
+
+    omc_store_reset(&store);
+    makernote_size = make_sigma_makernote_main_u16(makernote, 0x004BU, 41U);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "SIGMA", "sd Quattro H", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_sigma0", 0x004BU);
+    assert(entry != (const omc_entry*)0);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "ExposureTime2");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Sigma_0x004b");
+
+    omc_store_reset(&store);
+    makernote_size = make_sigma_wb_makernote(makernote);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "SIGMA", "SIGMA fp L", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID, ifds, 8U,
+                       &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_sigma_wbsettings_0", 0x0000U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_F32_BITS);
+    assert(entry->value.count == 3U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "WB_RGBLevelsAuto");
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 12U);
+    memcpy(&bits, view.data + 0U, sizeof(bits));
+    assert(bits == f32_bits(1.0f));
+    memcpy(&bits, view.data + 8U, sizeof(bits));
+    assert(bits == f32_bits(3.0f));
+
+    entry = find_exif_entry(&store, "mk_sigma_wbsettings2_0", 0x001BU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_F32_BITS);
+    assert(entry->value.count == 3U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "WB_RGBLevelsUnknown9");
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 12U);
+    memcpy(&bits, view.data + 0U, sizeof(bits));
+    assert(bits == f32_bits(68.0f));
+    memcpy(&bits, view.data + 8U, sizeof(bits));
+    assert(bits == f32_bits(70.0f));
+
+    omc_store_fini(&store);
+}
+
 int
 main(void)
 {
@@ -6377,6 +7209,8 @@ main(void)
     test_samsung_type2_picturewizard();
     test_samsung_type2_picturewizard_u16_array();
     test_samsung_compat_tag0_and_a002_names();
+    test_minolta_makernote_and_binary_subdirs();
+    test_motorola_makernote_context();
     test_pentax_makernote_root_and_binary_subdirs();
     test_pentax_makernote_type2_routing();
     test_pentax_contextual_name_and_zero_face_tables();
@@ -6386,6 +7220,8 @@ main(void)
     test_panasonic_makernote_subdirs();
     test_panasonic_makernote_truncated_next_ifd();
     test_panasonic_type2_makernote();
+    test_panasonic_extended_makernote_subdirs();
+    test_panasonic_extended_truncated_next_ifd();
     test_olympus_signature_makernote();
     test_olympus_omsystem_nested_subifds();
     test_olympus_oldstyle_nested_subifds();
@@ -6415,5 +7251,7 @@ main(void)
     test_canon_camera_info_additional_cohorts_makernote();
     test_canon_camera_info_extended_fixed_fields_makernote();
     test_small_vendor_makernotes();
+    test_kodak_makernote_variants();
+    test_sigma_makernote_variants();
     return 0;
 }

@@ -129,6 +129,11 @@ test_tag_name_basics(void)
     expect_tag_name("mk_flir_fff_gpsinfo_0", 0x0008U, "GPSLatitudeRef");
     expect_tag_name("mk_nikonsettings_main_0", 0x0001U, "ISOAutoHiLimit");
     expect_tag_name("mk_fuji0", 0x1200U, "FujiFilm_0x1200");
+    expect_tag_name("mk_sigma0", 0x000CU, "ExposureAdjust");
+    expect_tag_name("mk_sigma0", 0x0020U, "Sigma_0x0020");
+    expect_tag_name("mk_sigma_wbsettings_0", 0x0000U, "WB_RGBLevelsAuto");
+    expect_tag_name("mk_sigma_wbsettings2_0", 0x001BU,
+                    "WB_RGBLevelsUnknown9");
     expect_tag_name("mk_minolta0", 0x0103U, "MinoltaImageSize");
     expect_tag_name("mk_minolta0", 0x0106U, "Minolta_0x0106");
     expect_tag_name("mk_motorola0", 0x5500U, "BuildNumber");
@@ -236,6 +241,13 @@ test_contextual_entry_names(void)
     expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
                       "Motorola_0x6420");
 
+    entry = add_context_entry(&store, "mk_sigma0", 0x0033U,
+                              OMC_ENTRY_NAME_CTX_SIGMA_MAIN_COMPAT, 1U);
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                      "ExposureTime2");
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                      "Sigma_0x0033");
+
     entry = add_context_entry(&store, "mk_nikonsettings_main_0", 0x0001U,
                               OMC_ENTRY_NAME_CTX_NIKONSETTINGS_MAIN, 1U);
     expect_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL, "ISOAutoHiLimit");
@@ -316,6 +328,18 @@ test_compat_entry_names_without_context_flag(void)
                       "ImageStabilization");
     expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
                       "Minolta_0x0018");
+
+    entry = add_plain_entry(&store, "mk_sigma0", 0x001AU);
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                      "PreviewImageStart");
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                      "Sigma_0x001a");
+
+    entry = add_plain_entry(&store, "mk_sigma0", 0x001CU);
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                      "PreviewImageSize");
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                      "PreviewImageStart");
 
     entry = add_plain_entry(&store, "mk_panasonic0", 0x0004U);
     expect_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL, "Model");

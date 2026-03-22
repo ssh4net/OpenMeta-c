@@ -2144,7 +2144,10 @@ typedef enum omc_exif_mn_vendor {
     OMC_EXIF_MN_RICOH = 13,
     OMC_EXIF_MN_OLYMPUS = 14,
     OMC_EXIF_MN_PANASONIC = 15,
-    OMC_EXIF_MN_SAMSUNG = 16
+    OMC_EXIF_MN_SAMSUNG = 16,
+    OMC_EXIF_MN_MINOLTA = 17,
+    OMC_EXIF_MN_MOTOROLA = 18,
+    OMC_EXIF_MN_SIGMA = 19
 } omc_exif_mn_vendor;
 
 static omc_exif_cfg
@@ -2217,6 +2220,20 @@ omc_exif_set_sony_tokens(omc_exif_opts* opts)
     opts->tokens.exif_ifd_token = "mk_sony_exififd";
     opts->tokens.gps_ifd_token = "mk_sony_gpsifd";
     opts->tokens.interop_ifd_token = "mk_sony_interopifd";
+}
+
+static void
+omc_exif_set_sigma_tokens(omc_exif_opts* opts)
+{
+    if (opts == (omc_exif_opts*)0) {
+        return;
+    }
+
+    opts->tokens.ifd_prefix = "mk_sigma";
+    opts->tokens.subifd_prefix = "mk_sigma_subifd";
+    opts->tokens.exif_ifd_token = "mk_sigma_exififd";
+    opts->tokens.gps_ifd_token = "mk_sigma_gpsifd";
+    opts->tokens.interop_ifd_token = "mk_sigma_interopifd";
 }
 
 static void
@@ -2357,6 +2374,34 @@ omc_exif_set_panasonic_tokens(omc_exif_opts* opts)
     opts->tokens.exif_ifd_token = "mk_panasonic_exififd";
     opts->tokens.gps_ifd_token = "mk_panasonic_gpsifd";
     opts->tokens.interop_ifd_token = "mk_panasonic_interopifd";
+}
+
+static void
+omc_exif_set_minolta_tokens(omc_exif_opts* opts)
+{
+    if (opts == (omc_exif_opts*)0) {
+        return;
+    }
+
+    opts->tokens.ifd_prefix = "mk_minolta";
+    opts->tokens.subifd_prefix = "mk_minolta_subifd";
+    opts->tokens.exif_ifd_token = "mk_minolta_exififd";
+    opts->tokens.gps_ifd_token = "mk_minolta_gpsifd";
+    opts->tokens.interop_ifd_token = "mk_minolta_interopifd";
+}
+
+static void
+omc_exif_set_motorola_tokens(omc_exif_opts* opts)
+{
+    if (opts == (omc_exif_opts*)0) {
+        return;
+    }
+
+    opts->tokens.ifd_prefix = "mk_motorola";
+    opts->tokens.subifd_prefix = "mk_motorola_subifd";
+    opts->tokens.exif_ifd_token = "mk_motorola_exififd";
+    opts->tokens.gps_ifd_token = "mk_motorola_gpsifd";
+    opts->tokens.interop_ifd_token = "mk_motorola_interopifd";
 }
 
 static void
@@ -3030,6 +3075,56 @@ omc_exif_pentax_model_uses_type2_store(const omc_exif_ctx* ctx)
         return 0;
     }
     return omc_exif_pentax_model_uses_type2(model_text, model_size);
+}
+
+static int
+omc_exif_motorola_model_prefers_placeholder(const omc_u8* model_text,
+                                            omc_u32 model_size)
+{
+    return omc_exif_ascii_starts_with_nocase(model_text, model_size, "XT");
+}
+
+static int
+omc_exif_sigma_main_0033_prefers_placeholder(const omc_u8* model_text,
+                                             omc_u32 model_size)
+{
+    return omc_exif_ascii_equals_nocase(model_text, model_size,
+                                        "SIGMA DP1 Merrill")
+           || omc_exif_ascii_equals_nocase(model_text, model_size,
+                                           "SIGMA dp2 Quattro");
+}
+
+static int
+omc_exif_sigma_main_fp_l_prefers_placeholder(const omc_u8* model_text,
+                                             omc_u32 model_size, omc_u16 tag)
+{
+    if (!omc_exif_ascii_equals_nocase(model_text, model_size, "SIGMA fp L")) {
+        return 0;
+    }
+
+    switch (tag) {
+    case 0x0026U:
+    case 0x0027U:
+    case 0x002AU:
+    case 0x002BU:
+    case 0x0048U:
+    case 0x0056U:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int
+omc_exif_sigma_main_sd_quattro_h_prefers_placeholder(const omc_u8* model_text,
+                                                     omc_u32 model_size,
+                                                     omc_u16 tag)
+{
+    if (!omc_exif_ascii_equals_nocase(model_text, model_size,
+                                      "sd Quattro H")) {
+        return 0;
+    }
+    return tag == 0x0034U || tag == 0x004BU;
 }
 
 typedef struct omc_exif_pentax_subdir_candidate {
@@ -4613,6 +4708,276 @@ omc_exif_decode_samsung_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
     return 1;
 }
 
+static int
+omc_exif_decode_minolta_binary_subdirs(omc_exif_ctx* ctx)
+{
+    const omc_entry* entry;
+    omc_const_bytes raw;
+    omc_u8 stable16[16];
+    omc_u8 stable8[8];
+    omc_u32 value32;
+    omc_u16 value16;
+    omc_exif_status status;
+    char ifd_name[64];
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0) {
+        return 1;
+    }
+
+    entry = omc_exif_find_first_entry(ctx->store, "mk_minolta0", 0x0001U);
+    if (omc_exif_entry_raw_view(ctx->store, entry, &raw) && raw.size >= 16U) {
+        omc_u32 i;
+
+        memcpy(stable16, raw.data, sizeof(stable16));
+        if (omc_exif_make_subifd_name("mk_minolta", "camerasettings", 0U,
+                                      ifd_name, sizeof(ifd_name))) {
+            for (i = 0U; i < 4U; ++i) {
+                if (!omc_exif_read_u32le_raw(stable16, sizeof(stable16),
+                                             (omc_u64)i * 4U, &value32)) {
+                    break;
+                }
+                status = omc_exif_emit_derived_exif_u32(ctx, ifd_name,
+                                                        (omc_u16)i, i,
+                                                        value32);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    return 0;
+                }
+            }
+        }
+    }
+
+    entry = omc_exif_find_first_entry(ctx->store, "mk_minolta0", 0x0004U);
+    if (omc_exif_entry_raw_view(ctx->store, entry, &raw) && raw.size >= 8U) {
+        omc_u32 i;
+
+        memcpy(stable8, raw.data, sizeof(stable8));
+        if (omc_exif_make_subifd_name("mk_minolta", "camerasettings7d", 0U,
+                                      ifd_name, sizeof(ifd_name))) {
+            for (i = 0U; i < 4U; ++i) {
+                if (!omc_exif_read_u16le_raw(stable8, sizeof(stable8),
+                                             (omc_u64)i * 2U, &value16)) {
+                    break;
+                }
+                status = omc_exif_emit_derived_exif_u16(ctx, ifd_name,
+                                                        (omc_u16)i, i,
+                                                        value16);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    return 0;
+                }
+            }
+        }
+    }
+
+    entry = omc_exif_find_first_entry(ctx->store, "mk_minolta0", 0x0114U);
+    if (omc_exif_entry_raw_view(ctx->store, entry, &raw) && raw.size >= 4U) {
+        omc_u32 copy_size;
+        omc_u32 i;
+
+        memset(stable8, 0, sizeof(stable8));
+        copy_size = (omc_u32)raw.size;
+        if (copy_size > (omc_u32)sizeof(stable8)) {
+            copy_size = (omc_u32)sizeof(stable8);
+        }
+        memcpy(stable8, raw.data, copy_size);
+        if (omc_exif_make_subifd_name("mk_minolta", "camerasettings5d", 0U,
+                                      ifd_name, sizeof(ifd_name))) {
+            for (i = 0U; i < 4U; ++i) {
+                if (!omc_exif_read_u16be_raw(stable8, sizeof(stable8),
+                                             (omc_u64)i * 2U, &value16)) {
+                    break;
+                }
+                status = omc_exif_emit_derived_exif_u16(ctx, ifd_name,
+                                                        (omc_u16)i, i,
+                                                        value16);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    return 0;
+                }
+            }
+        }
+    }
+
+    return 1;
+}
+
+static int
+omc_exif_decode_minolta_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
+                                  omc_u64 raw_size)
+{
+    omc_exif_opts mn_opts;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 6U) {
+        return 1;
+    }
+
+    mn_opts = ctx->opts;
+    mn_opts.decode_printim = 0;
+    mn_opts.decode_geotiff = 0;
+    mn_opts.decode_makernote = 0;
+    mn_opts.decode_embedded_containers = 0;
+    omc_exif_set_minolta_tokens(&mn_opts);
+
+    if (!omc_exif_decode_ifd_blob_loose(ctx, raw, raw_size, 0U, &mn_opts)) {
+        return 0;
+    }
+    return omc_exif_decode_minolta_binary_subdirs(ctx);
+}
+
+static int
+omc_exif_sigma_find_ifd_off(const omc_u8* raw, omc_u64 raw_size,
+                            omc_u32 max_entries, omc_u64* out_ifd_off)
+{
+    omc_u64 off;
+
+    if (out_ifd_off == (omc_u64*)0) {
+        return 0;
+    }
+    *out_ifd_off = 0U;
+    if (raw == (const omc_u8*)0 || raw_size < 6U) {
+        return 0;
+    }
+
+    for (off = 0U; off < raw_size && off < 64U; ++off) {
+        omc_u16 entry_count16;
+        omc_u64 table_bytes;
+
+        entry_count16 = 0U;
+        if (!omc_exif_read_u16le_raw(raw, raw_size, off, &entry_count16)
+            || entry_count16 == 0U || entry_count16 > max_entries) {
+            continue;
+        }
+        if (!omc_exif_mul_u64((omc_u64)entry_count16, 12U, &table_bytes)) {
+            continue;
+        }
+        if (off > raw_size || table_bytes > (raw_size - off)
+            || 6U > ((raw_size - off) - table_bytes)) {
+            continue;
+        }
+        *out_ifd_off = off;
+        return 1;
+    }
+
+    return 0;
+}
+
+static int
+omc_exif_decode_sigma_binary_subdirs(omc_exif_ctx* ctx)
+{
+    static const struct {
+        omc_u16 source_tag;
+        const char* subtable;
+    } k_specs[] = {
+        { 0x0120U, "wbsettings" },
+        { 0x0121U, "wbsettings2" }
+    };
+    static const omc_u16 k_sigma_wb_tags[] = {
+        0x0000U, 0x0003U, 0x0006U, 0x0009U, 0x000CU,
+        0x000FU, 0x0012U, 0x0015U, 0x0018U, 0x001BU
+    };
+    omc_size spec_i;
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0) {
+        return 1;
+    }
+    if (omc_exif_find_first_entry(ctx->store, "mk_sigma_wbsettings_0", 0x0000U)
+        != (const omc_entry*)0
+        || omc_exif_find_first_entry(ctx->store, "mk_sigma_wbsettings2_0",
+                                     0x0000U) != (const omc_entry*)0) {
+        return 1;
+    }
+
+    for (spec_i = 0U; spec_i < (sizeof(k_specs) / sizeof(k_specs[0]));
+         ++spec_i) {
+        const omc_entry* source;
+        omc_const_bytes raw_view;
+        char ifd_name[64];
+        omc_u32 i;
+
+        source = omc_exif_find_first_entry(ctx->store, "mk_sigma0",
+                                           k_specs[spec_i].source_tag);
+        if (source == (const omc_entry*)0
+            || source->value.kind != OMC_VAL_ARRAY
+            || source->value.elem_type != OMC_ELEM_F32_BITS
+            || source->value.count < 30U
+            || !omc_exif_entry_raw_view(ctx->store, source, &raw_view)
+            || raw_view.size < 120U) {
+            continue;
+        }
+        if (!omc_exif_make_subifd_name("mk_sigma", k_specs[spec_i].subtable,
+                                       0U, ifd_name, sizeof(ifd_name))) {
+            continue;
+        }
+
+        for (i = 0U; i < 10U; ++i) {
+            omc_exif_status status;
+            omc_size off;
+
+            off = (omc_size)i * 12U;
+            status = omc_exif_emit_derived_exif_array_copy(
+                ctx, ifd_name, k_sigma_wb_tags[i], i, OMC_ELEM_F32_BITS,
+                raw_view.data + off, 12U, 3U);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+        }
+    }
+
+    return 1;
+}
+
+static int
+omc_exif_decode_sigma_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
+                                omc_u64 raw_size)
+{
+    omc_exif_opts mn_opts;
+    omc_u64 ifd_off;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 6U) {
+        return 1;
+    }
+
+    mn_opts = ctx->opts;
+    mn_opts.decode_printim = 0;
+    mn_opts.decode_geotiff = 0;
+    mn_opts.decode_makernote = 0;
+    mn_opts.decode_embedded_containers = 0;
+    omc_exif_set_sigma_tokens(&mn_opts);
+
+    if (!omc_exif_sigma_find_ifd_off(raw, raw_size,
+                                     ctx->opts.limits.max_entries_per_ifd,
+                                     &ifd_off)) {
+        return 1;
+    }
+    if (!omc_exif_decode_ifd_blob_loose(ctx, raw, raw_size, ifd_off,
+                                        &mn_opts)) {
+        return 0;
+    }
+    return omc_exif_decode_sigma_binary_subdirs(ctx);
+}
+
+static int
+omc_exif_decode_motorola_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
+                                   omc_u64 raw_size)
+{
+    omc_exif_opts mn_opts;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 6U) {
+        return 1;
+    }
+
+    mn_opts = ctx->opts;
+    mn_opts.decode_printim = 0;
+    mn_opts.decode_geotiff = 0;
+    mn_opts.decode_makernote = 0;
+    mn_opts.decode_embedded_containers = 0;
+    omc_exif_set_motorola_tokens(&mn_opts);
+
+    return omc_exif_decode_ifd_blob_loose(ctx, raw, raw_size, 0U, &mn_opts);
+}
+
 static omc_exif_mn_vendor
 omc_exif_detect_makernote_vendor(omc_exif_ctx* ctx, const omc_u8* raw,
                                  omc_u64 raw_size)
@@ -4627,6 +4992,10 @@ omc_exif_detect_makernote_vendor(omc_exif_ctx* ctx, const omc_u8* raw,
     if (raw != (const omc_u8*)0 && raw_size >= 4U
         && (memcmp(raw, "SONY", 4U) == 0 || memcmp(raw, "VHAB", 4U) == 0)) {
         return OMC_EXIF_MN_SONY;
+    }
+    if (raw != (const omc_u8*)0 && raw_size >= 5U
+        && memcmp(raw, "SIGMA", 5U) == 0) {
+        return OMC_EXIF_MN_SIGMA;
     }
     if (raw != (const omc_u8*)0 && raw_size >= 8U
         && memcmp(raw, "RICOH\0", 6U) == 0
@@ -4717,6 +5086,9 @@ omc_exif_detect_makernote_vendor(omc_exif_ctx* ctx, const omc_u8* raw,
     if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "Sony")) {
         return OMC_EXIF_MN_SONY;
     }
+    if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "SIGMA")) {
+        return OMC_EXIF_MN_SIGMA;
+    }
     if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "FUJIFILM")) {
         return OMC_EXIF_MN_FUJI;
     }
@@ -4731,6 +5103,9 @@ omc_exif_detect_makernote_vendor(omc_exif_ctx* ctx, const omc_u8* raw,
     }
     if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "RICOH")) {
         return OMC_EXIF_MN_RICOH;
+    }
+    if (omc_exif_ascii_contains_nocase(make_text, make_size, "MINOLTA")) {
+        return OMC_EXIF_MN_MINOLTA;
     }
     if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "OLYMPUS")
         || omc_exif_ascii_starts_with_nocase(make_text, make_size, "OMDS")
@@ -4755,6 +5130,9 @@ omc_exif_detect_makernote_vendor(omc_exif_ctx* ctx, const omc_u8* raw,
     }
     if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "SAMSUNG")) {
         return OMC_EXIF_MN_SAMSUNG;
+    }
+    if (omc_exif_ascii_starts_with_nocase(make_text, make_size, "Motorola")) {
+        return OMC_EXIF_MN_MOTOROLA;
     }
     return OMC_EXIF_MN_UNKNOWN;
 }
@@ -6401,6 +6779,46 @@ omc_exif_maybe_mark_contextual_name(const omc_exif_ctx* ctx, omc_entry* entry)
             entry->origin.name_context_variant = 1U;
         }
         return;
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_motorola0")
+        && entry->key.u.exif_tag.tag == 0x6420U
+        && omc_exif_motorola_model_prefers_placeholder(model_text,
+                                                       model_size)) {
+        entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+        entry->origin.name_context_kind
+            = OMC_ENTRY_NAME_CTX_MOTOROLA_MAIN_6420;
+        entry->origin.name_context_variant = 1U;
+        return;
+    }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_sigma0")) {
+        int prefer_placeholder;
+
+        prefer_placeholder = 0;
+        if (entry->key.u.exif_tag.tag == 0x0033U
+            && omc_exif_sigma_main_0033_prefers_placeholder(model_text,
+                                                            model_size)) {
+            prefer_placeholder = 1;
+        }
+        if (entry->key.u.exif_tag.tag == 0x0034U
+            && (omc_exif_sigma_main_0033_prefers_placeholder(model_text,
+                                                             model_size)
+                || omc_exif_sigma_main_sd_quattro_h_prefers_placeholder(
+                    model_text, model_size, entry->key.u.exif_tag.tag))) {
+            prefer_placeholder = 1;
+        }
+        if (omc_exif_sigma_main_fp_l_prefers_placeholder(
+                model_text, model_size, entry->key.u.exif_tag.tag)
+            || omc_exif_sigma_main_sd_quattro_h_prefers_placeholder(
+                model_text, model_size, entry->key.u.exif_tag.tag)) {
+            prefer_placeholder = 1;
+        }
+        if (prefer_placeholder) {
+            entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+            entry->origin.name_context_kind
+                = OMC_ENTRY_NAME_CTX_SIGMA_MAIN_COMPAT;
+            entry->origin.name_context_variant = 1U;
+            return;
+        }
     }
     if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_pentax0")
         && entry->key.u.exif_tag.tag == 0x0062U
@@ -9770,12 +10188,13 @@ omc_exif_decode_hp_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
 }
 
 static int
-omc_exif_decode_kodak_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
-                                omc_u64 raw_size)
+omc_exif_decode_kodak_kdk_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
+                                    omc_u64 raw_size)
 {
     const omc_u8* model_text;
     omc_u8 buf[11];
     omc_u16 value16;
+    omc_u32 value32;
     omc_u8 quality8;
     omc_u8 burst8;
     omc_u8 month8;
@@ -9784,7 +10203,6 @@ omc_exif_decode_kodak_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
     omc_u8 minute8;
     omc_u8 second8;
     omc_u8 frac8;
-    omc_u32 start;
     omc_u32 trimmed;
     omc_exif_status status;
     omc_u32 order;
@@ -9882,8 +10300,667 @@ omc_exif_decode_kodak_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
         }
     }
 
-    start = 0U;
-    (void)start;
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x20U, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak0", 0x0018U,
+                                                order++, value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u8_raw(raw, raw_size, 0x23U, &quality8)) {
+        status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak0", 0x001BU,
+                                               order++, quality8);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u8_raw(raw, raw_size, 0x21U, &burst8)) {
+        status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak0", 0x001CU,
+                                               order++, burst8);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x24U, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak0", 0x001DU,
+                                                order++, value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x26U, &value16)) {
+        status = omc_exif_emit_derived_exif_urational(
+            ctx, "mk_kodak0", 0x001EU, order++, value16, 100U);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u32le_raw(raw, raw_size, 0x28U, &value32)) {
+        status = omc_exif_emit_derived_exif_urational(
+            ctx, "mk_kodak0", 0x0020U, order++, value32, 100000U);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x2CU, &value16)) {
+        status = omc_exif_emit_derived_exif_i16(ctx, "mk_kodak0", 0x0024U,
+                                                order++, (omc_s16)value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x2EU, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak0", 0x0026U,
+                                                order++, value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x30U, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak0", 0x0028U,
+                                                order++, value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x34U, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak0", 0x002CU,
+                                                order++, value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x38U, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak0", 0x0030U,
+                                                order++, value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x3CU, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak0", 0x0034U,
+                                                order++, value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x40U, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak0", 0x0038U,
+                                                order++, value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x42U, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak0", 0x003AU,
+                                                order++, value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x44U, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak0", 0x003CU,
+                                                order++, value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x46U, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak0", 0x003EU,
+                                                order++, value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u8_raw(raw, raw_size, 0x48U, &quality8)) {
+        status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak0", 0x0040U,
+                                               order++, quality8);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u8_raw(raw, raw_size, 0x60U, &quality8)) {
+        status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak0", 0x005CU,
+                                               order++, quality8);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u8_raw(raw, raw_size, 0x5CU, &quality8)) {
+        status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak0", 0x005DU,
+                                               order++, quality8);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u8_raw(raw, raw_size, 0x66U, &quality8)) {
+        status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak0", 0x005EU,
+                                               order++, quality8);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u8_raw(raw, raw_size, 0x68U, &quality8)) {
+        status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak0", 0x0060U,
+                                               order++, quality8);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x6AU, &value16)) {
+        status = omc_exif_emit_derived_exif_urational(
+            ctx, "mk_kodak0", 0x0062U, order++, value16, 100U);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u8_raw(raw, raw_size, 0x65U, &quality8)) {
+        status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak0", 0x0064U,
+                                               order++, quality8);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u16le_raw(raw, raw_size, 0x12U, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak0", 0x0066U,
+                                                order++, value16);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u8_raw(raw, raw_size, 0x5EU, &quality8)) {
+        status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak0", 0x0068U,
+                                               order++, quality8);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+    if (omc_exif_read_u8_raw(raw, raw_size, 0x67U, &quality8)) {
+        status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak0", 0x006BU,
+                                               order++, quality8);
+        if (status != OMC_EXIF_OK) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int
+omc_exif_kodak_serial_only_matched(const omc_u8* raw, omc_u64 raw_size)
+{
+    omc_u32 n;
+    int have_digit;
+    int have_alpha;
+
+    if (raw == (const omc_u8*)0 || raw_size < 8U) {
+        return 0;
+    }
+
+    n = 0U;
+    while ((omc_u64)n < raw_size && n < 32U) {
+        omc_u8 c;
+
+        c = raw[n];
+        if (c == 0U) {
+            break;
+        }
+        if (c < 0x20U || c > 0x7EU) {
+            break;
+        }
+        ++n;
+    }
+    if (n < 8U) {
+        return 0;
+    }
+
+    have_digit = 0;
+    have_alpha = 0;
+    while (n != 0U) {
+        omc_u8 c;
+
+        --n;
+        c = raw[n];
+        if (c >= (omc_u8)'0' && c <= (omc_u8)'9') {
+            have_digit = 1;
+        } else if ((c >= (omc_u8)'A' && c <= (omc_u8)'Z')
+                   || (c >= (omc_u8)'a' && c <= (omc_u8)'z')) {
+            have_alpha = 1;
+        }
+    }
+
+    return have_digit && have_alpha;
+}
+
+static int
+omc_exif_decode_kodak_serial_only(omc_exif_ctx* ctx, const omc_u8* raw,
+                                  omc_u64 raw_size, int* out_matched)
+{
+    omc_u32 n;
+    omc_exif_status status;
+
+    if (out_matched != (int*)0) {
+        *out_matched = 0;
+    }
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0) {
+        return 1;
+    }
+    if (!omc_exif_kodak_serial_only_matched(raw, raw_size)) {
+        return 1;
+    }
+
+    n = 0U;
+    while ((omc_u64)n < raw_size && n < 32U) {
+        omc_u8 c;
+
+        c = raw[n];
+        if (c == 0U || c < 0x20U || c > 0x7EU) {
+            break;
+        }
+        ++n;
+    }
+
+    status = omc_exif_emit_derived_exif_text(ctx, "mk_kodak_type7_0", 0x0000U,
+                                             0U, raw, n);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+    if (out_matched != (int*)0) {
+        *out_matched = 1;
+    }
+    return 1;
+}
+
+static int
+omc_exif_kodak_ascii_blob(const omc_u8* raw, omc_u64 raw_size,
+                          omc_u64 off, omc_u64 len)
+{
+    omc_u64 i;
+    int have_printable;
+
+    if (raw == (const omc_u8*)0 || off > raw_size || len > (raw_size - off)) {
+        return 0;
+    }
+
+    have_printable = 0;
+    for (i = 0U; i < len; ++i) {
+        omc_u8 c;
+
+        c = raw[(omc_size)(off + i)];
+        if (c == 0U) {
+            break;
+        }
+        if (c < 0x20U || c > 0x7EU) {
+            return 0;
+        }
+        have_printable = 1;
+    }
+    return have_printable;
+}
+
+static int
+omc_exif_emit_kodak_trimmed_text(omc_exif_ctx* ctx, const char* ifd_name,
+                                 omc_u16 tag, omc_u32 order,
+                                 const omc_u8* raw, omc_u32 raw_size)
+{
+    omc_u32 start;
+    omc_u32 trimmed;
+    omc_exif_status status;
+
+    trimmed = omc_exif_trim_ascii_span(raw, raw_size, &start);
+    if (trimmed == 0U) {
+        return 1;
+    }
+
+    status = omc_exif_emit_derived_exif_text(ctx, ifd_name, tag, order,
+                                             raw + start, trimmed);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+    return 1;
+}
+
+static int
+omc_exif_decode_kodak_type2(omc_exif_ctx* ctx, const omc_u8* raw,
+                            omc_u64 raw_size, int* out_matched)
+{
+    omc_u32 width;
+    omc_u32 height;
+    omc_exif_status status;
+    omc_u32 order;
+
+    if (out_matched != (int*)0) {
+        *out_matched = 0;
+    }
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 0x74U) {
+        return 1;
+    }
+    if (!omc_exif_kodak_ascii_blob(raw, raw_size, 0x08U, 32U)
+        || !omc_exif_kodak_ascii_blob(raw, raw_size, 0x28U, 32U)
+        || !omc_exif_read_u32be_raw(raw, raw_size, 0x6CU, &width)
+        || !omc_exif_read_u32be_raw(raw, raw_size, 0x70U, &height)
+        || width == 0U || height == 0U || width > 200000U
+        || height > 200000U) {
+        return 1;
+    }
+
+    order = 0U;
+    if (!omc_exif_emit_kodak_trimmed_text(ctx, "mk_kodak_type2_0", 0x0008U,
+                                          order++, raw + 0x08U, 32U)
+        || !omc_exif_emit_kodak_trimmed_text(ctx, "mk_kodak_type2_0", 0x0028U,
+                                             order++, raw + 0x28U, 32U)) {
+        return 0;
+    }
+
+    status = omc_exif_emit_derived_exif_u32(ctx, "mk_kodak_type2_0", 0x006CU,
+                                            order++, width);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+    status = omc_exif_emit_derived_exif_u32(ctx, "mk_kodak_type2_0", 0x0070U,
+                                            order++, height);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+
+    if (out_matched != (int*)0) {
+        *out_matched = 1;
+    }
+    return 1;
+}
+
+static int
+omc_exif_kodak_model_has(const omc_u8* model_text, omc_u32 model_size,
+                         const char* needle)
+{
+    if (model_text == (const omc_u8*)0 || model_size == 0U
+        || needle == (const char*)0) {
+        return 0;
+    }
+    return omc_exif_ascii_contains_nocase(model_text, model_size, needle);
+}
+
+static int
+omc_exif_kodak_model_is_type5(const omc_u8* model_text, omc_u32 model_size)
+{
+    return omc_exif_kodak_model_has(model_text, model_size, "CX4200")
+           || omc_exif_kodak_model_has(model_text, model_size, "CX4210")
+           || omc_exif_kodak_model_has(model_text, model_size, "CX4230")
+           || omc_exif_kodak_model_has(model_text, model_size, "CX4300")
+           || omc_exif_kodak_model_has(model_text, model_size, "CX4310")
+           || omc_exif_kodak_model_has(model_text, model_size, "CX6200")
+           || omc_exif_kodak_model_has(model_text, model_size, "CX6230");
+}
+
+static int
+omc_exif_kodak_model_is_type11(const omc_u8* model_text, omc_u32 model_size)
+{
+    return omc_exif_kodak_model_has(model_text, model_size, "PIXPRO S-1")
+           || omc_exif_kodak_model_has(model_text, model_size,
+                                       "PIXPRO 4KVR360")
+           || omc_exif_kodak_model_has(model_text, model_size,
+                                       "KODAK PIXPRO SL10")
+           || omc_exif_kodak_model_has(model_text, model_size,
+                                       "KODAK PIXPRO SP360");
+}
+
+static int
+omc_exif_decode_kodak_type5(omc_exif_ctx* ctx, const omc_u8* raw,
+                            omc_u64 raw_size, const omc_u8* model_text,
+                            omc_u32 model_size, int* out_matched)
+{
+    omc_u32 exposure_time;
+    omc_u16 fnumber;
+    omc_u16 iso;
+    omc_u16 optical_zoom;
+    omc_u16 digital_zoom;
+    omc_u8 white_balance;
+    omc_u8 flash_mode;
+    omc_u8 image_rotated;
+    omc_u8 macro;
+    omc_exif_status status;
+    omc_u32 order;
+
+    if (out_matched != (int*)0) {
+        *out_matched = 0;
+    }
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 0x2CU
+        || !omc_exif_kodak_model_is_type5(model_text, model_size)
+        || !omc_exif_read_u32be_raw(raw, raw_size, 0x14U, &exposure_time)
+        || !omc_exif_read_u8_raw(raw, raw_size, 0x1AU, &white_balance)
+        || !omc_exif_read_u16be_raw(raw, raw_size, 0x1CU, &fnumber)
+        || !omc_exif_read_u16be_raw(raw, raw_size, 0x1EU, &iso)
+        || !omc_exif_read_u16be_raw(raw, raw_size, 0x20U, &optical_zoom)
+        || !omc_exif_read_u16be_raw(raw, raw_size, 0x22U, &digital_zoom)
+        || !omc_exif_read_u8_raw(raw, raw_size, 0x27U, &flash_mode)
+        || !omc_exif_read_u8_raw(raw, raw_size, 0x2AU, &image_rotated)
+        || !omc_exif_read_u8_raw(raw, raw_size, 0x2BU, &macro)) {
+        return 1;
+    }
+
+    order = 0U;
+    status = omc_exif_emit_derived_exif_u32(ctx, "mk_kodak_type5_0", 0x0014U,
+                                            order++, exposure_time);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+    status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak_type5_0", 0x001AU,
+                                           order++, white_balance);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+    status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak_type5_0", 0x001CU,
+                                            order++, fnumber);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+    status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak_type5_0", 0x001EU,
+                                            order++, iso);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+    status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak_type5_0", 0x0020U,
+                                            order++, optical_zoom);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+    status = omc_exif_emit_derived_exif_u16(ctx, "mk_kodak_type5_0", 0x0022U,
+                                            order++, digital_zoom);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+    status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak_type5_0", 0x0027U,
+                                           order++, flash_mode);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+    status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak_type5_0", 0x002AU,
+                                           order++, image_rotated);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+    status = omc_exif_emit_derived_exif_u8(ctx, "mk_kodak_type5_0", 0x002BU,
+                                           order++, macro);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+
+    if (out_matched != (int*)0) {
+        *out_matched = 1;
+    }
+    return 1;
+}
+
+static int
+omc_exif_kodak_absolute_candidate(const omc_u8* bytes, omc_u64 size,
+                                  omc_u64 ifd_off, omc_exif_cfg cfg,
+                                  omc_u32 max_entries_per_ifd)
+{
+    omc_u16 entry_count16;
+    omc_u64 table_off;
+    omc_u64 table_bytes;
+
+    if (bytes == (const omc_u8*)0 || ifd_off >= size
+        || !omc_exif_read_u16(cfg, bytes, (omc_size)size, ifd_off,
+                              &entry_count16)
+        || entry_count16 == 0U || entry_count16 > max_entries_per_ifd) {
+        return 0;
+    }
+
+    table_off = ifd_off + 2U;
+    if (!omc_exif_mul_u64((omc_u64)entry_count16, 12U, &table_bytes)) {
+        return 0;
+    }
+    if (table_off > size || table_bytes > (size - table_off)
+        || 4U > ((size - table_off) - table_bytes)) {
+        return 0;
+    }
+    return 1;
+}
+
+static int
+omc_exif_decode_kodak_absolute_ifd(omc_exif_ctx* ctx, const omc_u8* raw,
+                                   omc_u64 raw_size, const omc_u8* model_text,
+                                   omc_u32 model_size, int* out_matched)
+{
+    omc_exif_opts mn_opts;
+    omc_exif_cfg cfg;
+    omc_u64 ifd_off;
+    const char* subtable;
+    char ifd_name[64];
+    omc_u64 maker_note_off;
+
+    if (out_matched != (int*)0) {
+        *out_matched = 0;
+    }
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0
+        || raw == (const omc_u8*)0 || raw_size < 8U || raw < ctx->bytes
+        || raw > (ctx->bytes + ctx->size)) {
+        return 1;
+    }
+
+    maker_note_off = (omc_u64)(raw - ctx->bytes);
+    if ((raw[0U] == (omc_u8)'I' && raw[1U] == (omc_u8)'I')
+        || (raw[0U] == (omc_u8)'M' && raw[1U] == (omc_u8)'M')) {
+        cfg = omc_exif_make_classic_cfg(raw[0U] == (omc_u8)'I');
+        ifd_off = maker_note_off + 2U;
+        if (!omc_exif_kodak_absolute_candidate(ctx->bytes,
+                                               (omc_u64)ctx->size, ifd_off,
+                                               cfg,
+                                               ctx->opts.limits
+                                                   .max_entries_per_ifd)) {
+            return 1;
+        }
+        subtable = "type10";
+    } else {
+        ifd_off = maker_note_off;
+        cfg = omc_exif_make_classic_cfg(1);
+        if (omc_exif_kodak_absolute_candidate(ctx->bytes, (omc_u64)ctx->size,
+                                              ifd_off, cfg,
+                                              ctx->opts.limits
+                                                  .max_entries_per_ifd)) {
+            /* use little-endian */
+        } else {
+            cfg = omc_exif_make_classic_cfg(0);
+            if (!omc_exif_kodak_absolute_candidate(
+                    ctx->bytes, (omc_u64)ctx->size, ifd_off, cfg,
+                    ctx->opts.limits.max_entries_per_ifd)) {
+                return 1;
+            }
+        }
+        subtable = omc_exif_kodak_model_is_type11(model_text, model_size)
+                       ? "type11"
+                       : "type8";
+    }
+
+    if (!omc_exif_make_subifd_name("mk_kodak", subtable, 0U,
+                                   ifd_name, sizeof(ifd_name))) {
+        return 0;
+    }
+
+    mn_opts = ctx->opts;
+    mn_opts.decode_printim = 0;
+    mn_opts.decode_geotiff = 0;
+    mn_opts.decode_makernote = 0;
+    mn_opts.decode_embedded_containers = 0;
+
+    if (!omc_exif_decode_ifd_blob_loose_named_cfg(ctx, ctx->bytes,
+                                                  (omc_u64)ctx->size, ifd_off,
+                                                  &mn_opts, cfg, ifd_name)) {
+        return 0;
+    }
+    if (out_matched != (int*)0) {
+        *out_matched = 1;
+    }
+    return 1;
+}
+
+static int
+omc_exif_decode_kodak_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
+                                omc_u64 raw_size)
+{
+    const omc_u8* model_text;
+    omc_u32 model_size;
+    int matched;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size < 8U) {
+        return 1;
+    }
+
+    if (raw_size >= 3U && memcmp(raw, "KDK", 3U) == 0) {
+        return omc_exif_decode_kodak_kdk_makernote(ctx, raw, raw_size);
+    }
+
+    if (!omc_exif_decode_kodak_serial_only(ctx, raw, raw_size, &matched)) {
+        return 0;
+    }
+    if (matched) {
+        return 1;
+    }
+
+    model_text = (const omc_u8*)0;
+    model_size = 0U;
+    if (ctx->store != (omc_store*)0) {
+        (void)omc_exif_find_first_text(ctx->store, "ifd0", 0x0110U,
+                                       &model_text, &model_size);
+    }
+    if (model_text == (const omc_u8*)0) {
+        (void)omc_exif_find_outer_ifd0_ascii(ctx, 0x0110U,
+                                             &model_text, &model_size);
+    }
+
+    if (!omc_exif_decode_kodak_type5(ctx, raw, raw_size, model_text,
+                                     model_size, &matched)) {
+        return 0;
+    }
+    if (matched) {
+        return 1;
+    }
+
+    if (!omc_exif_decode_kodak_type2(ctx, raw, raw_size, &matched)) {
+        return 0;
+    }
+    if (matched) {
+        return 1;
+    }
+
+    if (!omc_exif_decode_kodak_absolute_ifd(ctx, raw, raw_size, model_text,
+                                            model_size, &matched)) {
+        return 0;
+    }
     return 1;
 }
 
@@ -11387,6 +12464,9 @@ omc_exif_decode_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
         return omc_exif_decode_sony_makernote(ctx, maker_note_off, raw,
                                               raw_size);
     }
+    if (vendor == OMC_EXIF_MN_SIGMA) {
+        return omc_exif_decode_sigma_makernote(ctx, raw, raw_size);
+    }
     if (vendor == OMC_EXIF_MN_CANON) {
         return omc_exif_decode_canon_makernote(ctx, raw, raw_size);
     }
@@ -11415,6 +12495,12 @@ omc_exif_decode_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
     }
     if (vendor == OMC_EXIF_MN_SAMSUNG) {
         return omc_exif_decode_samsung_makernote(ctx, raw, raw_size);
+    }
+    if (vendor == OMC_EXIF_MN_MINOLTA) {
+        return omc_exif_decode_minolta_makernote(ctx, raw, raw_size);
+    }
+    if (vendor == OMC_EXIF_MN_MOTOROLA) {
+        return omc_exif_decode_motorola_makernote(ctx, raw, raw_size);
     }
     if (vendor == OMC_EXIF_MN_PENTAX) {
         return omc_exif_decode_pentax_makernote(ctx, raw, raw_size);

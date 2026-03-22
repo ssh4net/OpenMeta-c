@@ -87,6 +87,42 @@ omc_exif_name_write_placeholder(const char* prefix, omc_u16 tag,
     return omc_exif_name_write(name, out_name, out_cap, out_len);
 }
 
+static int
+omc_exif_sigma_main_prefers_placeholder(omc_u16 tag)
+{
+    switch (tag) {
+    case 0x001AU:
+    case 0x001BU:
+    case 0x0022U:
+    case 0x0024U:
+    case 0x002CU:
+    case 0x0031U:
+    case 0x0032U:
+    case 0x0035U:
+    case 0x0039U:
+    case 0x003AU:
+    case 0x003BU:
+    case 0x003CU:
+    case 0x0047U:
+    case 0x0113U:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static const char*
+omc_exif_sigma_main_fixed_compat_name(omc_u16 tag)
+{
+    switch (tag) {
+    case 0x001CU: return "PreviewImageStart";
+    case 0x001DU: return "PreviewImageLength";
+    case 0x001FU: return "MakerNoteVersion";
+    case 0x0030U: return "Calibration";
+    default: return (const char*)0;
+    }
+}
+
 static const char*
 omc_exif_lookup_exact_name(const char* ifd_name, omc_u16 tag)
 {
@@ -115,7 +151,38 @@ omc_exif_lookup_exact_name(const char* ifd_name, omc_u16 tag)
         { "mk_casio_type2_0", 0x0008U, "QualityMode" },
         { "mk_fuji0", 0x1304U, "GEImageSize" },
         { "mk_fuji0", 0x144AU, "WBRed" },
+        { "mk_sigma0", 0x000CU, "ExposureAdjust" },
+        { "mk_sigma0", 0x001AU, "PreviewImageStart" },
+        { "mk_sigma0", 0x001CU, "PreviewImageSize" },
+        { "mk_sigma0", 0x001DU, "MakerNoteVersion" },
+        { "mk_sigma0", 0x0026U, "FileFormat" },
+        { "mk_sigma0", 0x0033U, "ExposureTime2" },
+        { "mk_sigma0", 0x0034U, "BurstShot" },
+        { "mk_sigma0", 0x004BU, "ExposureTime2" },
+        { "mk_sigma_wbsettings_0", 0x0000U, "WB_RGBLevelsAuto" },
+        { "mk_sigma_wbsettings_0", 0x0003U, "WB_RGBLevelsDaylight" },
+        { "mk_sigma_wbsettings_0", 0x0006U, "WB_RGBLevelsShade" },
+        { "mk_sigma_wbsettings_0", 0x0009U, "WB_RGBLevelsOvercast" },
+        { "mk_sigma_wbsettings_0", 0x000CU, "WB_RGBLevelsIncandescent" },
+        { "mk_sigma_wbsettings_0", 0x000FU, "WB_RGBLevelsFluorescent" },
+        { "mk_sigma_wbsettings_0", 0x0012U, "WB_RGBLevelsFlash" },
+        { "mk_sigma_wbsettings_0", 0x0015U, "WB_RGBLevelsCustom1" },
+        { "mk_sigma_wbsettings_0", 0x0018U, "WB_RGBLevelsCustom2" },
+        { "mk_sigma_wbsettings_0", 0x001BU, "WB_RGBLevelsCustom3" },
+        { "mk_sigma_wbsettings2_0", 0x0000U, "WB_RGBLevelsUnknown0" },
+        { "mk_sigma_wbsettings2_0", 0x0003U, "WB_RGBLevelsUnknown1" },
+        { "mk_sigma_wbsettings2_0", 0x0006U, "WB_RGBLevelsUnknown2" },
+        { "mk_sigma_wbsettings2_0", 0x0009U, "WB_RGBLevelsUnknown3" },
+        { "mk_sigma_wbsettings2_0", 0x000CU, "WB_RGBLevelsUnknown4" },
+        { "mk_sigma_wbsettings2_0", 0x000FU, "WB_RGBLevelsUnknown5" },
+        { "mk_sigma_wbsettings2_0", 0x0012U, "WB_RGBLevelsUnknown6" },
+        { "mk_sigma_wbsettings2_0", 0x0015U, "WB_RGBLevelsUnknown7" },
+        { "mk_sigma_wbsettings2_0", 0x0018U, "WB_RGBLevelsUnknown8" },
+        { "mk_sigma_wbsettings2_0", 0x001BU, "WB_RGBLevelsUnknown9" },
         { "mk_kodak0", 0x0028U, "Distance1" },
+        { "mk_kodak_type2_0", 0x0028U, "KodakModel" },
+        { "mk_kodak_type5_0", 0x0014U, "ExposureTime" },
+        { "mk_kodak_type7_0", 0x0000U, "SerialNumber" },
         { "mk_minolta0", 0x0018U, "ImageStabilization" },
         { "mk_minolta0", 0x0103U, "MinoltaImageSize" },
         { "mk_minolta0", 0x0113U, "ImageStabilization" },
@@ -202,6 +269,38 @@ omc_exif_tag_name_impl(const char* ifd_name, omc_u16 tag,
     }
     if (strcmp(ifd_name, "mk_fuji0") == 0) {
         return omc_exif_name_write_placeholder("FujiFilm", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_sigma0") == 0) {
+        return omc_exif_name_write_placeholder("Sigma", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_kodak0") == 0) {
+        return omc_exif_name_write_placeholder("Kodak", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_kodak_type2_0") == 0) {
+        return omc_exif_name_write_placeholder("Kodak_Type2", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_kodak_type5_0") == 0) {
+        return omc_exif_name_write_placeholder("Kodak_Type5", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_kodak_type7_0") == 0) {
+        return omc_exif_name_write_placeholder("Kodak_Type7", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_kodak_type8_0") == 0) {
+        return omc_exif_name_write_placeholder("Kodak_Type8", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_kodak_type10_0") == 0) {
+        return omc_exif_name_write_placeholder("Kodak_Type10", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_kodak_type11_0") == 0) {
+        return omc_exif_name_write_placeholder("Kodak_Type11", tag,
                                                out_name, out_cap, out_len);
     }
     if (strcmp(ifd_name, "mk_casio_type2_0") == 0) {
@@ -368,6 +467,19 @@ omc_exif_entry_name(const omc_store* store, const omc_entry* entry,
         return status;
     }
 
+    if (strcmp(ifd_name, "mk_sigma0") == 0) {
+        const char* compat;
+
+        compat = omc_exif_sigma_main_fixed_compat_name(entry->key.u.exif_tag.tag);
+        if (compat != (const char*)0) {
+            return omc_exif_name_write(compat, out_name, out_cap, out_len);
+        }
+        if (omc_exif_sigma_main_prefers_placeholder(entry->key.u.exif_tag.tag)) {
+            return omc_exif_name_write_placeholder("Sigma",
+                                                   entry->key.u.exif_tag.tag,
+                                                   out_name, out_cap, out_len);
+        }
+    }
     if (strcmp(ifd_name, "mk_samsung_type2_0") == 0
         && entry->key.u.exif_tag.tag == 0xA002U) {
         return omc_exif_name_write("Samsung_Type2_0xa002",
@@ -464,6 +576,13 @@ omc_exif_entry_name(const omc_store* store, const omc_entry* entry,
         if (entry->origin.name_context_variant == 1U) {
             return omc_exif_name_write("Motorola_0x6420",
                                        out_name, out_cap, out_len);
+        }
+        break;
+    case OMC_ENTRY_NAME_CTX_SIGMA_MAIN_COMPAT:
+        if (entry->origin.name_context_variant == 1U) {
+            return omc_exif_name_write_placeholder("Sigma",
+                                                   entry->key.u.exif_tag.tag,
+                                                   out_name, out_cap, out_len);
         }
         break;
     case OMC_ENTRY_NAME_CTX_RICOH_MAIN_COMPAT:
