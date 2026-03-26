@@ -192,7 +192,10 @@ omc_exif_lookup_exact_name(const char* ifd_name, omc_u16 tag)
         { "mk_motorola0", 0x665EU, "Sensor" },
         { "mk_motorola0", 0x6705U, "ManufactureDate" },
         { "mk_nikonsettings_main_0", 0x0001U, "ISOAutoHiLimit" },
+        { "mk_nikonsettings_main_0", 0x001DU, "AF-CPrioritySel" },
         { "mk_nikonsettings_main_0", 0x0046U, "OpticalVR" },
+        { "mk_nikonsettings_main_0", 0x0103U, "HDMIOutputHDR" },
+        { "mk_nikonsettings_main_0", 0x010BU, "BracketIncrement" },
         { "mk_olympus_equipment0", 0x0040U, "CompressedImageSize" },
         { "mk_olympus_equipment_0", 0x0040U, "CompressedImageSize" },
         { "mk_olympus_fetags_0", 0x0311U, "CoringValues" },
@@ -325,6 +328,10 @@ omc_exif_tag_name_impl(const char* ifd_name, omc_u16 tag,
     }
     if (strcmp(ifd_name, "mk_motorola0") == 0) {
         return omc_exif_name_write_placeholder("Motorola", tag,
+                                               out_name, out_cap, out_len);
+    }
+    if (strcmp(ifd_name, "mk_nikon0") == 0) {
+        return omc_exif_name_write_placeholder("Nikon", tag,
                                                out_name, out_cap, out_len);
     }
     if (omc_exif_name_starts_with(ifd_name, "mk_nikonsettings_main_")) {
@@ -601,6 +608,160 @@ omc_exif_entry_name(const omc_store* store, const omc_entry* entry,
             return omc_exif_name_write_placeholder("NikonSettings",
                                                    entry->key.u.exif_tag.tag,
                                                    out_name, out_cap, out_len);
+        }
+        if (entry->origin.name_context_variant == 2U) {
+            return omc_exif_name_write("MovieFunc1Button",
+                                       out_name, out_cap, out_len);
+        }
+        if (entry->origin.name_context_variant == 3U) {
+            return omc_exif_name_write("MovieFunc2Button",
+                                       out_name, out_cap, out_len);
+        }
+        break;
+    case OMC_ENTRY_NAME_CTX_NIKON_MAIN_Z:
+        switch (entry->key.u.exif_tag.tag) {
+        case 0x002BU:
+            return omc_exif_name_write("ImageArea",
+                                       out_name, out_cap, out_len);
+        case 0x002CU:
+            return omc_exif_name_write("AFImageHeight",
+                                       out_name, out_cap, out_len);
+        case 0x002EU:
+            return omc_exif_name_write("AFAreaXPosition",
+                                       out_name, out_cap, out_len);
+        case 0x002FU:
+            return omc_exif_name_write("FocusPositionHorizontal",
+                                       out_name, out_cap, out_len);
+        case 0x0031U:
+            return omc_exif_name_write("FocusPositionVertical",
+                                       out_name, out_cap, out_len);
+        case 0x0032U:
+            return omc_exif_name_write("AFAreaWidth",
+                                       out_name, out_cap, out_len);
+        case 0x0035U:
+            return omc_exif_name_write("LensMountType",
+                                       out_name, out_cap, out_len);
+        default:
+            break;
+        }
+        break;
+    case OMC_ENTRY_NAME_CTX_NIKON_MAIN_COMPACT_TYPE2:
+        switch (entry->key.u.exif_tag.tag) {
+        case 0x0002U:
+            return omc_exif_name_write("Nikon_Type2_0x0002",
+                                       out_name, out_cap, out_len);
+        case 0x0003U:
+            return omc_exif_name_write("Quality",
+                                       out_name, out_cap, out_len);
+        case 0x0004U:
+            return omc_exif_name_write("ColorMode",
+                                       out_name, out_cap, out_len);
+        case 0x0005U:
+            return omc_exif_name_write("ImageAdjustment",
+                                       out_name, out_cap, out_len);
+        case 0x0006U:
+            return omc_exif_name_write("CCDSensitivity",
+                                       out_name, out_cap, out_len);
+        case 0x0007U:
+            return omc_exif_name_write("WhiteBalance",
+                                       out_name, out_cap, out_len);
+        case 0x0008U:
+            return omc_exif_name_write("Focus",
+                                       out_name, out_cap, out_len);
+        case 0x0009U:
+            return omc_exif_name_write("Nikon_Type2_0x0009",
+                                       out_name, out_cap, out_len);
+        case 0x000AU:
+            return omc_exif_name_write("DigitalZoom",
+                                       out_name, out_cap, out_len);
+        case 0x000BU:
+            return omc_exif_name_write("Converter",
+                                       out_name, out_cap, out_len);
+        case 0x0F00U:
+            return omc_exif_name_write("Nikon_Type2_0x0f00",
+                                       out_name, out_cap, out_len);
+        default:
+            break;
+        }
+        break;
+    case OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_GROUPS:
+        switch (entry->key.u.exif_tag.tag) {
+        case 0x0011U:
+            if (entry->origin.name_context_variant == 5U) {
+                return omc_exif_name_write("FlashGroupAControlMode",
+                                           out_name, out_cap, out_len);
+            }
+            break;
+        case 0x0012U:
+            if (entry->origin.name_context_variant == 6U) {
+                return omc_exif_name_write("FlashGroupBControlMode",
+                                           out_name, out_cap, out_len);
+            }
+            if (entry->origin.name_context_variant == 7U) {
+                return omc_exif_name_write("FlashGroupCControlMode",
+                                           out_name, out_cap, out_len);
+            }
+            break;
+        case 0x0028U:
+            if (entry->origin.name_context_variant == 1U) {
+                return omc_exif_name_write("FlashGroupACompensation",
+                                           out_name, out_cap, out_len);
+            }
+            if (entry->origin.name_context_variant == 2U) {
+                return omc_exif_name_write("FlashGroupAOutput",
+                                           out_name, out_cap, out_len);
+            }
+            break;
+        case 0x0029U:
+            if (entry->origin.name_context_variant == 1U) {
+                return omc_exif_name_write("FlashGroupBCompensation",
+                                           out_name, out_cap, out_len);
+            }
+            if (entry->origin.name_context_variant == 2U) {
+                return omc_exif_name_write("FlashGroupBOutput",
+                                           out_name, out_cap, out_len);
+            }
+            break;
+        case 0x002AU:
+            if (entry->origin.name_context_variant == 1U) {
+                return omc_exif_name_write("FlashGroupCCompensation",
+                                           out_name, out_cap, out_len);
+            }
+            if (entry->origin.name_context_variant == 2U) {
+                return omc_exif_name_write("FlashGroupCOutput",
+                                           out_name, out_cap, out_len);
+            }
+            break;
+        default:
+            break;
+        }
+        break;
+    case OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY:
+        switch (entry->origin.name_context_variant) {
+        case 1U:
+        case 8U:
+            return omc_exif_name_write("FlashCompensation",
+                                       out_name, out_cap, out_len);
+        case 2U:
+            return omc_exif_name_write("FlashGroupACompensation",
+                                       out_name, out_cap, out_len);
+        case 3U:
+            return omc_exif_name_write("FlashGroupBCompensation",
+                                       out_name, out_cap, out_len);
+        case 4U:
+            return omc_exif_name_write("FlashGroupCCompensation",
+                                       out_name, out_cap, out_len);
+        case 5U:
+            return omc_exif_name_write("FlashGroupAControlMode",
+                                       out_name, out_cap, out_len);
+        case 6U:
+            return omc_exif_name_write("FlashGroupBControlMode",
+                                       out_name, out_cap, out_len);
+        case 7U:
+            return omc_exif_name_write("FlashGroupCControlMode",
+                                       out_name, out_cap, out_len);
+        default:
+            break;
         }
         break;
     case OMC_ENTRY_NAME_CTX_PENTAX_MAIN_0062:

@@ -15,6 +15,24 @@ typedef enum omc_jumbf_status {
     OMC_JUMBF_NOMEM = 4
 } omc_jumbf_status;
 
+typedef enum omc_c2pa_verify_backend {
+    OMC_C2PA_VERIFY_BACKEND_NONE = 0,
+    OMC_C2PA_VERIFY_BACKEND_AUTO = 1,
+    OMC_C2PA_VERIFY_BACKEND_NATIVE = 2,
+    OMC_C2PA_VERIFY_BACKEND_OPENSSL = 3
+} omc_c2pa_verify_backend;
+
+typedef enum omc_c2pa_verify_status {
+    OMC_C2PA_VERIFY_NOT_REQUESTED = 0,
+    OMC_C2PA_VERIFY_DISABLED_BY_BUILD = 1,
+    OMC_C2PA_VERIFY_BACKEND_UNAVAILABLE = 2,
+    OMC_C2PA_VERIFY_NO_SIGNATURES = 3,
+    OMC_C2PA_VERIFY_INVALID_SIGNATURE = 4,
+    OMC_C2PA_VERIFY_VERIFICATION_FAILED = 5,
+    OMC_C2PA_VERIFY_VERIFIED = 6,
+    OMC_C2PA_VERIFY_NOT_IMPLEMENTED = 7
+} omc_c2pa_verify_status;
+
 typedef struct omc_jumbf_limits {
     omc_u64 max_input_bytes;
     omc_u32 max_box_depth;
@@ -30,6 +48,10 @@ typedef struct omc_jumbf_limits {
 typedef struct omc_jumbf_opts {
     int decode_cbor;
     int detect_c2pa;
+    int verify_c2pa;
+    omc_c2pa_verify_backend verify_backend;
+    int verify_require_trusted_chain;
+    int verify_require_resolved_references;
     omc_jumbf_limits limits;
 } omc_jumbf_opts;
 
@@ -38,6 +60,8 @@ typedef struct omc_jumbf_res {
     omc_u32 boxes_decoded;
     omc_u32 cbor_items;
     omc_u32 entries_decoded;
+    omc_c2pa_verify_status verify_status;
+    omc_c2pa_verify_backend verify_backend_selected;
 } omc_jumbf_res;
 
 OMC_API void

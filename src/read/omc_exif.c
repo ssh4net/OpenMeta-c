@@ -54,6 +54,11 @@ omc_exif_entry_ifd_equals(const omc_store* store, const omc_entry* entry,
                           const char* ifd_name);
 
 static void
+omc_exif_mark_last_contextual_name(omc_exif_ctx* ctx,
+                                   omc_entry_name_ctx_kind kind,
+                                   omc_u8 variant);
+
+static void
 omc_exif_res_init(omc_exif_res* res)
 {
     res->status = OMC_EXIF_OK;
@@ -147,6 +152,30 @@ omc_exif_read_u32(omc_exif_cfg cfg, const omc_u8* bytes, omc_size size,
                      | (((omc_u32)bytes[(omc_size)offset + 1U]) << 16)
                      | (((omc_u32)bytes[(omc_size)offset + 2U]) << 8)
                      | (((omc_u32)bytes[(omc_size)offset + 3U]) << 0);
+    }
+    return 1;
+}
+
+static int
+omc_exif_write_u32(omc_exif_cfg cfg, omc_u8* bytes, omc_size size,
+                   omc_u64 offset, omc_u32 value)
+{
+    if (bytes == (omc_u8*)0) {
+        return 0;
+    }
+    if (offset > (omc_u64)size || ((omc_u64)size - offset) < 4U) {
+        return 0;
+    }
+    if (cfg.little_endian) {
+        bytes[(omc_size)offset + 0U] = (omc_u8)(value & 0xFFU);
+        bytes[(omc_size)offset + 1U] = (omc_u8)((value >> 8) & 0xFFU);
+        bytes[(omc_size)offset + 2U] = (omc_u8)((value >> 16) & 0xFFU);
+        bytes[(omc_size)offset + 3U] = (omc_u8)((value >> 24) & 0xFFU);
+    } else {
+        bytes[(omc_size)offset + 0U] = (omc_u8)((value >> 24) & 0xFFU);
+        bytes[(omc_size)offset + 1U] = (omc_u8)((value >> 16) & 0xFFU);
+        bytes[(omc_size)offset + 2U] = (omc_u8)((value >> 8) & 0xFFU);
+        bytes[(omc_size)offset + 3U] = (omc_u8)(value & 0xFFU);
     }
     return 1;
 }
@@ -4309,6 +4338,55 @@ omc_exif_emit_other_exif_bytes(omc_exif_ctx* ctx, const char* ifd_name,
     return OMC_EXIF_OK;
 }
 
+static omc_exif_status
+omc_exif_emit_other_exif_empty(omc_exif_ctx* ctx, const char* ifd_name,
+                               omc_u16 tag, omc_u32 order_in_block,
+                               omc_u16 wire_type, omc_u32 wire_count,
+                               omc_entry_flags flags)
+{
+    omc_entry entry;
+    omc_status st;
+    omc_byte_ref ifd_ref;
+    omc_exif_status status;
+
+    if (ctx == (omc_exif_ctx*)0 || ifd_name == (const char*)0) {
+        return OMC_EXIF_MALFORMED;
+    }
+    if (ctx->measure_only) {
+        return OMC_EXIF_OK;
+    }
+
+    status = omc_exif_store_cstr_len(ctx, ifd_name, strlen(ifd_name), &ifd_ref);
+    if (status != OMC_EXIF_OK) {
+        return status;
+    }
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_exif_tag(&entry.key, ifd_ref, tag);
+    entry.value.kind = OMC_VAL_EMPTY;
+    entry.value.elem_type = OMC_ELEM_U8;
+    entry.value.text_encoding = OMC_TEXT_UNKNOWN;
+    entry.value.count = 0U;
+    entry.value.u.u64 = 0U;
+    entry.origin.block = ctx->source_block;
+    entry.origin.order_in_block = order_in_block;
+    entry.origin.wire_type.family = OMC_WIRE_TIFF;
+    entry.origin.wire_type.code = wire_type;
+    entry.origin.wire_count = wire_count;
+    entry.origin.name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
+    entry.origin.name_context_variant = 0U;
+    entry.flags = flags;
+    omc_exif_maybe_mark_contextual_name(ctx, &entry);
+    st = omc_store_add_entry(ctx->store, &entry, (omc_entry_id*)0);
+    if (st == OMC_STATUS_NO_MEMORY) {
+        return OMC_EXIF_NOMEM;
+    }
+    if (st != OMC_STATUS_OK) {
+        return OMC_EXIF_LIMIT;
+    }
+    return OMC_EXIF_OK;
+}
+
 static int
 omc_exif_samsung_is_dec_digit(omc_u8 c)
 {
@@ -4578,6 +4656,85 @@ omc_exif_samsung_type2_ifd_candidate(const omc_u8* raw, omc_u64 raw_size,
 }
 
 static int
+omc_exif_decode_samsung_malformed_type2_tag21(omc_exif_ctx* ctx,
+                                              const omc_u8* raw,
+                                              omc_u64 raw_size,
+                                              const char* ifd_name,
+                                              omc_exif_cfg cfg)
+{
+    omc_u16 entry_count16;
+    omc_u64 entry_table_off;
+    omc_u64 table_bytes;
+    omc_u32 i;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0
+        || ifd_name == (const char*)0) {
+        return 1;
+    }
+    if (omc_exif_find_first_entry(ctx->store, ifd_name, 0x0021U)
+        != (const omc_entry*)0) {
+        return 1;
+    }
+    if (!omc_exif_read_u16(cfg, raw, (omc_size)raw_size, 0U, &entry_count16)
+        || entry_count16 == 0U) {
+        return 1;
+    }
+
+    entry_table_off = 2U;
+    if (!omc_exif_mul_u64((omc_u64)entry_count16, 12U, &table_bytes)
+        || entry_table_off > raw_size
+        || table_bytes > (raw_size - entry_table_off)
+        || 4U > ((raw_size - entry_table_off) - table_bytes)) {
+        return 1;
+    }
+
+    for (i = 0U; i < (omc_u32)entry_count16; ++i) {
+        omc_u64 entry_off;
+        omc_u16 tag16;
+        omc_u16 type16;
+        omc_u32 count32;
+        omc_u32 off32;
+        omc_u32 elem_size;
+        omc_u64 value_size;
+        omc_exif_status status;
+
+        entry_off = entry_table_off + ((omc_u64)i * 12U);
+        if (!omc_exif_read_u16(cfg, raw, (omc_size)raw_size, entry_off + 0U,
+                               &tag16)
+            || !omc_exif_read_u16(cfg, raw, (omc_size)raw_size, entry_off + 2U,
+                                  &type16)
+            || !omc_exif_read_u32(cfg, raw, (omc_size)raw_size, entry_off + 4U,
+                                  &count32)
+            || !omc_exif_read_u32(cfg, raw, (omc_size)raw_size, entry_off + 8U,
+                                  &off32)
+            || !omc_exif_elem_size(type16, &elem_size)
+            || !omc_exif_mul_u64((omc_u64)elem_size, (omc_u64)count32,
+                                 &value_size)) {
+            return 1;
+        }
+        if (tag16 != 0x0021U) {
+            continue;
+        }
+        if (value_size <= 4U) {
+            return 1;
+        }
+        if ((omc_u64)off32 <= raw_size && value_size <= (raw_size - (omc_u64)off32)) {
+            return 1;
+        }
+        status = omc_exif_emit_other_exif_empty(ctx, ifd_name, 0x0021U, i,
+                                                type16, count32,
+                                                OMC_ENTRY_FLAG_UNREADABLE);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            return 0;
+        }
+        ctx->res.entries_decoded += 1U;
+        return 1;
+    }
+    return 1;
+}
+
+static int
 omc_exif_decode_samsung_stmn(omc_exif_ctx* ctx, const omc_u8* raw,
                              omc_u64 raw_size)
 {
@@ -4693,6 +4850,10 @@ omc_exif_decode_samsung_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
 
     if (!omc_exif_decode_ifd_blob_loose_cfg(ctx, raw, raw_size, 0U, &mn_opts,
                                             cfg)) {
+        return 0;
+    }
+    if (!omc_exif_decode_samsung_malformed_type2_tag21(ctx, raw, raw_size,
+                                                       type2_ifd_name, cfg)) {
         return 0;
     }
     if (!omc_exif_decode_samsung_picturewizard(ctx, type2_ifd_name,
@@ -5361,25 +5522,107 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x00A8U);
     if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size >= 4U
-        && omc_exif_make_subifd_name("mk_nikon", "flashinfo0106", 0U, ifd_name,
-                                     sizeof(ifd_name))) {
-        static const omc_u16 u8_tags[] = { 0x0009U, 0x000CU, 0x000DU,
-                                           0x000EU, 0x000FU, 0x0010U };
-        static const omc_u16 i8_tags[] = { 0x000AU, 0x0011U, 0x0012U,
-                                           0x0013U, 0x0014U, 0x0015U,
-                                           0x001BU, 0x001DU, 0x0027U,
-                                           0x0028U, 0x0029U, 0x002AU };
+        && raw.size >= 4U) {
+        enum {
+            OMC_EXIF_NIKON_FLASHINFO_0100 = 0,
+            OMC_EXIF_NIKON_FLASHINFO_0102 = 1,
+            OMC_EXIF_NIKON_FLASHINFO_0103 = 2,
+            OMC_EXIF_NIKON_FLASHINFO_0106 = 3,
+            OMC_EXIF_NIKON_FLASHINFO_0107 = 4,
+            OMC_EXIF_NIKON_FLASHINFO_0300 = 5,
+            OMC_EXIF_NIKON_FLASHINFO_UNKNOWN = 6
+        } layout;
+        const char* suffix;
+        const omc_u16* u8_tags;
+        const omc_u16* i8_tags;
+        omc_u32 u8_tag_count;
+        omc_u32 i8_tag_count;
         omc_u32 order;
         omc_u32 i;
+        omc_entry_name_ctx_kind name_context_kind;
+        omc_u8 flash_control_mode;
+        omc_u8 flash_group_a_mode;
+        omc_u8 flash_group_b_mode;
+        omc_u8 flash_group_c_mode;
+        omc_u8 flash_group_a_variant;
+        omc_u8 flash_group_b_variant;
+        omc_u8 flash_group_c_variant;
 
-        order = 0U;
+        static const omc_u16 k_flashinfo0100_u8_tags[] = { 0x0009U, 0x000CU,
+                                                           0x000DU, 0x000EU,
+                                                           0x000FU, 0x0010U };
+        static const omc_u16 k_flashinfo0100_i8_tags[] = { 0x000AU, 0x0011U,
+                                                           0x0012U, 0x0013U,
+                                                           0x0014U, 0x0015U,
+                                                           0x001BU, 0x001DU,
+                                                           0x0027U, 0x0028U,
+                                                           0x0029U, 0x002AU };
+        static const omc_u16 k_flashinfo0102_u8_tags[] = { 0x000CU, 0x000DU,
+                                                           0x000EU, 0x000FU };
+        static const omc_u16 k_flashinfo0102_i8_tags[] = { 0x000AU, 0x0012U,
+                                                           0x0013U, 0x0014U };
+        static const omc_u16 k_flashinfo0103_u8_tags[] = { 0x000CU, 0x000DU,
+                                                           0x000EU, 0x000FU,
+                                                           0x0010U };
+        static const omc_u16 k_flashinfo0103_i8_tags[] = { 0x000AU, 0x0013U,
+                                                           0x0014U, 0x0015U,
+                                                           0x001BU, 0x001DU,
+                                                           0x0027U };
+        static const omc_u16 k_flashinfo0106_u8_tags[] = { 0x000CU, 0x000DU,
+                                                           0x000EU, 0x000FU,
+                                                           0x0010U };
+        static const omc_u16 k_flashinfo0106_i8_tags[] = { 0x0027U, 0x0028U,
+                                                           0x0029U, 0x002AU };
+        static const omc_u16 k_flashinfo0107_u8_tags[] = { 0x000CU, 0x000DU,
+                                                           0x000EU, 0x000FU };
+        static const omc_u16 k_flashinfo0107_i8_tags[] = { 0x000AU, 0x0028U,
+                                                           0x0029U, 0x002AU };
+        static const omc_u16 k_flashinfo0300_u8_tags[] = { 0x000DU, 0x000EU,
+                                                           0x000FU, 0x0010U,
+                                                           0x0025U, 0x0026U };
+        static const omc_u16 k_flashinfo0300_i8_tags[] = { 0x000AU, 0x0021U,
+                                                           0x0028U, 0x0029U,
+                                                           0x002AU };
+
+        suffix = "flashinfo0100";
+        layout = OMC_EXIF_NIKON_FLASHINFO_0100;
+        if (memcmp(raw.data, "0102", 4U) == 0) {
+            suffix = "flashinfo0102";
+            layout = OMC_EXIF_NIKON_FLASHINFO_0102;
+        } else if (memcmp(raw.data, "0103", 4U) == 0
+                   || memcmp(raw.data, "0104", 4U) == 0
+                   || memcmp(raw.data, "0105", 4U) == 0) {
+            suffix = "flashinfo0103";
+            layout = OMC_EXIF_NIKON_FLASHINFO_0103;
+        } else if (memcmp(raw.data, "0106", 4U) == 0) {
+            suffix = "flashinfo0106";
+            layout = OMC_EXIF_NIKON_FLASHINFO_0106;
+        } else if (memcmp(raw.data, "0107", 4U) == 0
+                   || memcmp(raw.data, "0108", 4U) == 0) {
+            suffix = "flashinfo0107";
+            layout = OMC_EXIF_NIKON_FLASHINFO_0107;
+        } else if (memcmp(raw.data, "0300", 4U) == 0
+                   || memcmp(raw.data, "0301", 4U) == 0) {
+            suffix = "flashinfo0300";
+            layout = OMC_EXIF_NIKON_FLASHINFO_0300;
+        } else if (memcmp(raw.data, "0100", 4U) != 0
+                   && memcmp(raw.data, "0101", 4U) != 0) {
+            suffix = "flashinfounknown";
+            layout = OMC_EXIF_NIKON_FLASHINFO_UNKNOWN;
+        }
+
+        if (!omc_exif_make_subifd_name("mk_nikon", suffix, 0U, ifd_name,
+                                       sizeof(ifd_name))) {
+            return 1;
+        }
+
         status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U, 0U,
                                                  raw.data, 4U);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
             return 0;
         }
+
         order = 1U;
         if (raw.size > 4U) {
             status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0004U,
@@ -5398,7 +5641,12 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
                 return 0;
             }
         }
-        if (raw.size > 8U) {
+        if ((layout == OMC_EXIF_NIKON_FLASHINFO_0100
+             || layout == OMC_EXIF_NIKON_FLASHINFO_0102
+             || layout == OMC_EXIF_NIKON_FLASHINFO_0103
+             || layout == OMC_EXIF_NIKON_FLASHINFO_0106
+             || layout == OMC_EXIF_NIKON_FLASHINFO_0300)
+            && raw.size > 8U) {
             status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0008U,
                                                    order++, raw.data[8U]);
             if (status != OMC_EXIF_OK) {
@@ -5406,7 +5654,184 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
                 return 0;
             }
         }
-        for (i = 0U; i < (omc_u32)(sizeof(u8_tags) / sizeof(u8_tags[0])); ++i) {
+
+        flash_control_mode = (raw.size > 9U)
+                                 ? (omc_u8)(raw.data[9U] & 0x7FU)
+                                 : 0U;
+        flash_group_a_mode = 0U;
+        flash_group_b_mode = 0U;
+        flash_group_c_mode = 0U;
+        flash_group_a_variant = 0U;
+        flash_group_b_variant = 0U;
+        flash_group_c_variant = 0U;
+
+        if (layout == OMC_EXIF_NIKON_FLASHINFO_0102 && raw.size > 0x11U) {
+            flash_group_a_mode = (omc_u8)(raw.data[0x10U] & 0x0FU);
+            flash_group_b_mode = (omc_u8)((raw.data[0x11U] >> 4U) & 0x0FU);
+            flash_group_c_mode = (omc_u8)(raw.data[0x11U] & 0x0FU);
+            flash_group_a_variant = (omc_u8)((flash_group_a_mode >= 0x06U)
+                                                 ? 0U
+                                                 : 2U);
+            flash_group_b_variant = (omc_u8)((flash_group_b_mode >= 0x06U)
+                                                 ? 0U
+                                                 : 3U);
+            flash_group_c_variant = (omc_u8)((flash_group_c_mode >= 0x06U)
+                                                 ? 0U
+                                                 : 4U);
+        } else if ((layout == OMC_EXIF_NIKON_FLASHINFO_0103
+                    || layout == OMC_EXIF_NIKON_FLASHINFO_0106
+                    || layout == OMC_EXIF_NIKON_FLASHINFO_0107
+                    || layout == OMC_EXIF_NIKON_FLASHINFO_0300)
+                   && raw.size > 0x12U) {
+            flash_group_a_mode = (omc_u8)(raw.data[0x11U] & 0x0FU);
+            flash_group_b_mode = (omc_u8)((raw.data[0x12U] >> 4U) & 0x0FU);
+            flash_group_c_mode = (omc_u8)(raw.data[0x12U] & 0x0FU);
+            if (layout == OMC_EXIF_NIKON_FLASHINFO_0103
+                || layout == OMC_EXIF_NIKON_FLASHINFO_0106) {
+                flash_group_a_variant = (omc_u8)((flash_group_a_mode >= 0x06U)
+                                                     ? 0U
+                                                     : 2U);
+                flash_group_b_variant = (omc_u8)((flash_group_b_mode >= 0x06U)
+                                                     ? 0U
+                                                     : 3U);
+                flash_group_c_variant = (omc_u8)((flash_group_c_mode >= 0x06U)
+                                                     ? 0U
+                                                     : 4U);
+            } else {
+                flash_group_a_variant = (omc_u8)((flash_group_a_mode >= 0x06U)
+                                                     ? 2U
+                                                     : 1U);
+                flash_group_b_variant = (omc_u8)((flash_group_b_mode >= 0x06U)
+                                                     ? 2U
+                                                     : 1U);
+                flash_group_c_variant = (omc_u8)((flash_group_c_mode >= 0x06U)
+                                                     ? 2U
+                                                     : 1U);
+            }
+        }
+
+        if (layout == OMC_EXIF_NIKON_FLASHINFO_0102 && raw.size > 0x11U) {
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0010U,
+                                                   order++, flash_group_a_mode);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            omc_exif_mark_last_contextual_name(
+                ctx, OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY, 5U);
+
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0011U,
+                                                   order++, flash_group_b_mode);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            omc_exif_mark_last_contextual_name(
+                ctx, OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY, 6U);
+
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0011U,
+                                                   order++, flash_group_c_mode);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            omc_exif_mark_last_contextual_name(
+                ctx, OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY, 7U);
+        } else if (layout == OMC_EXIF_NIKON_FLASHINFO_0103
+                   && raw.size > 0x12U) {
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0011U,
+                                                   order++, flash_group_a_mode);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            omc_exif_mark_last_contextual_name(
+                ctx, OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY, 5U);
+
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0012U,
+                                                   order++, flash_group_b_mode);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            omc_exif_mark_last_contextual_name(
+                ctx, OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY, 6U);
+
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0012U,
+                                                   order++, flash_group_c_mode);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            omc_exif_mark_last_contextual_name(
+                ctx, OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY, 7U);
+        }
+
+        u8_tags = (const omc_u16*)0;
+        i8_tags = (const omc_u16*)0;
+        u8_tag_count = 0U;
+        i8_tag_count = 0U;
+        name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
+        switch (layout) {
+        case OMC_EXIF_NIKON_FLASHINFO_0102:
+            u8_tags = k_flashinfo0102_u8_tags;
+            u8_tag_count = (omc_u32)(sizeof(k_flashinfo0102_u8_tags)
+                                     / sizeof(k_flashinfo0102_u8_tags[0]));
+            i8_tags = k_flashinfo0102_i8_tags;
+            i8_tag_count = (omc_u32)(sizeof(k_flashinfo0102_i8_tags)
+                                     / sizeof(k_flashinfo0102_i8_tags[0]));
+            name_context_kind = OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY;
+            break;
+        case OMC_EXIF_NIKON_FLASHINFO_0103:
+            u8_tags = k_flashinfo0103_u8_tags;
+            u8_tag_count = (omc_u32)(sizeof(k_flashinfo0103_u8_tags)
+                                     / sizeof(k_flashinfo0103_u8_tags[0]));
+            i8_tags = k_flashinfo0103_i8_tags;
+            i8_tag_count = (omc_u32)(sizeof(k_flashinfo0103_i8_tags)
+                                     / sizeof(k_flashinfo0103_i8_tags[0]));
+            name_context_kind = OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY;
+            break;
+        case OMC_EXIF_NIKON_FLASHINFO_0106:
+            u8_tags = k_flashinfo0106_u8_tags;
+            u8_tag_count = (omc_u32)(sizeof(k_flashinfo0106_u8_tags)
+                                     / sizeof(k_flashinfo0106_u8_tags[0]));
+            i8_tags = k_flashinfo0106_i8_tags;
+            i8_tag_count = (omc_u32)(sizeof(k_flashinfo0106_i8_tags)
+                                     / sizeof(k_flashinfo0106_i8_tags[0]));
+            name_context_kind = OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY;
+            break;
+        case OMC_EXIF_NIKON_FLASHINFO_0107:
+            u8_tags = k_flashinfo0107_u8_tags;
+            u8_tag_count = (omc_u32)(sizeof(k_flashinfo0107_u8_tags)
+                                     / sizeof(k_flashinfo0107_u8_tags[0]));
+            i8_tags = k_flashinfo0107_i8_tags;
+            i8_tag_count = (omc_u32)(sizeof(k_flashinfo0107_i8_tags)
+                                     / sizeof(k_flashinfo0107_i8_tags[0]));
+            name_context_kind = OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_GROUPS;
+            break;
+        case OMC_EXIF_NIKON_FLASHINFO_0300:
+            u8_tags = k_flashinfo0300_u8_tags;
+            u8_tag_count = (omc_u32)(sizeof(k_flashinfo0300_u8_tags)
+                                     / sizeof(k_flashinfo0300_u8_tags[0]));
+            i8_tags = k_flashinfo0300_i8_tags;
+            i8_tag_count = (omc_u32)(sizeof(k_flashinfo0300_i8_tags)
+                                     / sizeof(k_flashinfo0300_i8_tags[0]));
+            name_context_kind = OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_GROUPS;
+            break;
+        case OMC_EXIF_NIKON_FLASHINFO_UNKNOWN:
+            break;
+        default:
+            u8_tags = k_flashinfo0100_u8_tags;
+            u8_tag_count = (omc_u32)(sizeof(k_flashinfo0100_u8_tags)
+                                     / sizeof(k_flashinfo0100_u8_tags[0]));
+            i8_tags = k_flashinfo0100_i8_tags;
+            i8_tag_count = (omc_u32)(sizeof(k_flashinfo0100_i8_tags)
+                                     / sizeof(k_flashinfo0100_i8_tags[0]));
+            name_context_kind = OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY;
+            break;
+        }
+
+        for (i = 0U; i < u8_tag_count; ++i) {
             omc_u16 tag16;
 
             tag16 = u8_tags[i];
@@ -5420,8 +5845,9 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
                 return 0;
             }
         }
-        for (i = 0U; i < (omc_u32)(sizeof(i8_tags) / sizeof(i8_tags[0])); ++i) {
+        for (i = 0U; i < i8_tag_count; ++i) {
             omc_u16 tag16;
+            omc_u8 variant;
 
             tag16 = i8_tags[i];
             if (raw.size <= tag16) {
@@ -5432,6 +5858,61 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
             if (status != OMC_EXIF_OK) {
                 omc_exif_update_status(&ctx->res, status);
                 return 0;
+            }
+
+            variant = 0U;
+            if (name_context_kind == OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY) {
+                if (layout == OMC_EXIF_NIKON_FLASHINFO_0106 && tag16 == 0x0027U
+                    && flash_control_mode < 0x06U) {
+                    variant = 1U;
+                } else if (layout == OMC_EXIF_NIKON_FLASHINFO_0100) {
+                    if (tag16 == 0x000AU) {
+                        variant = 8U;
+                    } else if (tag16 == 0x0011U) {
+                        variant = 2U;
+                    } else if (tag16 == 0x0012U) {
+                        variant = 3U;
+                    }
+                } else if (layout == OMC_EXIF_NIKON_FLASHINFO_0102) {
+                    if (tag16 == 0x000AU) {
+                        variant = 8U;
+                    } else if (tag16 == 0x0012U) {
+                        variant = flash_group_a_variant;
+                    } else if (tag16 == 0x0013U) {
+                        variant = flash_group_b_variant;
+                    } else if (tag16 == 0x0014U) {
+                        variant = flash_group_c_variant;
+                    }
+                } else if (layout == OMC_EXIF_NIKON_FLASHINFO_0103) {
+                    if (tag16 == 0x0013U) {
+                        variant = flash_group_a_variant;
+                    } else if (tag16 == 0x0014U) {
+                        variant = flash_group_b_variant;
+                    } else if (tag16 == 0x0015U) {
+                        variant = flash_group_c_variant;
+                    }
+                } else if (layout == OMC_EXIF_NIKON_FLASHINFO_0106) {
+                    if (tag16 == 0x0028U) {
+                        variant = flash_group_a_variant;
+                    } else if (tag16 == 0x0029U) {
+                        variant = flash_group_b_variant;
+                    } else if (tag16 == 0x002AU) {
+                        variant = flash_group_c_variant;
+                    }
+                }
+            } else if (name_context_kind
+                       == OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_GROUPS) {
+                if (tag16 == 0x0028U) {
+                    variant = flash_group_a_variant;
+                } else if (tag16 == 0x0029U) {
+                    variant = flash_group_b_variant;
+                } else if (tag16 == 0x002AU) {
+                    variant = flash_group_c_variant;
+                }
+            }
+            if (variant != 0U) {
+                omc_exif_mark_last_contextual_name(ctx, name_context_kind,
+                                                   variant);
             }
         }
     }
@@ -5475,61 +5956,183 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x00B7U);
     if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size >= 29U
-        && omc_exif_make_subifd_name("mk_nikon", "afinfo2v0100", 0U, ifd_name,
-                                     sizeof(ifd_name))) {
-        static const omc_u16 u16_tags[] = { 0x0010U, 0x0012U, 0x0014U,
-                                            0x0016U, 0x0018U, 0x001AU };
+        && raw.size >= 4U) {
         omc_u32 order;
         omc_u32 i;
 
-        status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U, 0U,
-                                                 raw.data, 4U);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
-        }
-        order = 1U;
-        for (i = 4U; i <= 7U; ++i) {
-            if (raw.size <= i) {
-                continue;
-            }
-            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, (omc_u16)i,
-                                                   order++, raw.data[i]);
-            if (status != OMC_EXIF_OK) {
-                omc_exif_update_status(&ctx->res, status);
-                return 0;
-            }
-        }
-        status = omc_exif_emit_derived_exif_bytes(ctx, ifd_name, 0x0008U,
-                                                  order++, raw.data + 8U, 5U);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
-        }
-        for (i = 0U; i < (omc_u32)(sizeof(u16_tags) / sizeof(u16_tags[0])); ++i) {
-            omc_u16 tag16;
+        if (memcmp(raw.data, "0100", 4U) == 0
+            && raw.size >= 29U
+            && omc_exif_make_subifd_name("mk_nikon", "afinfo2v0100", 0U,
+                                         ifd_name, sizeof(ifd_name))) {
+            static const omc_u16 u16_tags[] = { 0x0010U, 0x0012U, 0x0014U,
+                                                0x0016U, 0x0018U, 0x001AU };
 
-            tag16 = u16_tags[i];
-            if ((raw.size - 1U) <= tag16) {
-                continue;
-            }
-            if (!omc_exif_read_u16(ctx->cfg, raw.data, (omc_size)raw.size,
-                                   tag16, &u16v)) {
-                continue;
-            }
-            status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, tag16,
-                                                    order++, u16v);
+            status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U,
+                                                     0U, raw.data, 4U);
             if (status != OMC_EXIF_OK) {
                 omc_exif_update_status(&ctx->res, status);
                 return 0;
             }
-        }
-        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x001CU, order,
-                                               raw.data[28U]);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
+            order = 1U;
+            for (i = 4U; i <= 7U; ++i) {
+                if (raw.size <= i) {
+                    continue;
+                }
+                status = omc_exif_emit_derived_exif_u8(ctx, ifd_name,
+                                                       (omc_u16)i, order++,
+                                                       raw.data[i]);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    return 0;
+                }
+            }
+            status = omc_exif_emit_derived_exif_bytes(ctx, ifd_name, 0x0008U,
+                                                      order++, raw.data + 8U,
+                                                      5U);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            for (i = 0U;
+                 i < (omc_u32)(sizeof(u16_tags) / sizeof(u16_tags[0])); ++i) {
+                omc_u16 tag16;
+
+                tag16 = u16_tags[i];
+                if ((raw.size - 1U) <= tag16) {
+                    continue;
+                }
+                if (!omc_exif_read_u16(ctx->cfg, raw.data, (omc_size)raw.size,
+                                       tag16, &u16v)) {
+                    continue;
+                }
+                status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, tag16,
+                                                        order++, u16v);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    return 0;
+                }
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x001CU,
+                                                   order, raw.data[28U]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+        } else if (memcmp(raw.data, "0101", 4U) == 0
+                   && raw.size >= 0x53U
+                   && omc_exif_make_subifd_name("mk_nikon", "afinfo2v0101",
+                                                0U, ifd_name,
+                                                sizeof(ifd_name))) {
+            status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U,
+                                                     0U, raw.data, 4U);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            order = 1U;
+            for (i = 4U; i <= 6U; ++i) {
+                status = omc_exif_emit_derived_exif_u8(ctx, ifd_name,
+                                                       (omc_u16)i, order++,
+                                                       raw.data[i]);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    return 0;
+                }
+            }
+            status = omc_exif_emit_derived_exif_bytes(ctx, ifd_name, 0x0008U,
+                                                      order++, raw.data + 8U,
+                                                      7U);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x001CU,
+                                                   order++, raw.data[0x1CU]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_bytes(ctx, ifd_name, 0x0030U,
+                                                      order++, raw.data + 0x30U,
+                                                      7U);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0044U,
+                                                   order++, raw.data[0x44U]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            for (i = 0x46U; i <= 0x50U; i += 2U) {
+                if (!omc_exif_read_u16(ctx->cfg, raw.data, (omc_size)raw.size,
+                                       i, &u16v)) {
+                    continue;
+                }
+                status = omc_exif_emit_derived_exif_u16(ctx, ifd_name,
+                                                        (omc_u16)i, order++,
+                                                        u16v);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    return 0;
+                }
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0052U,
+                                                   order, raw.data[0x52U]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+        } else if ((memcmp(raw.data, "0300", 4U) == 0
+                    || memcmp(raw.data, "0301", 4U) == 0)
+                   && raw.size >= 0x34U
+                   && omc_exif_make_subifd_name("mk_nikon", "afinfo2v0300",
+                                                0U, ifd_name,
+                                                sizeof(ifd_name))) {
+            static const omc_u16 u8_tags[] = { 0x0004U, 0x0005U, 0x0006U,
+                                               0x0007U, 0x0038U };
+            static const omc_u16 u16_tags[] = { 0x002AU, 0x002CU, 0x002EU,
+                                                0x0031U, 0x0032U };
+            static const omc_u16 raw_u16_offs[] = { 0x002AU, 0x002CU, 0x002EU,
+                                                    0x0030U, 0x0032U };
+
+            status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U,
+                                                     0U, raw.data, 4U);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+            order = 1U;
+            for (i = 0U;
+                 i < (omc_u32)(sizeof(u8_tags) / sizeof(u8_tags[0])); ++i) {
+                omc_u16 tag16;
+
+                tag16 = u8_tags[i];
+                if (raw.size <= tag16) {
+                    continue;
+                }
+                status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, tag16,
+                                                       order++, raw.data[tag16]);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    return 0;
+                }
+            }
+            for (i = 0U;
+                 i < (omc_u32)(sizeof(u16_tags) / sizeof(u16_tags[0])); ++i) {
+                if (!omc_exif_read_u16(ctx->cfg, raw.data, (omc_size)raw.size,
+                                       raw_u16_offs[i], &u16v)) {
+                    continue;
+                }
+                status = omc_exif_emit_derived_exif_u16(ctx, ifd_name,
+                                                        u16_tags[i], order++,
+                                                        u16v);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    return 0;
+                }
+            }
         }
     }
 
@@ -5909,13 +6512,237 @@ omc_exif_decode_nikon_aftune(omc_exif_ctx* ctx)
 }
 
 static int
+omc_exif_decode_nikon_lensdata(omc_exif_ctx* ctx)
+{
+    const omc_entry* entry;
+    omc_const_bytes raw;
+    const char* suffix;
+    char ifd_name[64];
+    omc_exif_status status;
+    const omc_u16* want;
+    omc_u32 want_count;
+    omc_u32 wi;
+    omc_u32 order;
+    static const omc_u16 k_lens0100_tags[] = { 0x0006U, 0x0007U, 0x0008U,
+                                               0x0009U, 0x000AU, 0x000BU,
+                                               0x000CU };
+    static const omc_u16 k_lens0101_tags[] = { 0x0004U, 0x0005U, 0x0008U,
+                                               0x0009U, 0x000AU, 0x000BU,
+                                               0x000CU, 0x000DU, 0x000EU,
+                                               0x000FU, 0x0010U, 0x0011U,
+                                               0x0012U };
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0) {
+        return 1;
+    }
+
+    entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x0098U);
+    if (!omc_exif_entry_raw_view(ctx->store, entry, &raw) || raw.size < 4U) {
+        return 1;
+    }
+
+    suffix = (const char*)0;
+    want = (const omc_u16*)0;
+    want_count = 0U;
+    if (memcmp(raw.data, "0100", 4U) == 0) {
+        suffix = "lensdata0100";
+        want = k_lens0100_tags;
+        want_count = (omc_u32)(sizeof(k_lens0100_tags)
+                               / sizeof(k_lens0100_tags[0]));
+    } else if (memcmp(raw.data, "0101", 4U) == 0) {
+        suffix = "lensdata0101";
+        want = k_lens0101_tags;
+        want_count = (omc_u32)(sizeof(k_lens0101_tags)
+                               / sizeof(k_lens0101_tags[0]));
+    } else {
+        return 1;
+    }
+
+    if (!omc_exif_make_subifd_name("mk_nikon", suffix, 0U, ifd_name,
+                                   sizeof(ifd_name))) {
+        return 1;
+    }
+
+    status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U, 0U,
+                                             raw.data, 4U);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+
+    order = 1U;
+    for (wi = 0U; wi < want_count; ++wi) {
+        omc_u16 tag;
+
+        tag = want[wi];
+        if ((omc_size)tag >= raw.size) {
+            continue;
+        }
+        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, tag,
+                                               order++, raw.data[(omc_size)tag]);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+omc_exif_decode_nikon_colorbalancec(omc_exif_ctx* ctx)
+{
+    const omc_entry* entry;
+    omc_const_bytes raw;
+    char ifd_name[64];
+    omc_exif_status status;
+    omc_u16 u16v;
+    omc_u32 i;
+    static const struct {
+        omc_u16 tag;
+        omc_u32 off;
+    } k_colorbalancec_tags[] = {
+        { 0x0038U, 0x0038U }, { 0x004CU, 0x004CU }, { 0x0060U, 0x0060U },
+        { 0x0074U, 0x0074U }, { 0x0088U, 0x0088U }, { 0x009CU, 0x009CU },
+        { 0x00B0U, 0x00B0U }, { 0x00C4U, 0x00C4U }, { 0x00D8U, 0x00D8U },
+        { 0x0100U, 0x0100U }, { 0x0114U, 0x0114U }
+    };
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0) {
+        return 1;
+    }
+
+    entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x0014U);
+    if (!omc_exif_entry_raw_view(ctx->store, entry, &raw) || raw.size < 8U
+        || memcmp(raw.data, "NRW ", 4U) != 0
+        || !omc_exif_make_subifd_name("mk_nikon", "colorbalancec", 0U,
+                                      ifd_name, sizeof(ifd_name))) {
+        return 1;
+    }
+
+    status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0004U, 0U,
+                                             raw.data + 4U, 4U);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        return 0;
+    }
+    if (raw.size >= 0x22U
+        && omc_exif_read_u16(ctx->cfg, raw.data, (omc_size)raw.size, 0x20U,
+                             &u16v)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x0020U, 1U,
+                                                u16v);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            return 0;
+        }
+    }
+    for (i = 0U;
+         i < (omc_u32)(sizeof(k_colorbalancec_tags)
+                       / sizeof(k_colorbalancec_tags[0]));
+         ++i) {
+        omc_u8 raw_out[16];
+        omc_u32 levels[4];
+        omc_u32 off;
+        omc_u32 k;
+
+        off = k_colorbalancec_tags[i].off;
+        if (raw.size < (omc_size)(off + 16U)) {
+            continue;
+        }
+        for (k = 0U; k < 4U; ++k) {
+            if (!omc_exif_read_u32(ctx->cfg, raw.data, (omc_size)raw.size,
+                                   (omc_u64)off + (omc_u64)(k * 4U),
+                                   &levels[k])) {
+                break;
+            }
+        }
+        if (k != 4U) {
+            continue;
+        }
+        levels[0] *= 2U;
+        levels[3] *= 2U;
+        for (k = 0U; k < 4U; ++k) {
+            if (!omc_exif_write_u32(ctx->cfg, raw_out, sizeof(raw_out),
+                                    (omc_u64)(k * 4U), levels[k])) {
+                break;
+            }
+        }
+        if (k != 4U) {
+            continue;
+        }
+        status = omc_exif_emit_derived_exif_array_copy(
+            ctx, ifd_name, k_colorbalancec_tags[i].tag, 2U + i,
+            OMC_ELEM_U32, raw_out, sizeof(raw_out), 4U);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
 omc_exif_decode_nikon_preview_ifd(omc_exif_ctx* ctx, const omc_u8* raw,
                                   omc_u64 raw_size)
 {
-    (void)ctx;
-    (void)raw;
-    (void)raw_size;
-    /* Upstream only mirrors preview tags from real TIFF ifd0/ifd1 entries. */
+    const omc_entry* entry;
+    char ifd_name[64];
+    omc_u64 hdr_rel;
+    omc_u64 ifd_off;
+    omc_u64 pos;
+    omc_u16 count16;
+    omc_u32 order;
+    omc_u32 i;
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0
+        || raw == (const omc_u8*)0) {
+        return 1;
+    }
+
+    entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x0011U);
+    if (entry == (const omc_entry*)0 || entry->value.kind != OMC_VAL_SCALAR
+        || !omc_exif_find_tiff_header(raw, raw_size, 0U, 128U, &hdr_rel)
+        || !omc_exif_make_subifd_name("mk_nikon", "preview", 0U, ifd_name,
+                                      sizeof(ifd_name))) {
+        return 1;
+    }
+
+    ifd_off = hdr_rel + entry->value.u.u64;
+    if (!omc_exif_read_u16le_raw(raw, raw_size, ifd_off, &count16)) {
+        return 1;
+    }
+
+    pos = ifd_off + 2U;
+    order = 0U;
+    for (i = 0U; i < (omc_u32)count16 && (pos + 12U) <= raw_size; ++i) {
+        omc_u16 tag16;
+        omc_u16 type16;
+        omc_u32 count32;
+        omc_u32 value32;
+        omc_exif_status status;
+
+        if (!omc_exif_read_u16le_raw(raw, raw_size, pos + 0U, &tag16)
+            || !omc_exif_read_u16le_raw(raw, raw_size, pos + 2U, &type16)
+            || !omc_exif_read_u32le_raw(raw, raw_size, pos + 4U, &count32)
+            || !omc_exif_read_u32le_raw(raw, raw_size, pos + 8U, &value32)) {
+            break;
+        }
+
+        status = OMC_EXIF_OK;
+        if ((tag16 == 0x0103U || tag16 == 0x0213U) && type16 == 3U
+            && count32 == 1U) {
+            status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, tag16,
+                                                    order++, (omc_u16)value32);
+        } else if ((tag16 == 0x0201U || tag16 == 0x0202U) && type16 == 4U
+                   && count32 == 1U) {
+            status = omc_exif_emit_derived_exif_u32(ctx, ifd_name, tag16,
+                                                    order++, value32);
+        }
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            return 0;
+        }
+        pos += 12U;
+    }
     return 1;
 }
 
@@ -5927,6 +6754,12 @@ omc_exif_decode_nikon_postpass(omc_exif_ctx* ctx, const omc_u8* raw,
         return 0;
     }
     if (!omc_exif_decode_nikon_binary_subdirs(ctx)) {
+        return 0;
+    }
+    if (!omc_exif_decode_nikon_lensdata(ctx)) {
+        return 0;
+    }
+    if (!omc_exif_decode_nikon_colorbalancec(ctx)) {
         return 0;
     }
     if (!omc_exif_decode_nikon_settings(ctx)) {
@@ -6627,24 +7460,98 @@ omc_exif_nikon_model_is_z30(const omc_u8* model, omc_u32 model_size)
 }
 
 static int
-omc_exif_nikonsettings_prefers_placeholder(omc_u16 tag, const omc_u8* model,
-                                           omc_u32 model_size)
+omc_exif_nikon_model_is_z5(const omc_u8* model, omc_u32 model_size)
+{
+    return model != (const omc_u8*)0
+           && model_size == 9U
+           && memcmp(model, "NIKON Z 5", 9U) == 0;
+}
+
+static int
+omc_exif_nikon_model_is_d6(const omc_u8* model, omc_u32 model_size)
+{
+    return model != (const omc_u8*)0
+           && model_size == 8U
+           && memcmp(model, "NIKON D6", 8U) == 0;
+}
+
+static int
+omc_exif_nikon_main_model_is_legacy_compact_type2(const omc_u8* model,
+                                                  omc_u32 model_size)
+{
+    return omc_exif_ascii_equals_nocase(model, model_size, "E700")
+           || omc_exif_ascii_equals_nocase(model, model_size, "E800")
+           || omc_exif_ascii_equals_nocase(model, model_size, "E900")
+           || omc_exif_ascii_equals_nocase(model, model_size, "E950");
+}
+
+static int
+omc_exif_nikon_main_model_is_z_family(const omc_u8* model, omc_u32 model_size)
+{
+    return omc_exif_ascii_equals_nocase(model, model_size, "NIKON Z fc")
+           || omc_exif_ascii_equals_nocase(model, model_size, "NIKON Z f")
+           || omc_exif_ascii_starts_with_nocase(model, model_size, "NIKON Z ")
+           || omc_exif_ascii_starts_with_nocase(model, model_size, "NIKON Z5")
+           || omc_exif_ascii_starts_with_nocase(model, model_size, "NIKON Z6")
+           || omc_exif_ascii_starts_with_nocase(model, model_size, "NIKON Z7")
+           || omc_exif_ascii_starts_with_nocase(model, model_size, "NIKON Z50");
+}
+
+static int
+omc_exif_nikon_main_z_tag_prefers_compat_name(omc_u16 tag)
+{
+    switch (tag) {
+    case 0x002BU:
+    case 0x002CU:
+    case 0x002EU:
+    case 0x002FU:
+    case 0x0031U:
+    case 0x0032U:
+    case 0x0035U:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static void
+omc_exif_mark_last_contextual_name(omc_exif_ctx* ctx,
+                                   omc_entry_name_ctx_kind kind,
+                                   omc_u8 variant)
+{
+    omc_entry* entry;
+
+    if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0
+        || ctx->store->entry_count == 0U || kind == OMC_ENTRY_NAME_CTX_NONE
+        || variant == 0U) {
+        return;
+    }
+
+    entry = &ctx->store->entries[ctx->store->entry_count - 1U];
+    entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+    entry->origin.name_context_kind = kind;
+    entry->origin.name_context_variant = variant;
+}
+
+static omc_u8
+omc_exif_nikonsettings_context_variant(omc_u16 tag, const omc_u8* model,
+                                       omc_u32 model_size)
 {
     const int d7500 = omc_exif_nikon_model_is_d7500(model, model_size);
     const int d780 = omc_exif_nikon_model_is_d780(model, model_size);
     const int d850 = omc_exif_nikon_model_is_d850(model, model_size);
     const int z30 = omc_exif_nikon_model_is_z30(model, model_size);
+    const int z5 = omc_exif_nikon_model_is_z5(model, model_size);
+    const int d6 = omc_exif_nikon_model_is_d6(model, model_size);
 
     switch (tag) {
-    case 0x0103U:
     case 0x0104U:
-    case 0x010BU:
     case 0x010CU:
     case 0x013AU:
-    case 0x013CU: return 1;
-    case 0x0001U:
+    case 0x013CU: return 1U;
+    case 0x0001U: return (omc_u8)((d7500 || d780 || z5 || z30) ? 1U : 0U);
     case 0x0002U:
-    case 0x000DU: return d7500 || d780;
+    case 0x000DU: return (omc_u8)((d7500 || d780) ? 1U : 0U);
     case 0x001DU:
     case 0x0020U:
     case 0x002DU:
@@ -6653,17 +7560,31 @@ omc_exif_nikonsettings_prefers_placeholder(omc_u16 tag, const omc_u8* model,
     case 0x0052U:
     case 0x0053U:
     case 0x0054U:
-    case 0x006CU: return d7500 || d780;
-    case 0x0080U: return d7500 || d780 || d850 || z30;
+    case 0x006CU:
+        if (tag == 0x001DU) {
+            return (omc_u8)((d7500 || d780 || d850 || z30) ? 1U : 0U);
+        }
+        return (omc_u8)((d7500 || d780) ? 1U : 0U);
+    case 0x0080U: return (omc_u8)((d7500 || d780 || d850 || z30) ? 1U : 0U);
     case 0x0097U:
     case 0x00A0U:
     case 0x00A2U:
     case 0x00A3U:
     case 0x00A5U:
     case 0x00A7U:
-    case 0x00B6U: return d780 || d850 || z30;
-    case 0x00B1U: return d7500 || d780;
-    default: return 0;
+    case 0x00B6U: return (omc_u8)((d780 || d850 || z30) ? 1U : 0U);
+    case 0x00B1U:
+        if (z5) {
+            return 2U;
+        }
+        return (omc_u8)((d7500 || d780 || d850 || z30) ? 1U : 0U);
+    case 0x00B3U:
+        if (z5) {
+            return 3U;
+        }
+        return (omc_u8)((d850 || z30) ? 1U : 0U);
+    case 0x0103U: return (omc_u8)(d6 ? 1U : 0U);
+    default: return 0U;
     }
 }
 
@@ -6728,14 +7649,51 @@ omc_exif_maybe_mark_contextual_name(const omc_exif_ctx* ctx, omc_entry* entry)
         entry->origin.name_context_variant = 1U;
         return;
     }
+    if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_nikon0")) {
+        if (omc_exif_nikon_main_model_is_legacy_compact_type2(model_text,
+                                                              model_size)) {
+            switch (entry->key.u.exif_tag.tag) {
+            case 0x0002U:
+            case 0x0003U:
+            case 0x0004U:
+            case 0x0005U:
+            case 0x0006U:
+            case 0x0007U:
+            case 0x0008U:
+            case 0x0009U:
+            case 0x000AU:
+            case 0x000BU:
+            case 0x0F00U:
+                entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+                entry->origin.name_context_kind
+                    = OMC_ENTRY_NAME_CTX_NIKON_MAIN_COMPACT_TYPE2;
+                entry->origin.name_context_variant = 1U;
+                return;
+            default:
+                break;
+            }
+        }
+        if (omc_exif_nikon_main_model_is_z_family(model_text, model_size)
+            && omc_exif_nikon_main_z_tag_prefers_compat_name(
+                entry->key.u.exif_tag.tag)) {
+            entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+            entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_NIKON_MAIN_Z;
+            entry->origin.name_context_variant = 1U;
+            return;
+        }
+    }
     if (omc_exif_entry_ifd_starts_with(ctx->store, entry,
-                                       "mk_nikonsettings_main_")
-        && omc_exif_nikonsettings_prefers_placeholder(entry->key.u.exif_tag.tag,
-                                                      model_text, model_size)) {
+                                       "mk_nikonsettings_main_")) {
+        omc_u8 variant;
+
+        variant = omc_exif_nikonsettings_context_variant(
+            entry->key.u.exif_tag.tag, model_text, model_size);
+        if (variant != 0U) {
         entry->flags |= OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
         entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_NIKONSETTINGS_MAIN;
-        entry->origin.name_context_variant = 1U;
-        return;
+            entry->origin.name_context_variant = variant;
+            return;
+        }
     }
     if (omc_exif_entry_ifd_equals(ctx->store, entry, "mk_kodak0")
         && entry->key.u.exif_tag.tag == 0x0028U
@@ -8161,6 +9119,8 @@ static const omc_exif_sony_field k_omc_exif_sony_tag9050a_fields[] = {
     { 0x003AU, OMC_EXIF_SONY_F_U16LE, 0U },
     { 0x003CU, OMC_EXIF_SONY_F_U16LE, 0U },
     { 0x003FU, OMC_EXIF_SONY_F_U8, 0U },
+    { 0x004CU, OMC_EXIF_SONY_F_U32LE, 0U },
+    { 0x0051U, OMC_EXIF_SONY_F_BYTES, 6U },
     { 0x0067U, OMC_EXIF_SONY_F_U8, 0U },
     { 0x007CU, OMC_EXIF_SONY_F_U8_ARRAY, 4U },
     { 0x00F0U, OMC_EXIF_SONY_F_U8_ARRAY, 5U },
@@ -8171,6 +9131,7 @@ static const omc_exif_sony_field k_omc_exif_sony_tag9050a_fields[] = {
     { 0x010BU, OMC_EXIF_SONY_F_U8, 0U },
     { 0x0114U, OMC_EXIF_SONY_F_U8, 0U },
     { 0x0116U, OMC_EXIF_SONY_F_U8_ARRAY, 2U },
+    { 0x01A0U, OMC_EXIF_SONY_F_U32LE, 0U },
     { 0x01AAU, OMC_EXIF_SONY_F_U32LE, 0U },
     { 0x01BDU, OMC_EXIF_SONY_F_U32LE, 0U }
 };
@@ -8224,7 +9185,6 @@ static const omc_exif_sony_field k_omc_exif_sony_tag2010e_fields[] = {
     { 0x11ACU, OMC_EXIF_SONY_F_U8, 0U },
     { 0x11ADU, OMC_EXIF_SONY_F_U8, 0U },
     { 0x11B4U, OMC_EXIF_SONY_F_U16LE_ARRAY, 3U },
-    { 0x1254U, OMC_EXIF_SONY_F_U16LE, 0U },
     { 0x1870U, OMC_EXIF_SONY_F_I16LE_ARRAY, 16U },
     { 0x1891U, OMC_EXIF_SONY_F_U8, 0U },
     { 0x1892U, OMC_EXIF_SONY_F_U8, 0U },
@@ -9647,6 +10607,117 @@ omc_exif_decode_sony_isoinfo(omc_exif_ctx* ctx, const omc_u8* raw,
 }
 
 static int
+omc_exif_sony_model_has_tag2010e_1254(const omc_u8* model_text,
+                                      omc_u32 model_size)
+{
+    if (model_text == (const omc_u8*)0) {
+        return 0;
+    }
+    return omc_exif_ascii_equals_nocase(model_text, model_size, "SLT-A99")
+           || omc_exif_ascii_equals_nocase(model_text, model_size, "SLT-A99V")
+           || omc_exif_ascii_equals_nocase(model_text, model_size, "HV")
+           || omc_exif_ascii_equals_nocase(model_text, model_size, "NEX-5R")
+           || omc_exif_ascii_equals_nocase(model_text, model_size, "NEX-5T")
+           || omc_exif_ascii_equals_nocase(model_text, model_size, "NEX-6")
+           || omc_exif_ascii_equals_nocase(model_text, model_size,
+                                           "NEX-VG900")
+           || omc_exif_ascii_equals_nocase(model_text, model_size,
+                                           "NEX-VG30E")
+           || omc_exif_ascii_equals_nocase(model_text, model_size,
+                                           "DSC-RX100")
+           || omc_exif_ascii_equals_nocase(model_text, model_size, "Stellar");
+}
+
+static int
+omc_exif_sony_model_has_tag2010e_1258(const omc_u8* model_text,
+                                      omc_u32 model_size)
+{
+    if (model_text == (const omc_u8*)0) {
+        return 0;
+    }
+    return omc_exif_ascii_equals_nocase(model_text, model_size, "DSC-RX1")
+           || omc_exif_ascii_equals_nocase(model_text, model_size, "DSC-RX1R");
+}
+
+static int
+omc_exif_sony_model_has_tag2010e_focal_fields(const omc_u8* model_text,
+                                              omc_u32 model_size)
+{
+    if (model_text == (const omc_u8*)0) {
+        return 0;
+    }
+    return omc_exif_ascii_equals_nocase(model_text, model_size, "NEX-3N");
+}
+
+static int
+omc_exif_decode_sony_tag2010e_model_fields(omc_exif_ctx* ctx,
+                                           const omc_u8* raw,
+                                           omc_u64 raw_size,
+                                           const omc_u8* model_text,
+                                           omc_u32 model_size)
+{
+    char ifd_name[64];
+    omc_u16 value16;
+    omc_u32 order_in_block;
+    omc_exif_status status;
+
+    if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0
+        || !omc_exif_make_subifd_name("mk_sony", "tag2010e", 0U, ifd_name,
+                                      sizeof(ifd_name))) {
+        return 1;
+    }
+
+    order_in_block = 100U;
+    if (omc_exif_find_first_entry(ctx->store, ifd_name, 0x1254U)
+            == (const omc_entry*)0
+        && omc_exif_sony_model_has_tag2010e_1254(model_text, model_size)
+        && omc_exif_sony_read_u16le(raw, raw_size, 0x1254U, 1U, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x1254U,
+                                                order_in_block++, value16);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            return 0;
+        }
+    }
+    if (omc_exif_find_first_entry(ctx->store, ifd_name, 0x1258U)
+            == (const omc_entry*)0
+        && omc_exif_sony_model_has_tag2010e_1258(model_text, model_size)
+        && omc_exif_sony_read_u16le(raw, raw_size, 0x1258U, 1U, &value16)) {
+        status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x1258U,
+                                                order_in_block++, value16);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            return 0;
+        }
+    }
+    if (omc_exif_sony_model_has_tag2010e_focal_fields(model_text, model_size)) {
+        if (omc_exif_find_first_entry(ctx->store, ifd_name, 0x1278U)
+                == (const omc_entry*)0
+            && omc_exif_sony_read_u16le(raw, raw_size, 0x1278U, 1U,
+                                        &value16)) {
+            status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x1278U,
+                                                    order_in_block++, value16);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+        }
+        if (omc_exif_find_first_entry(ctx->store, ifd_name, 0x1280U)
+                == (const omc_entry*)0
+            && omc_exif_sony_read_u16le(raw, raw_size, 0x1280U, 1U,
+                                        &value16)) {
+            status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x1280U,
+                                                    order_in_block++, value16);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static int
 omc_exif_decode_sony_postpass(omc_exif_ctx* ctx)
 {
     static const omc_u8 allowed_9400[] = { 0x07U, 0x09U, 0x0AU, 0x0CU, 0x23U,
@@ -9743,6 +10814,8 @@ omc_exif_decode_sony_postpass(omc_exif_ctx* ctx)
                     k_omc_exif_sony_tag2010e_fields,
                     (omc_u32)(sizeof(k_omc_exif_sony_tag2010e_fields)
                               / sizeof(k_omc_exif_sony_tag2010e_fields[0])))
+                || !omc_exif_decode_sony_tag2010e_model_fields(
+                    ctx, raw.data, raw.size, model_text, model_size)
                 || !omc_exif_decode_sony_meterinfo(ctx, raw.data, raw.size, 1U,
                                                    0x04B8U)) {
                 return 0;

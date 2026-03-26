@@ -127,7 +127,12 @@ test_tag_name_basics(void)
                     "CanonCustom_FunctionsD30_0x0000");
     expect_tag_name("mk_flir0", 0x0007U, "FLIR_0x0007");
     expect_tag_name("mk_flir_fff_gpsinfo_0", 0x0008U, "GPSLatitudeRef");
+    expect_tag_name("mk_nikon0", 0x000AU, "Nikon_0x000a");
+    expect_tag_name("mk_nikon0", 0x002EU, "Nikon_0x002e");
     expect_tag_name("mk_nikonsettings_main_0", 0x0001U, "ISOAutoHiLimit");
+    expect_tag_name("mk_nikonsettings_main_0", 0x001DU, "AF-CPrioritySel");
+    expect_tag_name("mk_nikonsettings_main_0", 0x0103U, "HDMIOutputHDR");
+    expect_tag_name("mk_nikonsettings_main_0", 0x010BU, "BracketIncrement");
     expect_tag_name("mk_fuji0", 0x1200U, "FujiFilm_0x1200");
     expect_tag_name("mk_sigma0", 0x000CU, "ExposureAdjust");
     expect_tag_name("mk_sigma0", 0x0020U, "Sigma_0x0020");
@@ -253,6 +258,52 @@ test_contextual_entry_names(void)
     expect_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL, "ISOAutoHiLimit");
     expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
                       "NikonSettings_0x0001");
+
+    entry = add_context_entry(&store, "mk_nikonsettings_main_0", 0x00B1U,
+                              OMC_ENTRY_NAME_CTX_NIKONSETTINGS_MAIN, 2U);
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                      "NikonSettings_0x00b1");
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                      "MovieFunc1Button");
+
+    entry = add_context_entry(&store, "mk_nikonsettings_main_0", 0x00B3U,
+                              OMC_ENTRY_NAME_CTX_NIKONSETTINGS_MAIN, 3U);
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                      "NikonSettings_0x00b3");
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                      "MovieFunc2Button");
+
+    entry = add_context_entry(&store, "mk_nikon0", 0x002EU,
+                              OMC_ENTRY_NAME_CTX_NIKON_MAIN_Z, 1U);
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL, "Nikon_0x002e");
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                      "AFAreaXPosition");
+
+    entry = add_context_entry(&store, "mk_nikon0", 0x000AU,
+                              OMC_ENTRY_NAME_CTX_NIKON_MAIN_COMPACT_TYPE2, 1U);
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL, "Nikon_0x000a");
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                      "DigitalZoom");
+
+    entry = add_context_entry(&store, "mk_nikon_flashinfo0107_0", 0x0028U,
+                              OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_GROUPS, 1U);
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                      "FlashGroupACompensation");
+
+    entry = add_context_entry(&store, "mk_nikon_flashinfo0107_0", 0x0028U,
+                              OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_GROUPS, 2U);
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                      "FlashGroupAOutput");
+
+    entry = add_context_entry(&store, "mk_nikon_flashinfo0102_0", 0x0010U,
+                              OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY, 5U);
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                      "FlashGroupAControlMode");
+
+    entry = add_context_entry(&store, "mk_nikon_flashinfo0100_0", 0x000AU,
+                              OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY, 8U);
+    expect_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                      "FlashCompensation");
 
     entry = add_context_entry(&store, "mk_ricoh0", 0x1002U,
                               OMC_ENTRY_NAME_CTX_RICOH_MAIN_COMPAT, 1U);

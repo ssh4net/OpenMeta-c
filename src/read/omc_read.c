@@ -263,6 +263,11 @@ omc_read_merge_jumbf(omc_jumbf_res* dst, omc_jumbf_res src)
     dst->boxes_decoded += src.boxes_decoded;
     dst->cbor_items += src.cbor_items;
     dst->entries_decoded += src.entries_decoded;
+    if (src.verify_status != OMC_C2PA_VERIFY_NOT_REQUESTED
+        || dst->verify_status == OMC_C2PA_VERIFY_NOT_REQUESTED) {
+        dst->verify_status = src.verify_status;
+        dst->verify_backend_selected = src.verify_backend_selected;
+    }
     if (dst->status == OMC_JUMBF_NOMEM || dst->status == OMC_JUMBF_LIMIT) {
         return;
     }
@@ -300,266 +305,261 @@ omc_read_store_block(omc_store* store, const omc_blk_ref* block,
 static void
 omc_read_clear_casio_simple_context(omc_store* store, omc_size entry_start)
 {
-    omc_size i;
-
-    if (store == (omc_store*)0 || entry_start >= store->entry_count) {
-        return;
-    }
-    for (i = entry_start; i < store->entry_count; ++i) {
-        omc_entry* entry;
-
-        entry = &store->entries[i];
-        if ((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) == 0U
-            || entry->origin.name_context_kind
-                   != OMC_ENTRY_NAME_CTX_CASIO_TYPE2_LEGACY) {
-            continue;
-        }
-        entry->flags &= (omc_entry_flags)~OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
-        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
-        entry->origin.name_context_variant = 0U;
-    }
+    (void)store;
+    (void)entry_start;
 }
 
 static void
 omc_read_clear_pentax_simple_context(omc_store* store, omc_size entry_start)
 {
-    omc_size i;
-
-    if (store == (omc_store*)0 || entry_start >= store->entry_count) {
-        return;
-    }
-    for (i = entry_start; i < store->entry_count; ++i) {
-        omc_entry* entry;
-
-        entry = &store->entries[i];
-        if ((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) == 0U
-            || entry->origin.name_context_kind
-                   != OMC_ENTRY_NAME_CTX_PENTAX_MAIN_0062) {
-            continue;
-        }
-        entry->flags &= (omc_entry_flags)~OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
-        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
-        entry->origin.name_context_variant = 0U;
-    }
+    (void)store;
+    (void)entry_start;
 }
 
 static void
 omc_read_clear_ricoh_simple_context(omc_store* store, omc_size entry_start)
 {
-    omc_size i;
-
-    if (store == (omc_store*)0 || entry_start >= store->entry_count) {
-        return;
-    }
-    for (i = entry_start; i < store->entry_count; ++i) {
-        omc_entry* entry;
-
-        entry = &store->entries[i];
-        if ((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) == 0U
-            || entry->origin.name_context_kind
-                   != OMC_ENTRY_NAME_CTX_RICOH_MAIN_COMPAT) {
-            continue;
-        }
-        entry->flags &= (omc_entry_flags)~OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
-        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
-        entry->origin.name_context_variant = 0U;
-    }
+    (void)store;
+    (void)entry_start;
 }
 
 static void
 omc_read_clear_motorola_simple_context(omc_store* store, omc_size entry_start)
 {
-    omc_size i;
+    (void)store;
+    (void)entry_start;
+}
 
-    if (store == (omc_store*)0 || entry_start >= store->entry_count) {
-        return;
-    }
-    for (i = entry_start; i < store->entry_count; ++i) {
-        omc_entry* entry;
-
-        entry = &store->entries[i];
-        if ((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) == 0U
-            || entry->origin.name_context_kind
-                   != OMC_ENTRY_NAME_CTX_MOTOROLA_MAIN_6420) {
-            continue;
-        }
-        entry->flags &= (omc_entry_flags)~OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
-        entry->origin.name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
-        entry->origin.name_context_variant = 0U;
-    }
+static void
+omc_read_clear_nikon_main_simple_context(omc_store* store, omc_size entry_start)
+{
+    (void)store;
+    (void)entry_start;
 }
 
 static void
 omc_read_remap_ricoh_padded_type2_ifd(omc_store* store, omc_size entry_start)
 {
-    static const char type2_ifd[] = "mk_ricoh_type2_0";
-    static const char main_ifd[] = "mk_ricoh0";
-    omc_size i;
-    int have_padded_type2;
-    omc_byte_ref main_ifd_ref;
-
-    if (store == (omc_store*)0 || entry_start >= store->entry_count) {
-        return;
-    }
-
-    have_padded_type2 = 0;
-    for (i = entry_start; i < store->entry_count; ++i) {
-        omc_entry* entry;
-        omc_const_bytes ifd_view;
-
-        entry = &store->entries[i];
-        if (entry->key.kind != OMC_KEY_EXIF_TAG) {
-            continue;
-        }
-        ifd_view = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
-        if (ifd_view.size != (sizeof(type2_ifd) - 1U)
-            || memcmp(ifd_view.data, type2_ifd, sizeof(type2_ifd) - 1U) != 0) {
-            continue;
-        }
-        if (entry->key.u.exif_tag.tag == 0x0104U) {
-            have_padded_type2 = 1;
-            break;
-        }
-    }
-
-    if (!have_padded_type2
-        || omc_arena_append(&store->arena, main_ifd, sizeof(main_ifd) - 1U,
-                            &main_ifd_ref)
-               != OMC_STATUS_OK) {
-        return;
-    }
-
-    for (i = entry_start; i < store->entry_count; ++i) {
-        omc_entry* entry;
-        omc_const_bytes ifd_view;
-
-        entry = &store->entries[i];
-        if (entry->key.kind != OMC_KEY_EXIF_TAG) {
-            continue;
-        }
-        ifd_view = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
-        if (ifd_view.size != (sizeof(type2_ifd) - 1U)
-            || memcmp(ifd_view.data, type2_ifd, sizeof(type2_ifd) - 1U) != 0) {
-            continue;
-        }
-        entry->key.u.exif_tag.ifd = main_ifd_ref;
-    }
-}
-
-static int
-omc_read_ifd_equals_any_kodak_simple(const omc_u8* data, omc_size size)
-{
-    static const char k_type2[] = "mk_kodak_type2_0";
-    static const char k_type5[] = "mk_kodak_type5_0";
-    static const char k_type7[] = "mk_kodak_type7_0";
-    static const char k_type8[] = "mk_kodak_type8_0";
-    static const char k_type10[] = "mk_kodak_type10_0";
-    static const char k_type11[] = "mk_kodak_type11_0";
-
-    if ((size == (sizeof(k_type2) - 1U)
-         && memcmp(data, k_type2, sizeof(k_type2) - 1U) == 0)
-        || (size == (sizeof(k_type5) - 1U)
-            && memcmp(data, k_type5, sizeof(k_type5) - 1U) == 0)
-        || (size == (sizeof(k_type7) - 1U)
-            && memcmp(data, k_type7, sizeof(k_type7) - 1U) == 0)
-        || (size == (sizeof(k_type8) - 1U)
-            && memcmp(data, k_type8, sizeof(k_type8) - 1U) == 0)
-        || (size == (sizeof(k_type10) - 1U)
-            && memcmp(data, k_type10, sizeof(k_type10) - 1U) == 0)
-        || (size == (sizeof(k_type11) - 1U)
-            && memcmp(data, k_type11, sizeof(k_type11) - 1U) == 0)) {
-        return 1;
-    }
-    return 0;
+    (void)store;
+    (void)entry_start;
 }
 
 static void
 omc_read_remap_kodak_simple_ifd(omc_store* store, omc_size entry_start)
 {
-    static const char main_ifd[] = "mk_kodak0";
+    (void)store;
+    (void)entry_start;
+}
+
+static int
+omc_read_read_u16le(const omc_u8* bytes, omc_size size, omc_u64 off,
+                    omc_u16* out_value)
+{
+    omc_u16 value;
+
+    if (bytes == (const omc_u8*)0 || out_value == (omc_u16*)0) {
+        return 0;
+    }
+    if (off + 2U > (omc_u64)size) {
+        return 0;
+    }
+
+    value = 0U;
+    value |= (omc_u16)bytes[(omc_size)off + 0U] << 0;
+    value |= (omc_u16)bytes[(omc_size)off + 1U] << 8;
+    *out_value = value;
+    return 1;
+}
+
+static int
+omc_read_read_u32le(const omc_u8* bytes, omc_size size, omc_u64 off,
+                    omc_u32* out_value)
+{
+    omc_u32 value;
+
+    if (bytes == (const omc_u8*)0 || out_value == (omc_u32*)0) {
+        return 0;
+    }
+    if (off + 4U > (omc_u64)size) {
+        return 0;
+    }
+
+    value = 0U;
+    value |= (omc_u32)bytes[(omc_size)off + 0U] << 0;
+    value |= (omc_u32)bytes[(omc_size)off + 1U] << 8;
+    value |= (omc_u32)bytes[(omc_size)off + 2U] << 16;
+    value |= (omc_u32)bytes[(omc_size)off + 3U] << 24;
+    *out_value = value;
+    return 1;
+}
+
+static int
+omc_read_tiff_elem_size(omc_u16 type16, omc_u32* out_size)
+{
+    if (out_size == (omc_u32*)0) {
+        return 0;
+    }
+
+    switch (type16) {
+        case 1U:
+        case 2U:
+        case 6U:
+        case 7U:
+            *out_size = 1U;
+            return 1;
+        case 3U:
+        case 8U:
+            *out_size = 2U;
+            return 1;
+        case 4U:
+        case 9U:
+        case 11U:
+            *out_size = 4U;
+            return 1;
+        case 5U:
+        case 10U:
+        case 12U:
+            *out_size = 8U;
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int
+omc_read_samsung_type2_malformed_tag21(const omc_u8* raw, omc_size raw_size,
+                                       omc_u16* out_type,
+                                       omc_u32* out_count)
+{
+    omc_u16 entry_count16;
+    omc_u32 table_bytes;
+    omc_u32 i;
+
+    if (raw == (const omc_u8*)0 || out_type == (omc_u16*)0
+        || out_count == (omc_u32*)0) {
+        return 0;
+    }
+    if (!omc_read_read_u16le(raw, raw_size, 0U, &entry_count16)
+        || entry_count16 == 0U) {
+        return 0;
+    }
+
+    table_bytes = (omc_u32)entry_count16 * 12U;
+    if (2U + table_bytes + 4U > raw_size) {
+        return 0;
+    }
+
+    for (i = 0U; i < (omc_u32)entry_count16; ++i) {
+        omc_u64 entry_off;
+        omc_u16 tag16;
+        omc_u16 type16;
+        omc_u32 count32;
+        omc_u32 value_off32;
+        omc_u32 elem_size;
+        omc_u64 value_size;
+
+        entry_off = 2U + ((omc_u64)i * 12U);
+        if (!omc_read_read_u16le(raw, raw_size, entry_off + 0U, &tag16)
+            || !omc_read_read_u16le(raw, raw_size, entry_off + 2U, &type16)
+            || !omc_read_read_u32le(raw, raw_size, entry_off + 4U, &count32)
+            || !omc_read_read_u32le(raw, raw_size, entry_off + 8U,
+                                    &value_off32)
+            || !omc_read_tiff_elem_size(type16, &elem_size)) {
+            return 0;
+        }
+        if (tag16 != 0x0021U) {
+            continue;
+        }
+        value_size = (omc_u64)elem_size * (omc_u64)count32;
+        if (value_size <= 4U) {
+            return 0;
+        }
+        if ((omc_u64)value_off32 <= (omc_u64)raw_size
+            && value_size <= ((omc_u64)raw_size - (omc_u64)value_off32)) {
+            return 0;
+        }
+        *out_type = type16;
+        *out_count = count32;
+        return 1;
+    }
+    return 0;
+}
+
+static int
+omc_read_find_exif_tag_bytes(const omc_store* store, omc_size entry_start,
+                             omc_u16 tag, omc_const_bytes* out_view)
+{
     omc_size i;
-    int have_typed_ifd;
-    omc_byte_ref main_ifd_ref;
 
-    if (store == (omc_store*)0 || entry_start >= store->entry_count) {
-        return;
+    if (store == (const omc_store*)0 || out_view == (omc_const_bytes*)0) {
+        return 0;
     }
 
-    have_typed_ifd = 0;
+    out_view->data = (const omc_u8*)0;
+    out_view->size = 0U;
     for (i = entry_start; i < store->entry_count; ++i) {
-        omc_entry* entry;
-        omc_const_bytes ifd_view;
+        const omc_entry* entry;
 
         entry = &store->entries[i];
-        if (entry->key.kind != OMC_KEY_EXIF_TAG) {
+        if (entry->key.kind != OMC_KEY_EXIF_TAG
+            || entry->key.u.exif_tag.tag != tag) {
             continue;
         }
-        ifd_view = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
-        if (!omc_read_ifd_equals_any_kodak_simple(ifd_view.data, ifd_view.size)) {
-            continue;
+        if (entry->value.kind == OMC_VAL_BYTES
+            || entry->value.kind == OMC_VAL_TEXT
+            || (entry->value.kind == OMC_VAL_ARRAY
+                && (entry->value.elem_type == OMC_ELEM_U8
+                    || entry->value.elem_type == OMC_ELEM_I8))) {
+            *out_view = omc_arena_view(&store->arena, entry->value.u.ref);
+            return out_view->data != (const omc_u8*)0;
         }
-        have_typed_ifd = 1;
-        break;
     }
-
-    if (!have_typed_ifd
-        || omc_arena_append(&store->arena, main_ifd, sizeof(main_ifd) - 1U,
-                            &main_ifd_ref)
-               != OMC_STATUS_OK) {
-        return;
-    }
-
-    for (i = entry_start; i < store->entry_count; ++i) {
-        omc_entry* entry;
-        omc_const_bytes ifd_view;
-
-        entry = &store->entries[i];
-        if (entry->key.kind != OMC_KEY_EXIF_TAG) {
-            continue;
-        }
-        ifd_view = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
-        if (!omc_read_ifd_equals_any_kodak_simple(ifd_view.data, ifd_view.size)) {
-            continue;
-        }
-        entry->key.u.exif_tag.ifd = main_ifd_ref;
-    }
+    return 0;
 }
 
 static int
-omc_read_ifd_equals_sigma_main(const omc_u8* data, omc_size size)
+omc_read_ifd_equals_nikon_preview(const omc_u8* data, omc_size size)
 {
-    static const char k_sigma0[] = "mk_sigma0";
+    static const char k_preview[] = "mk_nikon_preview_0";
 
-    return size == (sizeof(k_sigma0) - 1U)
-           && memcmp(data, k_sigma0, sizeof(k_sigma0) - 1U) == 0;
-}
-
-static int
-omc_read_ifd_equals_sigma_derived(const omc_u8* data, omc_size size)
-{
-    static const char k_wb1[] = "mk_sigma_wbsettings_0";
-    static const char k_wb2[] = "mk_sigma_wbsettings2_0";
-
-    return (size == (sizeof(k_wb1) - 1U)
-            && memcmp(data, k_wb1, sizeof(k_wb1) - 1U) == 0)
-           || (size == (sizeof(k_wb2) - 1U)
-               && memcmp(data, k_wb2, sizeof(k_wb2) - 1U) == 0);
+    return size == (sizeof(k_preview) - 1U)
+           && memcmp(data, k_preview, sizeof(k_preview) - 1U) == 0;
 }
 
 static void
 omc_read_adjust_sigma_simple(omc_store* store, omc_size entry_start)
 {
-    static const char main_ifd[] = "mkifd0";
-    omc_byte_ref main_ifd_ref;
+    (void)store;
+    (void)entry_start;
+}
+
+static void
+omc_read_adjust_samsung_simple(omc_store* store, omc_size entry_start)
+{
+    static const omc_u8 compat_tag0_bytes[4] = { 0x01U, 0x00U, 0x21U, 0x00U };
+    static const char k_type2[] = "mk_samsung_type2_0";
     omc_size i;
-    omc_size write_i;
-    int have_sigma_main;
+    omc_byte_ref type2_ifd_ref;
+    omc_const_bytes makernote_view;
+    omc_u16 malformed_type;
+    omc_u32 malformed_count;
+    int add_empty_tag21;
+    int have_tag0;
+    int have_tag21_any;
 
     if (store == (omc_store*)0 || entry_start >= store->entry_count) {
         return;
     }
 
-    have_sigma_main = 0;
+    type2_ifd_ref.offset = 0U;
+    type2_ifd_ref.size = 0U;
+    makernote_view.data = (const omc_u8*)0;
+    makernote_view.size = 0U;
+    malformed_type = 0U;
+    malformed_count = 0U;
+    add_empty_tag21 = 0;
+    have_tag0 = 0;
+    have_tag21_any = 0;
     for (i = entry_start; i < store->entry_count; ++i) {
         omc_entry* entry;
         omc_const_bytes ifd_view;
@@ -569,42 +569,122 @@ omc_read_adjust_sigma_simple(omc_store* store, omc_size entry_start)
             continue;
         }
         ifd_view = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
-        if (!omc_read_ifd_equals_sigma_main(ifd_view.data, ifd_view.size)) {
+        if (ifd_view.size != (sizeof(k_type2) - 1U)
+            || memcmp(ifd_view.data, k_type2, sizeof(k_type2) - 1U) != 0) {
             continue;
         }
-        have_sigma_main = 1;
-        break;
+        type2_ifd_ref = entry->key.u.exif_tag.ifd;
+        if (entry->key.u.exif_tag.tag == 0x0000U) {
+            have_tag0 = 1;
+            continue;
+        }
+        if (entry->key.u.exif_tag.tag != 0x0021U) {
+            continue;
+        }
+        have_tag21_any = 1;
     }
 
-    if (!have_sigma_main
-        || omc_arena_append(&store->arena, main_ifd, sizeof(main_ifd) - 1U,
-                            &main_ifd_ref)
-               != OMC_STATUS_OK) {
+    if (!have_tag21_any) {
+        if (have_tag21_any
+            || !omc_read_find_exif_tag_bytes(store, entry_start, 0x927CU,
+                                             &makernote_view)
+            || !omc_read_samsung_type2_malformed_tag21(
+                makernote_view.data, makernote_view.size, &malformed_type,
+                &malformed_count)) {
+            if (!have_tag0) {
+                return;
+            }
+        } else {
+            add_empty_tag21 = 1;
+            if (type2_ifd_ref.size == 0U) {
+                if (omc_arena_append(&store->arena, k_type2,
+                                     sizeof(k_type2) - 1U, &type2_ifd_ref)
+                    != OMC_STATUS_OK) {
+                    return;
+                }
+            }
+        }
+    }
+
+    if (type2_ifd_ref.size == 0U) {
+        return;
+    }
+
+    if (add_empty_tag21) {
+        omc_entry entry;
+
+        memset(&entry, 0, sizeof(entry));
+        entry.key.kind = OMC_KEY_EXIF_TAG;
+        entry.key.u.exif_tag.ifd = type2_ifd_ref;
+        entry.key.u.exif_tag.tag = 0x0021U;
+        entry.value.kind = OMC_VAL_EMPTY;
+        entry.value.elem_type = OMC_ELEM_U8;
+        entry.value.text_encoding = OMC_TEXT_UNKNOWN;
+        entry.value.count = 0U;
+        entry.value.u.u64 = 0U;
+        entry.origin.block = OMC_INVALID_BLOCK_ID;
+        entry.origin.order_in_block = 0U;
+        entry.origin.wire_type.family = OMC_WIRE_TIFF;
+        entry.origin.wire_type.code = malformed_type;
+        entry.origin.wire_count = malformed_count;
+        entry.origin.name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
+        entry.origin.name_context_variant = 0U;
+        entry.flags = OMC_ENTRY_FLAG_UNREADABLE;
+        (void)omc_store_add_entry(store, &entry, (omc_entry_id*)0);
+    }
+
+    if (!have_tag0) {
+        omc_entry entry;
+        omc_byte_ref raw_ref;
+
+        if (omc_arena_append(&store->arena, compat_tag0_bytes,
+                             sizeof(compat_tag0_bytes), &raw_ref)
+            != OMC_STATUS_OK) {
+            return;
+        }
+        memset(&entry, 0, sizeof(entry));
+        entry.key.kind = OMC_KEY_EXIF_TAG;
+        entry.key.u.exif_tag.ifd = type2_ifd_ref;
+        entry.key.u.exif_tag.tag = 0x0000U;
+        omc_val_make_bytes(&entry.value, raw_ref);
+        entry.origin.block = OMC_INVALID_BLOCK_ID;
+        entry.origin.order_in_block = 0U;
+        entry.origin.wire_type.family = OMC_WIRE_OTHER;
+        entry.origin.wire_type.code = 0U;
+        entry.origin.wire_count = (omc_u32)sizeof(compat_tag0_bytes);
+        entry.origin.name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
+        entry.origin.name_context_variant = 0U;
+        entry.flags = OMC_ENTRY_FLAG_NONE;
+        (void)omc_store_add_entry(store, &entry, (omc_entry_id*)0);
+    }
+}
+
+static void
+omc_read_prune_nikon_preview_simple(omc_store* store, omc_size entry_start)
+{
+    omc_size i;
+    omc_size write_i;
+
+    if (store == (omc_store*)0 || entry_start >= store->entry_count) {
         return;
     }
 
     write_i = entry_start;
     for (i = entry_start; i < store->entry_count; ++i) {
-        omc_entry entry;
+        omc_entry* entry;
+        omc_const_bytes ifd_view;
 
-        entry = store->entries[i];
-        if (entry.key.kind == OMC_KEY_EXIF_TAG) {
-            omc_const_bytes ifd_view;
-
-            ifd_view = omc_arena_view(&store->arena, entry.key.u.exif_tag.ifd);
-            if (omc_read_ifd_equals_sigma_derived(ifd_view.data,
-                                                  ifd_view.size)) {
+        entry = &store->entries[i];
+        if (entry->key.kind == OMC_KEY_EXIF_TAG) {
+            ifd_view = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
+            if (omc_read_ifd_equals_nikon_preview(ifd_view.data, ifd_view.size)) {
                 continue;
             }
-            if (omc_read_ifd_equals_sigma_main(ifd_view.data, ifd_view.size)) {
-                entry.key.u.exif_tag.ifd = main_ifd_ref;
-                entry.flags
-                    &= (omc_entry_flags)~OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
-                entry.origin.name_context_kind = OMC_ENTRY_NAME_CTX_NONE;
-                entry.origin.name_context_variant = 0U;
-            }
         }
-        store->entries[write_i++] = entry;
+        if (write_i != i) {
+            store->entries[write_i] = *entry;
+        }
+        write_i += 1U;
     }
     store->entry_count = write_i;
 }
@@ -1469,9 +1549,12 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                 omc_read_clear_pentax_simple_context(store, entry_start);
                 omc_read_clear_ricoh_simple_context(store, entry_start);
                 omc_read_clear_motorola_simple_context(store, entry_start);
+                omc_read_clear_nikon_main_simple_context(store, entry_start);
                 omc_read_remap_ricoh_padded_type2_ifd(store, entry_start);
                 omc_read_remap_kodak_simple_ifd(store, entry_start);
                 omc_read_adjust_sigma_simple(store, entry_start);
+                omc_read_adjust_samsung_simple(store, entry_start);
+                omc_read_prune_nikon_preview_simple(store, entry_start);
                 if (exif_res.status == OMC_EXIF_OK
                     || exif_res.status == OMC_EXIF_TRUNCATED) {
                     omc_read_decode_tiff_embedded(use_opts, store, block_id,
@@ -1496,9 +1579,12 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                 omc_read_clear_pentax_simple_context(store, entry_start);
                 omc_read_clear_ricoh_simple_context(store, entry_start);
                 omc_read_clear_motorola_simple_context(store, entry_start);
+                omc_read_clear_nikon_main_simple_context(store, entry_start);
                 omc_read_remap_ricoh_padded_type2_ifd(store, entry_start);
                 omc_read_remap_kodak_simple_ifd(store, entry_start);
                 omc_read_adjust_sigma_simple(store, entry_start);
+                omc_read_adjust_samsung_simple(store, entry_start);
+                omc_read_prune_nikon_preview_simple(store, entry_start);
             }
         } else if (block->kind == OMC_BLK_CIFF) {
             omc_exif_res ciff_res;
@@ -1663,8 +1749,11 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                 omc_read_clear_pentax_simple_context(store, entry_start);
                 omc_read_clear_ricoh_simple_context(store, entry_start);
                 omc_read_clear_motorola_simple_context(store, entry_start);
+                omc_read_clear_nikon_main_simple_context(store, entry_start);
                 omc_read_remap_ricoh_padded_type2_ifd(store, entry_start);
                 omc_read_adjust_sigma_simple(store, entry_start);
+                omc_read_adjust_samsung_simple(store, entry_start);
+                omc_read_prune_nikon_preview_simple(store, entry_start);
             }
         } else if (block->kind == OMC_BLK_COMMENT) {
             omc_const_bytes block_view;

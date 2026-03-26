@@ -87,6 +87,20 @@ f32_bits(float value)
     return bits;
 }
 
+static int
+read_u32le_at(const omc_u8* data, omc_size size, omc_u32 off, omc_u32* out)
+{
+    if (data == (const omc_u8*)0 || out == (omc_u32*)0
+        || ((omc_u64)off + 4U) > size) {
+        return 0;
+    }
+    *out = (omc_u32)data[off + 0U]
+           | ((omc_u32)data[off + 1U] << 8)
+           | ((omc_u32)data[off + 2U] << 16)
+           | ((omc_u32)data[off + 3U] << 24);
+    return 1;
+}
+
 static void
 assert_exif_entry_name(const omc_store* store, const omc_entry* entry,
                        omc_exif_name_policy policy, const char* expected)
@@ -2218,6 +2232,436 @@ make_nikon_makernote_with_preview_settings_and_aftune(omc_u8* out)
 }
 
 static omc_size
+make_nikon_makernote_with_colorbalancec_0104(omc_u8* out)
+{
+    omc_u8 raw[0x0124];
+    static const omc_u32 level_offsets[11] = {
+        0x0038U, 0x004CU, 0x0060U, 0x0074U, 0x0088U, 0x009CU,
+        0x00B0U, 0x00C4U, 0x00D8U, 0x0100U, 0x0114U
+    };
+    static const omc_u32 level_sets[11][4] = {
+        { 444U, 512U, 513U, 396U }, { 374U, 512U, 513U, 480U },
+        { 410U, 512U, 513U, 437U }, { 467U, 512U, 513U, 359U },
+        { 253U, 512U, 513U, 714U }, { 394U, 512U, 513U, 636U },
+        { 397U, 512U, 513U, 466U }, { 447U, 512U, 513U, 375U },
+        { 440U, 512U, 513U, 411U }, { 0U, 0U, 0U, 0U },
+        { 421U, 512U, 513U, 409U }
+    };
+    omc_size size;
+    omc_u32 colorbalance_off;
+    omc_u32 i;
+    omc_u32 k;
+
+    size = 0U;
+    append_raw(out, &size, "Nikon\0", 6U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 1U);
+
+    colorbalance_off = 8U + 2U + 12U + 4U;
+    append_u16le(out, &size, 0x0014U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 0x0124U);
+    append_u32le(out, &size, colorbalance_off);
+    append_u32le(out, &size, 0U);
+
+    memset(raw, 0, sizeof(raw));
+    memcpy(raw, "NRW 0104", 8U);
+    write_u16le_at(raw, 0x0020U, 200U);
+    for (i = 0U; i < 11U; ++i) {
+        for (k = 0U; k < 4U; ++k) {
+            write_u32le_at(raw, level_offsets[i] + (k * 4U), level_sets[i][k]);
+        }
+    }
+    append_raw(out, &size, raw, sizeof(raw));
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_afinfo2_0101(omc_u8* out)
+{
+    omc_u8 raw[0x0053];
+    omc_size size;
+    omc_u32 afinfo_off;
+    omc_u32 i;
+
+    size = 0U;
+    append_raw(out, &size, "Nikon\0", 6U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 1U);
+
+    afinfo_off = 8U + 2U + 12U + 4U;
+    append_u16le(out, &size, 0x00B7U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 0x0053U);
+    append_u32le(out, &size, afinfo_off);
+    append_u32le(out, &size, 0U);
+
+    memset(raw, 0, sizeof(raw));
+    memcpy(raw, "0101", 4U);
+    raw[4U] = 1U;
+    raw[5U] = 2U;
+    raw[6U] = 1U;
+    for (i = 0U; i < 7U; ++i) {
+        raw[0x0008U + i] = (omc_u8)(i + 1U);
+        raw[0x0030U + i] = (omc_u8)(0x10U + i);
+    }
+    raw[0x001CU] = 1U;
+    raw[0x0044U] = 5U;
+    write_u16le_at(raw, 0x0046U, 640U);
+    write_u16le_at(raw, 0x0048U, 480U);
+    write_u16le_at(raw, 0x004AU, 120U);
+    write_u16le_at(raw, 0x004CU, 90U);
+    write_u16le_at(raw, 0x004EU, 36U);
+    write_u16le_at(raw, 0x0050U, 24U);
+    raw[0x0052U] = 1U;
+    append_raw(out, &size, raw, sizeof(raw));
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_afinfo2_0301(omc_u8* out)
+{
+    omc_u8 raw[0x0039];
+    omc_size size;
+    omc_u32 afinfo_off;
+
+    size = 0U;
+    append_raw(out, &size, "Nikon\0", 6U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 1U);
+
+    afinfo_off = 8U + 2U + 12U + 4U;
+    append_u16le(out, &size, 0x00B7U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 0x0039U);
+    append_u32le(out, &size, afinfo_off);
+    append_u32le(out, &size, 0U);
+
+    memset(raw, 0, sizeof(raw));
+    memcpy(raw, "0301", 4U);
+    raw[4U] = 1U;
+    raw[5U] = 8U;
+    raw[6U] = 8U;
+    raw[7U] = 1U;
+    raw[0x000AU] = 0xAAU;
+    raw[0x000BU] = 0xBBU;
+    raw[0x000CU] = 0xCCU;
+    raw[0x000DU] = 0xDDU;
+    raw[0x000EU] = 0xEEU;
+    raw[0x000FU] = 0xFFU;
+    raw[0x0010U] = 0x11U;
+    raw[0x0011U] = 0x22U;
+    raw[0x0012U] = 0x33U;
+    raw[0x0013U] = 0x44U;
+    raw[0x0014U] = 0x55U;
+    raw[0x002AU] = 0x80U;
+    raw[0x002BU] = 0x17U;
+    raw[0x002CU] = 0xB0U;
+    raw[0x002DU] = 0x0FU;
+    raw[0x002EU] = 0xC0U;
+    raw[0x002FU] = 0x0BU;
+    raw[0x0030U] = 0xD8U;
+    raw[0x0031U] = 0x07U;
+    raw[0x0032U] = 0x9EU;
+    raw[0x0033U] = 0x00U;
+    raw[0x0034U] = 0x8CU;
+    raw[0x0035U] = 0x00U;
+    raw[0x0038U] = 5U;
+    append_raw(out, &size, raw, sizeof(raw));
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_lensdata_0100(omc_u8* out)
+{
+    static const omc_u8 raw[] = {
+        '0', '1', '0', '0', 0U, 0U, 101U, 68U, 96U, 152U, 52U, 60U, 107U
+    };
+    omc_size size;
+    omc_u32 lensdata_off;
+
+    size = 0U;
+    append_raw(out, &size, "Nikon\0", 6U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 1U);
+
+    lensdata_off = 8U + 2U + 12U + 4U;
+    append_u16le(out, &size, 0x0098U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, (omc_u32)sizeof(raw));
+    append_u32le(out, &size, lensdata_off);
+    append_u32le(out, &size, 0U);
+    append_raw(out, &size, raw, sizeof(raw));
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_lensdata_0101(omc_u8* out)
+{
+    static const omc_u8 raw[] = {
+        '0', '1', '0', '1', 23U, 52U, 0U, 0U, 44U, 15U,
+        120U, 33U, 68U, 24U, 70U, 121U, 52U, 60U, 107U
+    };
+    omc_size size;
+    omc_u32 lensdata_off;
+
+    size = 0U;
+    append_raw(out, &size, "Nikon\0", 6U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 1U);
+
+    lensdata_off = 8U + 2U + 12U + 4U;
+    append_u16le(out, &size, 0x0098U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, (omc_u32)sizeof(raw));
+    append_u32le(out, &size, lensdata_off);
+    append_u32le(out, &size, 0U);
+    append_raw(out, &size, raw, sizeof(raw));
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_single_settings_long_tag(omc_u8* out,
+                                                   omc_u16 settings_tag,
+                                                   omc_u32 value)
+{
+    omc_size size;
+    omc_u32 settings_off;
+
+    size = 0U;
+    append_raw(out, &size, "Nikon\0", 6U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 2U);
+
+    append_u16le(out, &size, 0x0001U);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, 0x01020304U);
+
+    settings_off = 8U + 2U + (2U * 12U) + 4U;
+    append_u16le(out, &size, 0x004EU);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, 32U);
+    append_u32le(out, &size, settings_off);
+
+    append_u32le(out, &size, 0U);
+    memset(out + size, 0, 32U);
+    write_u32le_at(out, (omc_u32)size + 20U, 1U);
+    write_u16le_at(out, (omc_u32)size + 24U, settings_tag);
+    write_u16be_at(out, (omc_u32)size + 26U, 4U);
+    write_u32le_at(out, (omc_u32)size + 28U, value);
+    size += 32U;
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_single_main_long_tag(omc_u8* out, omc_u16 tag,
+                                               omc_u32 value)
+{
+    omc_size size;
+
+    size = 0U;
+    append_raw(out, &size, "Nikon\0", 6U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 1U);
+
+    append_u16le(out, &size, tag);
+    append_u16le(out, &size, 4U);
+    append_u32le(out, &size, 1U);
+    append_u32le(out, &size, value);
+    append_u32le(out, &size, 0U);
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_flashinfo_version(omc_u8* out, const char* version,
+                                            omc_u32 raw_size,
+                                            omc_u32 fill0106)
+{
+    omc_size size;
+    omc_u32 flashinfo_off;
+    omc_u32 payload_off;
+    omc_u32 i;
+
+    size = 0U;
+    append_raw(out, &size, "Nikon\0", 6U);
+    append_u8(out, &size, 2U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_u8(out, &size, 0U);
+    append_bytes(out, &size, "II");
+    append_u16le(out, &size, 42U);
+    append_u32le(out, &size, 8U);
+    append_u16le(out, &size, 1U);
+
+    flashinfo_off = 8U + 2U + 12U + 4U;
+    append_u16le(out, &size, 0x00A8U);
+    append_u16le(out, &size, 7U);
+    append_u32le(out, &size, raw_size);
+    append_u32le(out, &size, flashinfo_off);
+    append_u32le(out, &size, 0U);
+
+    append_raw(out, &size, version, 4U);
+    for (i = 4U; i < raw_size; ++i) {
+        append_u8(out, &size, 0U);
+    }
+
+    payload_off = 10U + flashinfo_off;
+    if (fill0106 != 0U) {
+        out[payload_off + 0x27U] = 0x12U;
+        out[payload_off + 0x28U] = 0x21U;
+        out[payload_off + 0x29U] = 0x22U;
+        out[payload_off + 0x2AU] = 0x23U;
+    }
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_flashinfo_0108(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 flashinfo_off;
+
+    size = make_nikon_makernote_with_flashinfo_version(out, "0108", 49U, 0U);
+    flashinfo_off = 10U + 8U + 2U + 12U + 4U;
+    out[flashinfo_off + 4U] = 1U;
+    out[flashinfo_off + 6U] = 0x12U;
+    out[flashinfo_off + 7U] = 0x34U;
+    out[flashinfo_off + 0x000AU] = 0x82U;
+    out[flashinfo_off + 0x0014U] = 0x66U;
+    out[flashinfo_off + 0x0015U] = 0x55U;
+    out[flashinfo_off + 0x0028U] = 0x7FU;
+    out[flashinfo_off + 0x0029U] = 0x7EU;
+    out[flashinfo_off + 0x002AU] = 0x7DU;
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_flashinfo_0102(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 flashinfo_off;
+
+    size = make_nikon_makernote_with_flashinfo_version(out, "0102", 21U, 0U);
+    flashinfo_off = 10U + 8U + 2U + 12U + 4U;
+    out[flashinfo_off + 4U] = 1U;
+    out[flashinfo_off + 0x000AU] = 0x11U;
+    out[flashinfo_off + 0x0010U] = 0x00U;
+    out[flashinfo_off + 0x0011U] = 0x00U;
+    out[flashinfo_off + 0x0012U] = 0x22U;
+    out[flashinfo_off + 0x0013U] = 0x33U;
+    out[flashinfo_off + 0x0014U] = 0x44U;
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_flashinfo_0101(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 flashinfo_off;
+
+    size = make_nikon_makernote_with_flashinfo_version(out, "0101", 19U, 0U);
+    flashinfo_off = 10U + 8U + 2U + 12U + 4U;
+    out[flashinfo_off + 4U] = 1U;
+    out[flashinfo_off + 0x000AU] = 0x11U;
+    out[flashinfo_off + 0x000FU] = 0x02U;
+    out[flashinfo_off + 0x0010U] = 0x03U;
+    out[flashinfo_off + 0x0011U] = 0x22U;
+    out[flashinfo_off + 0x0012U] = 0x33U;
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_flashinfo_0103(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 flashinfo_off;
+
+    size = make_nikon_makernote_with_flashinfo_version(out, "0105", 40U, 0U);
+    flashinfo_off = 10U + 8U + 2U + 12U + 4U;
+    out[flashinfo_off + 4U] = 2U;
+    out[flashinfo_off + 0x000AU] = 0x11U;
+    out[flashinfo_off + 0x0011U] = 0x02U;
+    out[flashinfo_off + 0x0012U] = 0x34U;
+    out[flashinfo_off + 0x0013U] = 0x22U;
+    out[flashinfo_off + 0x0014U] = 0x33U;
+    out[flashinfo_off + 0x0015U] = 0x44U;
+    out[flashinfo_off + 0x001BU] = 0x55U;
+    out[flashinfo_off + 0x001DU] = 0x66U;
+    out[flashinfo_off + 0x0027U] = 0x77U;
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_flashinfo_0300(omc_u8* out)
+{
+    omc_size size;
+    omc_u32 flashinfo_off;
+
+    size = make_nikon_makernote_with_flashinfo_version(out, "0300", 49U, 0U);
+    flashinfo_off = 10U + 8U + 2U + 12U + 4U;
+    out[flashinfo_off + 4U] = 1U;
+    out[flashinfo_off + 8U] = 0x90U;
+    out[flashinfo_off + 0x000AU] = 0x81U;
+    out[flashinfo_off + 0x0014U] = 0x22U;
+    out[flashinfo_off + 0x0021U] = 0x40U;
+    out[flashinfo_off + 0x0025U] = 2U;
+    out[flashinfo_off + 0x0026U] = 35U;
+    out[flashinfo_off + 0x0028U] = 0x41U;
+    out[flashinfo_off + 0x0029U] = 0x42U;
+    out[flashinfo_off + 0x002AU] = 0x43U;
+    return size;
+}
+
+static omc_size
+make_nikon_makernote_with_flashinfo_0106(omc_u8* out)
+{
+    return make_nikon_makernote_with_flashinfo_version(out, "0106", 43U, 1U);
+}
+
+static omc_size
 make_canon_filterinfo_makernote(omc_u8* out)
 {
     omc_size size;
@@ -2936,6 +3380,13 @@ make_sony_makernote_tag9050a_ciphered(omc_u8* out)
     write_u16le_at(plain, 0x003AU, 0x1234U);
     write_u16le_at(plain, 0x003CU, 0x5678U);
     plain[0x003FU] = 0x3FU;
+    write_u32le_at(plain, 0x004CU, 0x00ABCDEFU);
+    plain[0x0051U] = 24U;
+    plain[0x0052U] = 3U;
+    plain[0x0053U] = 21U;
+    plain[0x0054U] = 10U;
+    plain[0x0055U] = 11U;
+    plain[0x0056U] = 12U;
     plain[0x0067U] = 0x67U;
     plain[0x0105U] = 0x15U;
     plain[0x0106U] = 0x16U;
@@ -2943,6 +3394,7 @@ make_sony_makernote_tag9050a_ciphered(omc_u8* out)
     write_u16le_at(plain, 0x0109U, 0x0109U);
     plain[0x010BU] = 0x1BU;
     plain[0x0114U] = 0x24U;
+    write_u32le_at(plain, 0x01A0U, 0x00112233U);
     write_u32le_at(plain, 0x01AAU, 0x89ABCDEFU);
     write_u32le_at(plain, 0x01BDU, 0x10203040U);
     return make_sony_makernote_ciphered_blob(out, 0x9050U, plain,
@@ -3109,6 +3561,67 @@ find_exif_entry(const omc_store* store, const char* ifd_name, omc_u16 tag)
     }
 
     return (const omc_entry*)0;
+}
+
+static const omc_entry*
+find_exif_entry_n(const omc_store* store, const char* ifd_name, omc_u16 tag,
+                  omc_u32 index)
+{
+    omc_size i;
+    omc_u32 seen;
+
+    seen = 0U;
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes ifd;
+
+        entry = &store->entries[i];
+        if (entry->key.kind != OMC_KEY_EXIF_TAG) {
+            continue;
+        }
+        if (entry->key.u.exif_tag.tag != tag) {
+            continue;
+        }
+        ifd = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
+        if (ifd.size != strlen(ifd_name)
+            || memcmp(ifd.data, ifd_name, ifd.size) != 0) {
+            continue;
+        }
+        if (seen == index) {
+            return entry;
+        }
+        ++seen;
+    }
+
+    return (const omc_entry*)0;
+}
+
+static omc_u32
+count_exif_entries(const omc_store* store, const char* ifd_name, omc_u16 tag)
+{
+    omc_size i;
+    omc_u32 count;
+
+    count = 0U;
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes ifd;
+
+        entry = &store->entries[i];
+        if (entry->key.kind != OMC_KEY_EXIF_TAG) {
+            continue;
+        }
+        if (entry->key.u.exif_tag.tag != tag) {
+            continue;
+        }
+        ifd = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
+        if (ifd.size == strlen(ifd_name)
+            && memcmp(ifd.data, ifd_name, ifd.size) == 0) {
+            ++count;
+        }
+    }
+
+    return count;
 }
 
 static const omc_entry*
@@ -5099,7 +5612,7 @@ test_nikon_makernote_binary_subdirs(void)
 
     makernote_size = make_nikon_makernote_with_binary_subdirs(makernote);
     tiff_size = make_test_tiff_with_make_and_makernote_count(
-        tiff, "Nikon", makernote, makernote_size, (omc_u32)makernote_size);
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
     omc_store_init(&store);
     omc_exif_opts_init(&opts);
     opts.decode_makernote = 1;
@@ -5220,7 +5733,7 @@ test_nikon_makernote_info_blocks(void)
 
     makernote_size = make_nikon_makernote_with_info_blocks(makernote);
     tiff_size = make_test_tiff_with_make_and_makernote_count(
-        tiff, "Nikon", makernote, makernote_size, (omc_u32)makernote_size);
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
     omc_store_init(&store);
     omc_exif_opts_init(&opts);
     opts.decode_makernote = 1;
@@ -5369,7 +5882,7 @@ test_nikon_preview_settings_and_aftune_makernote(void)
     makernote_size = make_nikon_makernote_with_preview_settings_and_aftune(
         makernote);
     tiff_size = make_test_tiff_with_make_and_makernote_count(
-        tiff, "Nikon", makernote, makernote_size, (omc_u32)makernote_size);
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
     omc_store_init(&store);
     omc_exif_opts_init(&opts);
     opts.decode_makernote = 1;
@@ -5383,6 +5896,18 @@ test_nikon_preview_settings_and_aftune_makernote(void)
     assert(entry->value.kind == OMC_VAL_SCALAR);
     assert(entry->value.elem_type == OMC_ELEM_U32);
     assert(entry->value.u.u64 == 6400U);
+
+    entry = find_exif_entry(&store, "mk_nikon_preview_0", 0x0103U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 6U);
+
+    entry = find_exif_entry(&store, "mk_nikon_preview_0", 0x0202U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 0x1234U);
 
     entry = find_exif_entry(&store, "mk_nikonsettings_main_0", 0x0046U);
     assert(entry != (const omc_entry*)0);
@@ -5402,6 +5927,470 @@ test_nikon_preview_settings_and_aftune_makernote(void)
     assert(entry->value.elem_type == OMC_ELEM_I8);
     assert(entry->value.u.i64 == 5);
 
+    omc_store_fini(&store);
+}
+
+static void
+test_nikon_lensdata_makernote(void)
+{
+    omc_u8 makernote[256];
+    omc_u8 tiff[512];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_nikon_makernote_with_lensdata_0100(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_nikon_lensdata0100_0", 0x000AU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 52U);
+
+    entry = find_exif_entry(&store, "mk_nikon_lensdata0100_0", 0x000CU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 107U);
+    omc_store_fini(&store);
+
+    makernote_size = make_nikon_makernote_with_lensdata_0101(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_nikon_lensdata0101_0", 0x0010U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U8);
+    assert(entry->value.u.u64 == 52U);
+    omc_store_fini(&store);
+}
+
+static void
+test_nikon_colorbalance_and_afinfo_makernote(void)
+{
+    omc_u8 makernote[512];
+    omc_u8 tiff[1024];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    omc_const_bytes view;
+    omc_u32 v0;
+    omc_u32 v3;
+
+    makernote_size = make_nikon_makernote_with_colorbalancec_0104(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_nikon_colorbalancec_0", 0x0004U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_TEXT);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(view.size == 4U);
+    assert(memcmp(view.data, "0104", 4U) == 0);
+
+    entry = find_exif_entry(&store, "mk_nikon_colorbalancec_0", 0x0020U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 200U);
+
+    entry = find_exif_entry(&store, "mk_nikon_colorbalancec_0", 0x0038U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.count == 4U);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(read_u32le_at(view.data, view.size, 0U, &v0));
+    assert(read_u32le_at(view.data, view.size, 12U, &v3));
+    assert(v0 == 888U);
+    assert(v3 == 792U);
+
+    entry = find_exif_entry(&store, "mk_nikon_colorbalancec_0", 0x0114U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_ARRAY);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.count == 4U);
+    view = omc_arena_view(&store.arena, entry->value.u.ref);
+    assert(read_u32le_at(view.data, view.size, 0U, &v0));
+    assert(read_u32le_at(view.data, view.size, 12U, &v3));
+    assert(v0 == 842U);
+    assert(v3 == 818U);
+    omc_store_fini(&store);
+
+    makernote_size = make_nikon_makernote_with_afinfo2_0101(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_nikon_afinfo2v0101_0", 0x0030U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_BYTES);
+    assert(entry->value.count == 7U);
+
+    entry = find_exif_entry(&store, "mk_nikon_afinfo2v0101_0", 0x004AU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 120U);
+    assert(find_exif_entry(&store, "mk_nikon_afinfo2v0101_0", 0x0014U)
+           == (const omc_entry*)0);
+    omc_store_fini(&store);
+
+    makernote_size = make_nikon_makernote_with_afinfo2_0301(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+
+    entry = find_exif_entry(&store, "mk_nikon_afinfo2v0300_0", 0x002AU);
+    assert(entry != (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_nikon_afinfo2v0300_0", 0x002CU);
+    assert(entry != (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_nikon_afinfo2v0300_0", 0x002EU);
+    assert(entry != (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_nikon_afinfo2v0300_0", 0x0031U);
+    assert(entry != (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_nikon_afinfo2v0300_0", 0x0032U);
+    assert(entry != (const omc_entry*)0);
+    omc_store_fini(&store);
+}
+
+static void
+test_nikon_settings_contextual_names(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_nikon_makernote_with_single_settings_long_tag(
+        makernote, 0x0001U, 33U);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Nikon", "NIKON Z 5", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_nikonsettings_main_0", 0x0001U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "ISOAutoHiLimit");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "NikonSettings_0x0001");
+    omc_store_fini(&store);
+
+    makernote_size = make_nikon_makernote_with_single_settings_long_tag(
+        makernote, 0x001DU, 1U);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Nikon", "NIKON Z 5", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_nikonsettings_main_0", 0x001DU);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) == 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "AF-CPrioritySel");
+    omc_store_fini(&store);
+
+    makernote_size = make_nikon_makernote_with_single_settings_long_tag(
+        makernote, 0x00B1U, 9U);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Nikon", "NIKON Z 5", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_nikonsettings_main_0", 0x00B1U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "MovieFunc1Button");
+    omc_store_fini(&store);
+
+    makernote_size = make_nikon_makernote_with_single_settings_long_tag(
+        makernote, 0x0103U, 3U);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Nikon", "NIKON D6", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_nikonsettings_main_0", 0x0103U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_CANONICAL,
+                           "HDMIOutputHDR");
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "NikonSettings_0x0103");
+    omc_store_fini(&store);
+}
+
+static void
+test_nikon_flashinfo_variants(void)
+{
+    omc_u8 makernote[256];
+    omc_u8 tiff[512];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+    const omc_entry* entry2;
+
+    makernote_size = make_nikon_makernote_with_flashinfo_0108(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    assert(find_exif_entry(&store, "mk_nikon_flashinfo0107_0", 0x0014U)
+           == (const omc_entry*)0);
+    entry = find_exif_entry(&store, "mk_nikon_flashinfo0107_0", 0x0028U);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert(entry->origin.name_context_kind
+           == OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_GROUPS);
+    assert(entry->origin.name_context_variant == 1U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "FlashGroupACompensation");
+    omc_store_fini(&store);
+
+    makernote_size = make_nikon_makernote_with_flashinfo_0102(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    assert(count_exif_entries(&store, "mk_nikon_flashinfo0102_0", 0x0011U)
+           == 2U);
+    entry = find_exif_entry(&store, "mk_nikon_flashinfo0102_0", 0x0010U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->origin.name_context_kind
+           == OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_LEGACY);
+    assert(entry->origin.name_context_variant == 5U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "FlashGroupAControlMode");
+    entry = find_exif_entry(&store, "mk_nikon_flashinfo0102_0", 0x0012U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->origin.name_context_variant == 2U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "FlashGroupACompensation");
+    omc_store_fini(&store);
+
+    makernote_size = make_nikon_makernote_with_flashinfo_0101(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_nikon_flashinfo0100_0", 0x000AU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->origin.name_context_variant == 8U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "FlashCompensation");
+    omc_store_fini(&store);
+
+    makernote_size = make_nikon_makernote_with_flashinfo_0103(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_nikon_flashinfo0103_0", 0x0011U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->origin.name_context_variant == 5U);
+    entry = find_exif_entry_n(&store, "mk_nikon_flashinfo0103_0", 0x0012U, 0U);
+    entry2 = find_exif_entry_n(&store, "mk_nikon_flashinfo0103_0", 0x0012U, 1U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry2 != (const omc_entry*)0);
+    assert(entry->origin.name_context_variant == 6U);
+    assert(entry2->origin.name_context_variant == 7U);
+    omc_store_fini(&store);
+
+    makernote_size = make_nikon_makernote_with_flashinfo_0300(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_nikon_flashinfo0300_0", 0x0028U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->origin.name_context_kind
+           == OMC_ENTRY_NAME_CTX_NIKON_FLASHINFO_GROUPS);
+    assert(entry->origin.name_context_variant == 1U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "FlashGroupACompensation");
+    omc_store_fini(&store);
+
+    makernote_size = make_nikon_makernote_with_flashinfo_0106(makernote);
+    tiff_size = make_test_tiff_with_make_and_makernote_count(
+        tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_nikon_flashinfo0106_0", 0x0027U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->origin.name_context_variant == 1U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "FlashCompensation");
+    omc_store_fini(&store);
+}
+
+static void
+test_nikon_main_contextual_names(void)
+{
+    omc_u8 makernote[128];
+    omc_u8 tiff[256];
+    omc_size makernote_size;
+    omc_size tiff_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res res;
+    const omc_entry* entry;
+
+    makernote_size = make_nikon_makernote_with_single_main_long_tag(
+        makernote, 0x002EU, 3008U);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Nikon", "NIKON Z 5", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_nikon0", 0x002EU);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert(entry->origin.name_context_kind == OMC_ENTRY_NAME_CTX_NIKON_MAIN_Z);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "AFAreaXPosition");
+    omc_store_fini(&store);
+
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Nikon", "NIKON D850", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_nikon0", 0x002EU);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) == 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Nikon_0x002e");
+    omc_store_fini(&store);
+
+    makernote_size = make_nikon_makernote_with_single_main_long_tag(
+        makernote, 0x000AU, 0U);
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Nikon", "E700", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_nikon0", 0x000AU);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+    assert(entry->origin.name_context_kind
+           == OMC_ENTRY_NAME_CTX_NIKON_MAIN_COMPACT_TYPE2);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "DigitalZoom");
+    omc_store_fini(&store);
+
+    tiff_size = make_test_tiff_with_make_model_and_makernote_count(
+        tiff, "Nikon", "NIKON D850", makernote, makernote_size,
+        (omc_u32)makernote_size);
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    res = omc_exif_dec(tiff, tiff_size, &store, OMC_INVALID_BLOCK_ID,
+                       (omc_exif_ifd_ref*)0, 0U, &opts);
+    assert(res.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "mk_nikon0", 0x000AU);
+    assert(entry != (const omc_entry*)0);
+    assert((entry->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) == 0U);
+    assert_exif_entry_name(&store, entry, OMC_EXIF_NAME_EXIFTOOL_COMPAT,
+                           "Nikon_0x000a");
     omc_store_fini(&store);
 }
 
@@ -5560,6 +6549,20 @@ test_sony_model_selected_variants(void)
     assert(entry->value.kind == OMC_VAL_SCALAR);
     assert(entry->value.elem_type == OMC_ELEM_U32);
     assert(entry->value.u.u64 == 0x89ABCDEFU);
+    entry = find_exif_entry(&store, "mk_sony_tag9050a_0", 0x004CU);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 0x00ABCDEFU);
+    entry = find_exif_entry(&store, "mk_sony_tag9050a_0", 0x0051U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_BYTES);
+    assert(entry->value.count == 6U);
+    entry = find_exif_entry(&store, "mk_sony_tag9050a_0", 0x01A0U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 0x00112233U);
     omc_store_fini(&store);
 
     makernote_size = make_sony_makernote_tag9050b_ciphered(makernote);
@@ -5625,6 +6628,12 @@ test_sony_model_selected_variants(void)
     assert(entry->value.kind == OMC_VAL_SCALAR);
     assert(entry->value.elem_type == OMC_ELEM_I16);
     assert(entry->value.u.i64 == -9);
+    entry = find_exif_entry(&store, "mk_sony_tag2010e_0", 0x1254U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U16);
+    assert(entry->value.u.u64 == 0x1254U);
+    assert((entry->flags & OMC_ENTRY_FLAG_DERIVED) != 0U);
     entry = find_exif_entry(&store, "mk_sony_meterinfo_0", 0x0000U);
     assert(entry != (const omc_entry*)0);
     assert(entry->value.kind == OMC_VAL_BYTES);
@@ -7238,6 +8247,11 @@ main(void)
     test_canon_custom_functions2_makernote();
     test_canon_afinfo2_makernote();
     test_nikon_preview_settings_and_aftune_makernote();
+    test_nikon_lensdata_makernote();
+    test_nikon_colorbalance_and_afinfo_makernote();
+    test_nikon_settings_contextual_names();
+    test_nikon_flashinfo_variants();
+    test_nikon_main_contextual_names();
     test_sony_makernote_and_postpass();
     test_sony_model_selected_variants();
     test_sony_extra_derived_blocks();

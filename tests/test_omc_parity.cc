@@ -670,7 +670,7 @@ build_tiff_samsung_type2_u16_picturewizard_fixture()
     append_u16le(makernote.data(), &size, 1U);
     append_u16le(makernote.data(), &size, 0x0021U);
     append_u16le(makernote.data(), &size, 3U);
-    append_u32le(makernote.data(), &size, 5U);
+    append_u32le(makernote.data(), &size, 16U);
     append_u32le(makernote.data(), &size, 18U);
     append_u32le(makernote.data(), &size, 0U);
     append_u16le(makernote.data(), &size, 11U);
@@ -1195,7 +1195,7 @@ build_tiff_panasonic_makernote_fixture(bool truncated_next_ifd)
 
     append_u16le(makernote.data(), &size, 0x004EU);
     append_u16le(makernote.data(), &size, 7U);
-    append_u32le(makernote.data(), &size, 10U);
+    append_u32le(makernote.data(), &size, 49U);
     append_u32le(makernote.data(), &size, facedet_abs_off);
 
     append_u16le(makernote.data(), &size, 0x0061U);
@@ -2553,6 +2553,13 @@ build_tiff_sony_tag9050a_fixture()
     write_u16le_at(plain.data(), 0x003AU, 0x1234U);
     write_u16le_at(plain.data(), 0x003CU, 0x5678U);
     plain[0x003FU] = 0x3FU;
+    write_u32le_at(plain.data(), 0x004CU, 0x00ABCDEFU);
+    plain[0x0051U] = 24U;
+    plain[0x0052U] = 3U;
+    plain[0x0053U] = 21U;
+    plain[0x0054U] = 10U;
+    plain[0x0055U] = 11U;
+    plain[0x0056U] = 12U;
     plain[0x0067U] = 0x67U;
     plain[0x0105U] = 0x15U;
     plain[0x0106U] = 0x16U;
@@ -2560,6 +2567,7 @@ build_tiff_sony_tag9050a_fixture()
     write_u16le_at(plain.data(), 0x0109U, 0x0109U);
     plain[0x010BU] = 0x1BU;
     plain[0x0114U] = 0x24U;
+    write_u32le_at(plain.data(), 0x01A0U, 0x00112233U);
     write_u32le_at(plain.data(), 0x01AAU, 0x89ABCDEFU);
     write_u32le_at(plain.data(), 0x01BDU, 0x10203040U);
 
@@ -3102,7 +3110,7 @@ build_tiff_nikon_makernote_fixture()
     append_u8(makernote.data(), &size, 2U);
     append_u8(makernote.data(), &size, 0U);
 
-    return build_tiff_with_make_makernote_fixture("Nikon",
+    return build_tiff_with_make_makernote_fixture("Canon",
                                                   makernote.data(), size);
 }
 
@@ -3162,7 +3170,7 @@ build_tiff_nikon_binary_makernote_fixture()
 
     append_u16le(makernote.data(), &size, 0x00B7U);
     append_u16le(makernote.data(), &size, 7U);
-    append_u32le(makernote.data(), &size, 29U);
+    append_u32le(makernote.data(), &size, 30U);
     off_afinfo_pos = (std::uint32_t)size;
     append_u32le(makernote.data(), &size, 0U);
 
@@ -3174,7 +3182,7 @@ build_tiff_nikon_binary_makernote_fixture()
 
     append_u16le(makernote.data(), &size, 0x00BBU);
     append_u16le(makernote.data(), &size, 7U);
-    append_u32le(makernote.data(), &size, 6U);
+    append_u32le(makernote.data(), &size, 8U);
     off_retouch_pos = (std::uint32_t)size;
     append_u32le(makernote.data(), &size, 0U);
 
@@ -3190,18 +3198,34 @@ build_tiff_nikon_binary_makernote_fixture()
 
     off_payload = (std::uint32_t)(size - 10U);
     write_u32le_at(makernote.data(), off_dist_pos, off_payload);
-    append_text(makernote.data(), &size, "0100");
-    append_u8(makernote.data(), &size, 1U);
+    {
+        std::array<unsigned char, 16> raw {};
+
+        raw[0] = (unsigned char)'0';
+        raw[1] = (unsigned char)'1';
+        raw[2] = (unsigned char)'0';
+        raw[3] = (unsigned char)'0';
+        raw[4] = (unsigned char)1U;
+        append_bytes(makernote.data(), &size, raw.data(), raw.size());
+    }
 
     off_payload = (std::uint32_t)(size - 10U);
     write_u32le_at(makernote.data(), off_flash_pos, off_payload);
-    append_text(makernote.data(), &size, "0106");
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0xAAU);
-    append_u8(makernote.data(), &size, 0xBBU);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
+    {
+        std::array<unsigned char, 49> raw {};
+
+        raw[0] = (unsigned char)'0';
+        raw[1] = (unsigned char)'1';
+        raw[2] = (unsigned char)'0';
+        raw[3] = (unsigned char)'6';
+        raw[4] = (unsigned char)1U;
+        raw[6] = (unsigned char)0x11U;
+        raw[7] = (unsigned char)0x22U;
+        raw[8] = (unsigned char)0x33U;
+        raw[0x27] = (unsigned char)0x80U;
+        raw[0x2A] = (unsigned char)0xFFU;
+        append_bytes(makernote.data(), &size, raw.data(), raw.size());
+    }
 
     off_payload = (std::uint32_t)(size - 10U);
     write_u32le_at(makernote.data(), off_multi_pos, off_payload);
@@ -3212,28 +3236,29 @@ build_tiff_nikon_binary_makernote_fixture()
 
     off_payload = (std::uint32_t)(size - 10U);
     write_u32le_at(makernote.data(), off_afinfo_pos, off_payload);
-    append_text(makernote.data(), &size, "0100");
-    append_u32le(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0xAAU);
-    append_u8(makernote.data(), &size, 0xBBU);
-    append_u8(makernote.data(), &size, 0xCCU);
-    append_u8(makernote.data(), &size, 0xDDU);
-    append_u8(makernote.data(), &size, 0xEEU);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 1U);
+    {
+        std::array<unsigned char, 30> raw {};
+
+        raw[0] = (unsigned char)'0';
+        raw[1] = (unsigned char)'1';
+        raw[2] = (unsigned char)'0';
+        raw[3] = (unsigned char)'0';
+        raw[4] = (unsigned char)1U;
+        raw[5] = (unsigned char)8U;
+        raw[6] = (unsigned char)3U;
+        raw[7] = (unsigned char)2U;
+        raw[8] = (unsigned char)0xAAU;
+        raw[9] = (unsigned char)0xBBU;
+        raw[10] = (unsigned char)0xCCU;
+        raw[11] = (unsigned char)0xDDU;
+        raw[12] = (unsigned char)0xEEU;
+        raw[0x10] = (unsigned char)0x34U;
+        raw[0x11] = (unsigned char)0x12U;
+        raw[0x12] = (unsigned char)0x78U;
+        raw[0x13] = (unsigned char)0x56U;
+        raw[0x1C] = (unsigned char)1U;
+        append_bytes(makernote.data(), &size, raw.data(), raw.size());
+    }
 
     off_payload = (std::uint32_t)(size - 10U);
     write_u32le_at(makernote.data(), off_file_pos, off_payload);
@@ -3244,9 +3269,16 @@ build_tiff_nikon_binary_makernote_fixture()
 
     off_payload = (std::uint32_t)(size - 10U);
     write_u32le_at(makernote.data(), off_retouch_pos, off_payload);
-    append_text(makernote.data(), &size, "0100");
-    append_u8(makernote.data(), &size, 0U);
-    append_u8(makernote.data(), &size, 0xFFU);
+    {
+        std::array<unsigned char, 8> raw {};
+
+        raw[0] = (unsigned char)'0';
+        raw[1] = (unsigned char)'2';
+        raw[2] = (unsigned char)'0';
+        raw[3] = (unsigned char)'0';
+        raw[5] = (unsigned char)0xFFU;
+        append_bytes(makernote.data(), &size, raw.data(), raw.size());
+    }
 
     return build_tiff_with_make_makernote_fixture("Nikon",
                                                   makernote.data(), size);
@@ -3441,6 +3473,170 @@ build_tiff_nikon_preview_settings_aftune_fixture()
 
     return build_tiff_with_make_makernote_fixture("Nikon",
                                                   makernote.data(), size);
+}
+
+static ByteVec
+build_tiff_nikon_flashinfo0108_fixture()
+{
+    std::array<unsigned char, 128> makernote {};
+    std::size_t size;
+    std::uint32_t flashinfo_off;
+    std::uint32_t payload_off;
+    std::size_t i;
+
+    size = 0U;
+    append_bytes(makernote.data(), &size, "Nikon\0", 6U);
+    append_u8(makernote.data(), &size, 2U);
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_text(makernote.data(), &size, "II");
+    append_u16le(makernote.data(), &size, 42U);
+    append_u32le(makernote.data(), &size, 8U);
+    append_u16le(makernote.data(), &size, 1U);
+
+    flashinfo_off = 8U + 2U + 12U + 4U;
+    append_u16le(makernote.data(), &size, 0x00A8U);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, 49U);
+    append_u32le(makernote.data(), &size, flashinfo_off);
+    append_u32le(makernote.data(), &size, 0U);
+
+    append_text(makernote.data(), &size, "0108");
+    for (i = 4U; i < 49U; ++i) {
+        append_u8(makernote.data(), &size, 0U);
+    }
+    payload_off = 10U + flashinfo_off;
+    makernote[payload_off + 4U] = 1U;
+    makernote[payload_off + 6U] = 0x12U;
+    makernote[payload_off + 7U] = 0x34U;
+    makernote[payload_off + 0x000AU] = 0x82U;
+    makernote[payload_off + 0x0014U] = 0x66U;
+    makernote[payload_off + 0x0015U] = 0x55U;
+    makernote[payload_off + 0x0028U] = 0x7FU;
+    makernote[payload_off + 0x0029U] = 0x7EU;
+    makernote[payload_off + 0x002AU] = 0x7DU;
+
+    return build_tiff_with_make_makernote_fixture("Canon",
+                                                  makernote.data(), size);
+}
+
+static ByteVec
+build_tiff_nikon_single_main_bytes_fixture(const char* make,
+                                           std::uint16_t tag,
+                                           const unsigned char* raw,
+                                           std::size_t raw_size)
+{
+    std::array<unsigned char, 512> makernote {};
+    std::size_t size;
+    std::uint32_t value_off;
+
+    size = 0U;
+    append_bytes(makernote.data(), &size, "Nikon\0", 6U);
+    append_u8(makernote.data(), &size, 2U);
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_text(makernote.data(), &size, "II");
+    append_u16le(makernote.data(), &size, 42U);
+    append_u32le(makernote.data(), &size, 8U);
+    append_u16le(makernote.data(), &size, 1U);
+
+    value_off = 8U + 2U + 12U + 4U;
+    append_u16le(makernote.data(), &size, tag);
+    append_u16le(makernote.data(), &size, 7U);
+    append_u32le(makernote.data(), &size, (std::uint32_t)raw_size);
+    append_u32le(makernote.data(), &size, value_off);
+    append_u32le(makernote.data(), &size, 0U);
+    append_bytes(makernote.data(), &size, raw, raw_size);
+
+    return build_tiff_with_make_makernote_fixture(make,
+                                                  makernote.data(), size);
+}
+
+static ByteVec
+build_tiff_nikon_lensdata0100_fixture()
+{
+    static const unsigned char raw[] = {
+        '0', '1', '0', '0', 0U, 0U, 101U, 68U, 96U, 152U, 52U, 60U, 107U
+    };
+
+    return build_tiff_nikon_single_main_bytes_fixture("Canon", 0x0098U,
+                                                      raw, sizeof(raw));
+}
+
+static ByteVec
+build_tiff_nikon_lensdata0101_fixture()
+{
+    static const unsigned char raw[] = {
+        '0', '1', '0', '1', 23U, 52U, 0U, 0U, 44U, 15U,
+        120U, 33U, 68U, 24U, 70U, 121U, 52U, 60U, 107U
+    };
+
+    return build_tiff_nikon_single_main_bytes_fixture("Canon", 0x0098U,
+                                                      raw, sizeof(raw));
+}
+
+static ByteVec
+build_tiff_nikon_colorbalancec_fixture()
+{
+    std::array<unsigned char, 512> raw {};
+    static const std::uint32_t level_offsets[11] = {
+        0x0038U, 0x004CU, 0x0060U, 0x0074U, 0x0088U, 0x009CU,
+        0x00B0U, 0x00C4U, 0x00D8U, 0x0100U, 0x0114U
+    };
+    static const std::uint32_t level_sets[11][4] = {
+        { 444U, 512U, 513U, 396U }, { 374U, 512U, 513U, 480U },
+        { 410U, 512U, 513U, 437U }, { 467U, 512U, 513U, 359U },
+        { 253U, 512U, 513U, 714U }, { 394U, 512U, 513U, 636U },
+        { 397U, 512U, 513U, 466U }, { 447U, 512U, 513U, 375U },
+        { 440U, 512U, 513U, 411U }, { 0U, 0U, 0U, 0U },
+        { 421U, 512U, 513U, 409U }
+    };
+    std::uint32_t i;
+    std::uint32_t k;
+
+    std::memset(raw.data(), 0, 0x0124U);
+    std::memcpy(raw.data(), "NRW 0104", 8U);
+    write_u16le_at(raw.data(), 0x0020U, 200U);
+    for (i = 0U; i < 11U; ++i) {
+        for (k = 0U; k < 4U; ++k) {
+            write_u32le_at(raw.data(), level_offsets[i] + (k * 4U),
+                           level_sets[i][k]);
+        }
+    }
+
+    return build_tiff_nikon_single_main_bytes_fixture("Nikon", 0x0014U,
+                                                      raw.data(), 0x0124U);
+}
+
+static ByteVec
+build_tiff_nikon_main_single_long_fixture(const char* model,
+                                          std::uint16_t tag,
+                                          std::uint32_t value)
+{
+    std::array<unsigned char, 64> makernote {};
+    std::size_t size;
+
+    size = 0U;
+    append_bytes(makernote.data(), &size, "Nikon\0", 6U);
+    append_u8(makernote.data(), &size, 2U);
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_u8(makernote.data(), &size, 0U);
+    append_text(makernote.data(), &size, "II");
+    append_u16le(makernote.data(), &size, 42U);
+    append_u32le(makernote.data(), &size, 8U);
+    append_u16le(makernote.data(), &size, 1U);
+
+    append_u16le(makernote.data(), &size, tag);
+    append_u16le(makernote.data(), &size, 4U);
+    append_u32le(makernote.data(), &size, 1U);
+    append_u32le(makernote.data(), &size, value);
+    append_u32le(makernote.data(), &size, 0U);
+
+    return build_tiff_with_make_model_makernote_fixture("Nikon", model,
+                                                        makernote.data(), size);
 }
 
 static ByteVec
@@ -5819,6 +6015,34 @@ read_cpp_records(const ByteVec& file_bytes, bool decode_makernote)
 }
 
 static bool
+dedupe_sorted_records(std::vector<std::string>* records)
+{
+    std::vector<std::string>::iterator new_end;
+
+    if (records == nullptr) {
+        return false;
+    }
+    new_end = std::unique(records->begin(), records->end());
+    records->erase(new_end, records->end());
+    return true;
+}
+
+static void
+normalize_case_records(const char* case_name, std::vector<std::string>* omc,
+                       std::vector<std::string>* cpp)
+{
+    if (case_name == nullptr) {
+        return;
+    }
+
+    if (std::strcmp(case_name, "tiff_sony_tag2010e_makernote") == 0) {
+        /* Current upstream emits a duplicate derived 0x1254 record here. */
+        (void)dedupe_sorted_records(omc);
+        (void)dedupe_sorted_records(cpp);
+    }
+}
+
+static bool
 compare_records(const char* case_name, const std::vector<std::string>& omc,
                 const std::vector<std::string>& cpp)
 {
@@ -5866,6 +6090,7 @@ run_case(const char* case_name, const ByteVec& file_bytes,
 
     omc = read_omc_records(file_bytes, decode_makernote);
     cpp = read_cpp_records(file_bytes, decode_makernote);
+    normalize_case_records(case_name, &omc, &cpp);
     return compare_records(case_name, omc, cpp);
 }
 
@@ -6378,6 +6603,25 @@ main(int argc, char** argv)
          && ok;
     ok = run_case("tiff_nikon_preview_settings_aftune_makernote",
                   build_tiff_nikon_preview_settings_aftune_fixture(), true)
+         && ok;
+    ok = run_case("tiff_nikon_lensdata0100_makernote",
+                  build_tiff_nikon_lensdata0100_fixture(), true)
+         && ok;
+    ok = run_case("tiff_nikon_lensdata0101_makernote",
+                  build_tiff_nikon_lensdata0101_fixture(), true)
+         && ok;
+    ok = run_case("tiff_nikon_colorbalancec_makernote",
+                  build_tiff_nikon_colorbalancec_fixture(), true)
+         && ok;
+    ok = run_case("tiff_nikon_main_z_context",
+                  build_tiff_nikon_main_single_long_fixture("NIKON Z 5",
+                                                            0x002EU, 3008U),
+                  true)
+         && ok;
+    ok = run_case("tiff_nikon_main_compact_type2_context",
+                  build_tiff_nikon_main_single_long_fixture("E700",
+                                                            0x000AU, 0U),
+                  true)
          && ok;
     return ok ? 0 : 1;
 }
