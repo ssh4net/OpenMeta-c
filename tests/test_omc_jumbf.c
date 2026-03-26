@@ -2780,7 +2780,7 @@ test_jumbf_emits_c2pa_explicit_reference_status_fields(void)
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_label_hits"),
-                             1U);
+                             0U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.reference_key_hits"),
@@ -2821,7 +2821,7 @@ test_jumbf_emits_c2pa_explicit_reference_status_fields(void)
                                  &store,
                                  "c2pa.semantic.manifest.0."
                                  "explicit_reference_label_hits"),
-                             1U);
+                             0U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic."
@@ -3045,7 +3045,7 @@ test_jumbf_emits_c2pa_explicit_reference_status_fields(void)
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.1.explicit_reference_label_hits"),
-                             1U);
+                             0U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.1.reference_key_hits"),
@@ -4303,7 +4303,7 @@ test_jumbf_emits_c2pa_explicit_reference_nested_map_index_label_href_conflict_is
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_index_hits"),
-                             2U);
+                             1U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_label_hits"),
@@ -4311,7 +4311,7 @@ test_jumbf_emits_c2pa_explicit_reference_nested_map_index_label_href_conflict_is
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_ambiguous_signature_count"),
-                             1U);
+                             0U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_unresolved_signature_count"),
@@ -4320,12 +4320,12 @@ test_jumbf_emits_c2pa_explicit_reference_nested_map_index_label_href_conflict_is
                                  &store,
                                  "c2pa.semantic.signature.0."
                                  "explicit_reference_resolved_claim_count"),
-                             2U);
+                             1U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0."
                                  "explicit_reference_ambiguous"),
-                             1U);
+                             0U);
 
     omc_store_fini(&store);
 }
@@ -4653,7 +4653,7 @@ test_jumbf_emits_c2pa_explicit_reference_mixed_index_label_uri_deterministic(voi
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_ambiguous_signature_count"),
-                             1U);
+                             0U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_index_hits"),
@@ -4661,7 +4661,7 @@ test_jumbf_emits_c2pa_explicit_reference_mixed_index_label_uri_deterministic(voi
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_label_hits"),
-                             2U);
+                             0U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.reference_key_hits"),
@@ -4673,7 +4673,7 @@ test_jumbf_emits_c2pa_explicit_reference_mixed_index_label_uri_deterministic(voi
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_label_hits"),
-                             2U);
+                             0U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_present"),
@@ -4681,7 +4681,7 @@ test_jumbf_emits_c2pa_explicit_reference_mixed_index_label_uri_deterministic(voi
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_resolved_claim_count"),
-                             3U);
+                             1U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_unresolved"),
@@ -4689,30 +4689,26 @@ test_jumbf_emits_c2pa_explicit_reference_mixed_index_label_uri_deterministic(voi
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_ambiguous"),
-                             1U);
+                             0U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.linked_claim_count"),
-                             3U);
+                             1U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.cross_claim_link_count"),
-                             3U);
+                             1U);
     assert_text_entry_contains(
         &store,
         find_jumbf_field(&store,
                          "c2pa.semantic.signature.0.linked_claim.0.prefix"),
         "claims[1]");
-    assert_text_entry_contains(
-        &store,
-        find_jumbf_field(&store,
-                         "c2pa.semantic.signature.0.linked_claim.1.prefix"),
-        "claims[2]");
-    assert_text_entry_contains(
-        &store,
-        find_jumbf_field(&store,
-                         "c2pa.semantic.signature.0.linked_claim.2.prefix"),
-        "claims[3]");
+    assert(find_jumbf_field(&store,
+                            "c2pa.semantic.signature.0.linked_claim.1.prefix")
+           == (const omc_entry*)0);
+    assert(find_jumbf_field(&store,
+                            "c2pa.semantic.signature.0.linked_claim.2.prefix")
+           == (const omc_entry*)0);
 
     omc_store_fini(&store);
 }
@@ -4800,11 +4796,11 @@ test_jumbf_emits_c2pa_explicit_reference_index_label_uri_conflict_is_ambiguous(v
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_label_hits"),
-                             2U);
+                             0U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_ambiguous_signature_count"),
-                             1U);
+                             0U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_unresolved_signature_count"),
@@ -4816,11 +4812,11 @@ test_jumbf_emits_c2pa_explicit_reference_index_label_uri_conflict_is_ambiguous(v
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_resolved_claim_count"),
-                             2U);
+                             1U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_ambiguous"),
-                             1U);
+                             0U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_unresolved"),
@@ -5169,6 +5165,507 @@ test_jumbf_verify_requested_with_detached_payload_resolution(void)
 }
 
 static void
+test_jumbf_verify_requested_with_explicit_claim_ref_detached_payload_resolution(
+    void)
+{
+    static const omc_u8 k_claim_bad[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const omc_u8 k_claim_good[] = { 0xA1U, 0x61U, 'a', 0x44U };
+    omc_u8 cbor_payload[768];
+    omc_size cbor_size;
+    omc_u8 jumbf[1024];
+    omc_size jumbf_size;
+    omc_store store;
+    omc_jumbf_opts opts;
+    omc_jumbf_res res;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "manifests");
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "claims");
+    append_cbor_array(cbor_payload, &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload, &cbor_size, 2U);
+    append_cbor_text(cbor_payload, &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload, &cbor_size, k_claim_bad,
+                      sizeof(k_claim_bad));
+    append_cbor_text(cbor_payload, &cbor_size, "signatures");
+    append_cbor_array(cbor_payload, &cbor_size, 1U);
+    append_cbor_map(cbor_payload, &cbor_size, 3U);
+    append_cbor_text(cbor_payload, &cbor_size, "alg");
+    append_cbor_text(cbor_payload, &cbor_size, "es256");
+    append_cbor_text(cbor_payload, &cbor_size, "payload");
+    append_cbor_text(cbor_payload, &cbor_size, "null");
+    append_cbor_text(cbor_payload, &cbor_size, "claim_ref_id");
+    append_cbor_i64(cbor_payload, &cbor_size, 1);
+
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload, &cbor_size, k_claim_good,
+                      sizeof(k_claim_good));
+
+    jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
+    omc_store_init(&store);
+    omc_jumbf_opts_init(&opts);
+    opts.verify_c2pa = 1;
+
+    res = omc_jumbf_dec(jumbf, jumbf_size, &store, 0U, OMC_ENTRY_FLAG_NONE,
+                        &opts);
+    assert(res.status == OMC_JUMBF_OK);
+    assert(res.verify_status == OMC_C2PA_VERIFY_DISABLED_BY_BUILD);
+    assert(res.verify_backend_selected == OMC_C2PA_VERIFY_BACKEND_NONE);
+
+    assert_text_entry_equals(&store,
+                             find_jumbf_field(&store, "c2pa.verify.status"),
+                             "disabled_by_build");
+    assert_scalar_u8_equals(find_jumbf_field(&store,
+                                             "c2pa.verify.signatures_present"),
+                            1U);
+    assert_scalar_u64_equals(find_jumbf_field(
+                                 &store,
+                                 "c2pa.semantic.signature.0."
+                                 "explicit_reference_resolved_claim_count"),
+                             1U);
+    assert_scalar_u64_equals(find_jumbf_field(
+                                 &store, "c2pa.signature.0.payload_is_null"),
+                             0U);
+    assert_bytes_entry_equals(
+        &store, find_jumbf_field(&store, "c2pa.signature.0.payload_bytes"),
+        k_claim_good, sizeof(k_claim_good));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_jumbf_verify_requested_with_explicit_label_detached_payload_resolution(
+    void)
+{
+    static const omc_u8 k_claim_bad[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const omc_u8 k_claim_good[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    omc_u8 cbor_payload[1024];
+    omc_size cbor_size;
+    omc_u8 cbor_box[1152];
+    omc_size cbor_box_size;
+    omc_u8 claim_bad_jumb[128];
+    omc_size claim_bad_jumb_size;
+    omc_u8 claim_good_jumb[128];
+    omc_size claim_good_jumb_size;
+    omc_u8 root_payload[1536];
+    omc_size root_payload_size;
+    omc_u8 jumbf[1792];
+    omc_size jumbf_size;
+    omc_store store;
+    omc_jumbf_opts opts;
+    omc_jumbf_res res;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "manifests");
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "claims");
+    append_cbor_array(cbor_payload, &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload, &cbor_size, 2U);
+    append_cbor_text(cbor_payload, &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload, &cbor_size, k_claim_bad,
+                      sizeof(k_claim_bad));
+    append_cbor_text(cbor_payload, &cbor_size, "signatures");
+    append_cbor_array(cbor_payload, &cbor_size, 1U);
+    append_cbor_map(cbor_payload, &cbor_size, 3U);
+    append_cbor_text(cbor_payload, &cbor_size, "alg");
+    append_cbor_text(cbor_payload, &cbor_size, "es256");
+    append_cbor_text(cbor_payload, &cbor_size, "payload");
+    append_cbor_text(cbor_payload, &cbor_size, "null");
+    append_cbor_text(cbor_payload, &cbor_size, "jumbf_uri");
+    append_cbor_text(cbor_payload, &cbor_size,
+                     "https://example.test/asset?jumbf=c2pa.claim.good");
+
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload, &cbor_size, k_claim_good,
+                      sizeof(k_claim_good));
+
+    cbor_box_size = 0U;
+    append_box(cbor_box, &cbor_box_size, "cbor", cbor_payload, cbor_size);
+    claim_bad_jumb_size = make_claim_jumb_box(claim_bad_jumb, "c2pa.claim.bad",
+                                              k_claim_bad,
+                                              sizeof(k_claim_bad));
+    claim_good_jumb_size = make_claim_jumb_box(claim_good_jumb,
+                                               "c2pa.claim.good",
+                                               k_claim_good,
+                                               sizeof(k_claim_good));
+
+    root_payload_size = 0U;
+    append_bytes(root_payload, &root_payload_size, claim_bad_jumb,
+                 claim_bad_jumb_size);
+    append_bytes(root_payload, &root_payload_size, claim_good_jumb,
+                 claim_good_jumb_size);
+    append_bytes(root_payload, &root_payload_size, cbor_box, cbor_box_size);
+
+    jumbf_size = make_jumb_box_with_label(jumbf, "c2pa", root_payload,
+                                          root_payload_size);
+    omc_store_init(&store);
+    omc_jumbf_opts_init(&opts);
+    opts.verify_c2pa = 1;
+
+    res = omc_jumbf_dec(jumbf, jumbf_size, &store, 0U, OMC_ENTRY_FLAG_NONE,
+                        &opts);
+    assert(res.status == OMC_JUMBF_OK);
+    assert(res.verify_status == OMC_C2PA_VERIFY_DISABLED_BY_BUILD);
+    assert(res.verify_backend_selected == OMC_C2PA_VERIFY_BACKEND_NONE);
+
+    assert_text_entry_equals(&store,
+                             find_jumbf_field(&store, "c2pa.verify.status"),
+                             "disabled_by_build");
+    assert_scalar_u8_equals(find_jumbf_field(&store,
+                                             "c2pa.verify.signatures_present"),
+                            1U);
+    assert_scalar_u64_equals(find_jumbf_field(
+                                 &store, "c2pa.signature.0.payload_is_null"),
+                             0U);
+    assert_bytes_entry_equals(
+        &store, find_jumbf_field(&store, "c2pa.signature.0.payload_bytes"),
+        k_claim_good, sizeof(k_claim_good));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_jumbf_verify_requested_unresolved_detached_payload_ref_skips_fallback(
+    void)
+{
+    static const omc_u8 k_claim_bad[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const omc_u8 k_claim_other[] = { 0xA1U, 0x61U, 'a', 0x77U };
+    omc_u8 cbor_payload[1024];
+    omc_size cbor_size;
+    omc_u8 jumbf[1280];
+    omc_size jumbf_size;
+    omc_store store;
+    omc_jumbf_opts opts;
+    omc_jumbf_res res;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "manifests");
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "claims");
+    append_cbor_array(cbor_payload, &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload, &cbor_size, 2U);
+    append_cbor_text(cbor_payload, &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload, &cbor_size, k_claim_bad,
+                      sizeof(k_claim_bad));
+    append_cbor_text(cbor_payload, &cbor_size, "signatures");
+    append_cbor_array(cbor_payload, &cbor_size, 1U);
+    append_cbor_map(cbor_payload, &cbor_size, 3U);
+    append_cbor_text(cbor_payload, &cbor_size, "alg");
+    append_cbor_text(cbor_payload, &cbor_size, "es256");
+    append_cbor_text(cbor_payload, &cbor_size, "payload");
+    append_cbor_text(cbor_payload, &cbor_size, "null");
+    append_cbor_text(cbor_payload, &cbor_size, "claim_ref_id");
+    append_cbor_i64(cbor_payload, &cbor_size, 999);
+
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload, &cbor_size, k_claim_other,
+                      sizeof(k_claim_other));
+
+    jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
+    omc_store_init(&store);
+    omc_jumbf_opts_init(&opts);
+    opts.verify_c2pa = 1;
+
+    res = omc_jumbf_dec(jumbf, jumbf_size, &store, 0U, OMC_ENTRY_FLAG_NONE,
+                        &opts);
+    assert(res.status == OMC_JUMBF_OK);
+    assert(res.verify_status == OMC_C2PA_VERIFY_DISABLED_BY_BUILD);
+    assert(res.verify_backend_selected == OMC_C2PA_VERIFY_BACKEND_NONE);
+
+    assert_text_entry_equals(&store,
+                             find_jumbf_field(&store, "c2pa.verify.status"),
+                             "disabled_by_build");
+    assert_scalar_u8_equals(find_jumbf_field(&store,
+                                             "c2pa.verify.signatures_present"),
+                            1U);
+    assert_scalar_u64_equals(find_jumbf_field(
+                                 &store,
+                                 "c2pa.semantic.signature.0."
+                                 "explicit_reference_unresolved"),
+                             1U);
+    assert_scalar_u64_equals(find_jumbf_field(
+                                 &store, "c2pa.signature.0.payload_is_null"),
+                             1U);
+    assert(find_jumbf_field(&store, "c2pa.signature.0.payload_bytes")
+           == (const omc_entry*)0);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_jumbf_verify_requested_hyphen_reference_unresolved_skips_fallback(void)
+{
+    static const omc_u8 k_claim_bad[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const omc_u8 k_claim_other[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    omc_u8 cbor_payload[1024];
+    omc_size cbor_size;
+    omc_u8 jumbf[1280];
+    omc_size jumbf_size;
+    omc_store store;
+    omc_jumbf_opts opts;
+    omc_jumbf_res res;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "manifests");
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "claims");
+    append_cbor_array(cbor_payload, &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload, &cbor_size, 2U);
+    append_cbor_text(cbor_payload, &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload, &cbor_size, k_claim_bad,
+                      sizeof(k_claim_bad));
+    append_cbor_text(cbor_payload, &cbor_size, "signatures");
+    append_cbor_array(cbor_payload, &cbor_size, 1U);
+    append_cbor_map(cbor_payload, &cbor_size, 4U);
+    append_cbor_text(cbor_payload, &cbor_size, "alg");
+    append_cbor_text(cbor_payload, &cbor_size, "es256");
+    append_cbor_text(cbor_payload, &cbor_size, "payload");
+    append_cbor_text(cbor_payload, &cbor_size, "null");
+    append_cbor_text(cbor_payload, &cbor_size, "claim-ref-index");
+    append_cbor_i64(cbor_payload, &cbor_size, 999);
+    append_cbor_text(cbor_payload, &cbor_size, "claim-reference");
+    append_cbor_text(cbor_payload, &cbor_size, "c2pa.claim.missing");
+    append_cbor_text(cbor_payload, &cbor_size, "claim-uri");
+    append_cbor_text(cbor_payload, &cbor_size,
+                     "https://example.test/asset?jumbf=c2pa.claim.missing");
+
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload, &cbor_size, k_claim_other,
+                      sizeof(k_claim_other));
+
+    jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
+    omc_store_init(&store);
+    omc_jumbf_opts_init(&opts);
+    opts.verify_c2pa = 1;
+
+    res = omc_jumbf_dec(jumbf, jumbf_size, &store, 0U, OMC_ENTRY_FLAG_NONE,
+                        &opts);
+    assert(res.status == OMC_JUMBF_OK);
+    assert(res.verify_status == OMC_C2PA_VERIFY_DISABLED_BY_BUILD);
+    assert(res.verify_backend_selected == OMC_C2PA_VERIFY_BACKEND_NONE);
+
+    assert_text_entry_equals(&store,
+                             find_jumbf_field(&store, "c2pa.verify.status"),
+                             "disabled_by_build");
+    assert_scalar_u8_equals(find_jumbf_field(&store,
+                                             "c2pa.verify.signatures_present"),
+                            1U);
+    assert_scalar_u64_equals(find_jumbf_field(
+                                 &store,
+                                 "c2pa.semantic.signature.0."
+                                 "explicit_reference_unresolved"),
+                             1U);
+    assert_scalar_u64_equals(find_jumbf_field(
+                                 &store, "c2pa.signature.0.payload_is_null"),
+                             1U);
+    assert(find_jumbf_field(&store, "c2pa.signature.0.payload_bytes")
+           == (const omc_entry*)0);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_jumbf_verify_requested_percent_encoded_claim_ref_detached_payload_resolution(
+    void)
+{
+    static const omc_u8 k_claim_good[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    omc_u8 cbor_payload[2048];
+    omc_size cbor_size;
+    omc_u8 jumbf[2560];
+    omc_size jumbf_size;
+    omc_store store;
+    omc_jumbf_opts opts;
+    omc_jumbf_res res;
+    omc_u32 i;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "manifests");
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "claims");
+    append_cbor_array(cbor_payload, &cbor_size, 12U);
+
+    for (i = 0U; i < 11U; ++i) {
+        omc_u8 claim_value[4];
+
+        claim_value[0] = 0xA1U;
+        claim_value[1] = 0x61U;
+        claim_value[2] = (omc_u8)'a';
+        claim_value[3] = (omc_u8)(i + 1U);
+
+        append_cbor_map(cbor_payload, &cbor_size, (i == 0U) ? 2U : 1U);
+        append_cbor_text(cbor_payload, &cbor_size, "claim");
+        append_cbor_bytes(cbor_payload, &cbor_size, claim_value,
+                          sizeof(claim_value));
+        if (i == 0U) {
+            append_cbor_text(cbor_payload, &cbor_size, "signatures");
+            append_cbor_array(cbor_payload, &cbor_size, 1U);
+            append_cbor_map(cbor_payload, &cbor_size, 3U);
+            append_cbor_text(cbor_payload, &cbor_size, "alg");
+            append_cbor_text(cbor_payload, &cbor_size, "es256");
+            append_cbor_text(cbor_payload, &cbor_size, "payload");
+            append_cbor_text(cbor_payload, &cbor_size, "null");
+            append_cbor_text(cbor_payload, &cbor_size, "claim_ref");
+            append_cbor_text(
+                cbor_payload, &cbor_size,
+                "https://example.test/media/%63%6C%61%69%6D%73%5B11%5D");
+        }
+    }
+
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload, &cbor_size, k_claim_good,
+                      sizeof(k_claim_good));
+
+    jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
+    omc_store_init(&store);
+    omc_jumbf_opts_init(&opts);
+    opts.verify_c2pa = 1;
+
+    res = omc_jumbf_dec(jumbf, jumbf_size, &store, 0U, OMC_ENTRY_FLAG_NONE,
+                        &opts);
+    assert(res.status == OMC_JUMBF_OK);
+    assert(res.verify_status == OMC_C2PA_VERIFY_DISABLED_BY_BUILD);
+    assert(res.verify_backend_selected == OMC_C2PA_VERIFY_BACKEND_NONE);
+
+    assert_text_entry_equals(&store,
+                             find_jumbf_field(&store, "c2pa.verify.status"),
+                             "disabled_by_build");
+    assert_scalar_u8_equals(find_jumbf_field(&store,
+                                             "c2pa.verify.signatures_present"),
+                            1U);
+    assert_scalar_u64_equals(find_jumbf_field(
+                                 &store, "c2pa.signature.0.payload_is_null"),
+                             0U);
+    assert_bytes_entry_equals(
+        &store, find_jumbf_field(&store, "c2pa.signature.0.payload_bytes"),
+        k_claim_good, sizeof(k_claim_good));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_jumbf_verify_requested_percent_encoded_jumbf_label_detached_payload_resolution(
+    void)
+{
+    static const omc_u8 k_claim_bad[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const omc_u8 k_claim_good[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    omc_u8 cbor_payload[1024];
+    omc_size cbor_size;
+    omc_u8 cbor_box[1152];
+    omc_size cbor_box_size;
+    omc_u8 claim_bad_jumb[128];
+    omc_size claim_bad_jumb_size;
+    omc_u8 claim_good_jumb[128];
+    omc_size claim_good_jumb_size;
+    omc_u8 root_payload[1536];
+    omc_size root_payload_size;
+    omc_u8 jumbf[1792];
+    omc_size jumbf_size;
+    omc_store store;
+    omc_jumbf_opts opts;
+    omc_jumbf_res res;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "manifests");
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "claims");
+    append_cbor_array(cbor_payload, &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload, &cbor_size, 2U);
+    append_cbor_text(cbor_payload, &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload, &cbor_size, k_claim_bad,
+                      sizeof(k_claim_bad));
+    append_cbor_text(cbor_payload, &cbor_size, "signatures");
+    append_cbor_array(cbor_payload, &cbor_size, 1U);
+    append_cbor_map(cbor_payload, &cbor_size, 4U);
+    append_cbor_text(cbor_payload, &cbor_size, "alg");
+    append_cbor_text(cbor_payload, &cbor_size, "es256");
+    append_cbor_text(cbor_payload, &cbor_size, "payload");
+    append_cbor_text(cbor_payload, &cbor_size, "null");
+    append_cbor_text(cbor_payload, &cbor_size, "claim_reference");
+    append_cbor_text(cbor_payload, &cbor_size, "c2pa.claim.bad");
+    append_cbor_text(cbor_payload, &cbor_size, "claim_uri");
+    append_cbor_text(
+        cbor_payload, &cbor_size,
+        "https://example.test/asset?jumbf=%63%32%70%61%2E%63%6C%61%69%6D%2E%67%6F%6F%64");
+
+    append_cbor_map(cbor_payload, &cbor_size, 1U);
+    append_cbor_text(cbor_payload, &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload, &cbor_size, k_claim_good,
+                      sizeof(k_claim_good));
+
+    cbor_box_size = 0U;
+    append_box(cbor_box, &cbor_box_size, "cbor", cbor_payload, cbor_size);
+    claim_bad_jumb_size = make_claim_jumb_box(claim_bad_jumb, "c2pa.claim.bad",
+                                              k_claim_bad,
+                                              sizeof(k_claim_bad));
+    claim_good_jumb_size = make_claim_jumb_box(claim_good_jumb,
+                                               "c2pa.claim.good",
+                                               k_claim_good,
+                                               sizeof(k_claim_good));
+
+    root_payload_size = 0U;
+    append_bytes(root_payload, &root_payload_size, claim_bad_jumb,
+                 claim_bad_jumb_size);
+    append_bytes(root_payload, &root_payload_size, claim_good_jumb,
+                 claim_good_jumb_size);
+    append_bytes(root_payload, &root_payload_size, cbor_box, cbor_box_size);
+
+    jumbf_size = make_jumb_box_with_label(jumbf, "c2pa", root_payload,
+                                          root_payload_size);
+    omc_store_init(&store);
+    omc_jumbf_opts_init(&opts);
+    opts.verify_c2pa = 1;
+
+    res = omc_jumbf_dec(jumbf, jumbf_size, &store, 0U, OMC_ENTRY_FLAG_NONE,
+                        &opts);
+    assert(res.status == OMC_JUMBF_OK);
+    assert(res.verify_status == OMC_C2PA_VERIFY_DISABLED_BY_BUILD);
+    assert(res.verify_backend_selected == OMC_C2PA_VERIFY_BACKEND_NONE);
+
+    assert_text_entry_equals(&store,
+                             find_jumbf_field(&store, "c2pa.verify.status"),
+                             "disabled_by_build");
+    assert_scalar_u8_equals(find_jumbf_field(&store,
+                                             "c2pa.verify.signatures_present"),
+                            1U);
+    assert_scalar_u64_equals(find_jumbf_field(
+                                 &store, "c2pa.signature.0.payload_is_null"),
+                             0U);
+    assert_bytes_entry_equals(
+        &store, find_jumbf_field(&store, "c2pa.signature.0.payload_bytes"),
+        k_claim_good, sizeof(k_claim_good));
+
+    omc_store_fini(&store);
+}
+
+static void
 test_jumbf_verify_require_resolved_references_unresolved_disabled_by_build(void)
 {
     static const omc_u8 k_claim0[] = { 0xA1U, 0x61U, 0x61U, 0x01U };
@@ -5468,6 +5965,12 @@ main(void)
     test_jumbf_verify_scaffold_not_requested_by_default();
     test_jumbf_verify_scaffold_requested();
     test_jumbf_verify_requested_with_detached_payload_resolution();
+    test_jumbf_verify_requested_with_explicit_claim_ref_detached_payload_resolution();
+    test_jumbf_verify_requested_with_explicit_label_detached_payload_resolution();
+    test_jumbf_verify_requested_unresolved_detached_payload_ref_skips_fallback();
+    test_jumbf_verify_requested_hyphen_reference_unresolved_skips_fallback();
+    test_jumbf_verify_requested_percent_encoded_claim_ref_detached_payload_resolution();
+    test_jumbf_verify_requested_percent_encoded_jumbf_label_detached_payload_resolution();
     test_jumbf_verify_require_resolved_references_unresolved_disabled_by_build();
     test_jumbf_verify_require_resolved_references_ambiguous_disabled_by_build();
     test_jumbf_verify_require_resolved_references_disabled_policy_does_not_fail();

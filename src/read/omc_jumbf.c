@@ -58,6 +58,7 @@ typedef struct omc_jumbf_sig_proj {
     omc_u32 ref_label_count;
     char ref_labels[8][128];
     omc_u32 ref_label_lens[8];
+    omc_u8 ref_priority_level;
     int has_algorithm;
     char algorithm[32];
     omc_u32 algorithm_len;
@@ -1916,6 +1917,48 @@ omc_jumbf_key_matches_indexed_field_suffix(omc_const_bytes key,
 }
 
 static int
+omc_jumbf_key_matches_indexed_segment_prefix(omc_const_bytes key,
+                                             const char* prefix,
+                                             omc_u32 prefix_len,
+                                             const char* marker)
+{
+    omc_u32 pos;
+    omc_u32 marker_len;
+
+    if (key.data == (const omc_u8*)0 || prefix == (const char*)0
+        || marker == (const char*)0 || key.size <= prefix_len + 1U) {
+        return 0;
+    }
+    if (memcmp(key.data, prefix, prefix_len) != 0
+        || key.data[prefix_len] != (omc_u8)'.') {
+        return 0;
+    }
+
+    marker_len = omc_jumbf_cstr_size(marker);
+    pos = prefix_len + 1U;
+    if (pos + marker_len + 3U > key.size
+        || memcmp(key.data + pos, marker, marker_len) != 0) {
+        return 0;
+    }
+    pos += marker_len;
+    if (pos >= key.size || key.data[pos] != (omc_u8)'[') {
+        return 0;
+    }
+    pos += 1U;
+    if (pos >= key.size || !omc_jumbf_is_digit(key.data[pos])) {
+        return 0;
+    }
+    while (pos < key.size && omc_jumbf_is_digit(key.data[pos])) {
+        pos += 1U;
+    }
+    if (pos >= key.size || key.data[pos] != (omc_u8)']') {
+        return 0;
+    }
+    pos += 1U;
+    return pos == key.size || omc_jumbf_path_separator(key.data[pos]);
+}
+
+static int
 omc_jumbf_key_is_indexed_item(omc_const_bytes key, const char* prefix,
                               omc_u32 prefix_len, omc_u32 index)
 {
@@ -3675,6 +3718,18 @@ omc_jumbf_sig_proj_add_ref_label(omc_jumbf_sig_proj* sig, const char* label,
     return 1;
 }
 
+static void
+omc_jumbf_sig_proj_clear_explicit_refs(omc_jumbf_sig_proj* sig)
+{
+    if (sig == (omc_jumbf_sig_proj*)0) {
+        return;
+    }
+    sig->ref_index_count = 0U;
+    sig->ref_label_count = 0U;
+    sig->has_claim_ref_index = 0;
+    sig->claim_ref_index = 0U;
+}
+
 static int
 omc_jumbf_sig_proj_note_ref_scalar(omc_jumbf_sig_proj* sig,
                                    omc_const_bytes key, omc_elem_type elem_type,
@@ -3734,6 +3789,10 @@ omc_jumbf_sig_proj_note_ref_scalar(omc_jumbf_sig_proj* sig,
         return 1;
     }
     sig->reference_key_hits += 1U;
+    if (sig->ref_priority_level < 3U) {
+        omc_jumbf_sig_proj_clear_explicit_refs(sig);
+        sig->ref_priority_level = 3U;
+    }
 
     value = 0U;
     have_value = 0;
@@ -3770,37 +3829,172 @@ omc_jumbf_sig_proj_note_ref_text(omc_jumbf_sig_proj* sig,
     omc_u32 ref_index;
     char label[128];
     omc_u32 label_len;
+    omc_u8 priority;
 
     if (sig == (omc_jumbf_sig_proj*)0 || text == (const char*)0) {
         return 0;
     }
-    if (!(omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                      "claim_reference")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "claim_uri")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "jumbf_uri")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "reference.claim_reference")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "reference.uri")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "reference.jumbf_uri")
-          || omc_jumbf_key_matches_indexed_field_suffix(
-                 key, sig->prefix, sig->prefix_len, "references",
-                 "claim_reference")
-          || omc_jumbf_key_matches_indexed_field_suffix(
-                 key, sig->prefix, sig->prefix_len, "references", "uri")
-          || omc_jumbf_key_matches_indexed_field_suffix(
-                 key, sig->prefix, sig->prefix_len, "references",
-                 "jumbf_uri")
-          || omc_jumbf_key_matches_indexed_field_suffix(
-                 key, sig->prefix, sig->prefix_len, "references", "href")
-          || omc_jumbf_key_matches_indexed_field_suffix(
-                 key, sig->prefix, sig->prefix_len, "references", "link"))) {
+    priority = 0U;
+    if (omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
+                                    "claim_reference")
+        || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
+                                       "claim-reference")
+        || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
+                                       "reference.claim_reference")
+        || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
+                                       "reference.claim-reference")
+        || omc_jumbf_key_matches_indexed_field_suffix(
+               key, sig->prefix, sig->prefix_len, "references",
+               "claim_reference")
+        || omc_jumbf_key_matches_indexed_field_suffix(
+               key, sig->prefix, sig->prefix_len, "references",
+               "claim-reference")) {
+        priority = 1U;
+    } else if (omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
+                                           "claim_ref")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "claim_id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "claim_ref_id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "claim_reference_id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "reference_index")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "reference_id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "ref_index")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "ref_id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "claim-reference-id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "claim-id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "claim-ref")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "claim-ref-id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "reference-index")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "reference-id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "ref-index")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "ref-id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "claim_uri")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "jumbf_uri")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "claim-uri")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "jumbf-uri")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "reference.id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "reference.claim_id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "reference.claim_ref")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "reference.claim_ref_id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "reference.claim_reference_id")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "reference.index")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len, "reference.uri")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "reference.jumbf_uri")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "reference.claim-uri")
+               || omc_jumbf_key_matches_field(key, sig->prefix,
+                                              sig->prefix_len,
+                                              "reference.jumbf-uri")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references", "id")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "claim_id")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "claim_ref")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "claim_ref_id")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "claim_reference_id")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "index")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "claim-ref")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "claim-id")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "claim-ref-id")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "claim-reference-id")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "reference-index")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "reference-id")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "ref-index")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "ref-id")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references", "uri")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "jumbf_uri")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "claim-uri")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references",
+                      "jumbf-uri")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references", "href")
+               || omc_jumbf_key_matches_indexed_field_suffix(
+                      key, sig->prefix, sig->prefix_len, "references", "link")
+               || omc_jumbf_key_matches_indexed_segment_prefix(
+                      key, sig->prefix, sig->prefix_len, "references")) {
+        priority = 2U;
+    }
+    if (priority == 0U) {
         return 1;
     }
     sig->reference_key_hits += 1U;
+    if (priority < sig->ref_priority_level) {
+        return 1;
+    }
+    if (priority > sig->ref_priority_level) {
+        omc_jumbf_sig_proj_clear_explicit_refs(sig);
+        sig->ref_priority_level = priority;
+    }
 
     if (omc_jumbf_ref_text_parse_index(text, text_len, &ref_index)
         && !omc_jumbf_sig_proj_add_ref_index(sig, ref_index)) {
