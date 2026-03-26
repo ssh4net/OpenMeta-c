@@ -75,6 +75,7 @@ typedef struct omc_jumbf_sig_proj {
     int has_certificate_ref;
     omc_byte_ref certificate_ref;
     omc_u32 x5chain_count;
+    omc_byte_ref x5chain_refs[8];
 } omc_jumbf_sig_proj;
 
 typedef struct omc_jumbf_ing_proj {
@@ -225,6 +226,67 @@ typedef enum omc_c2pa_verify_detail_status {
     OMC_C2PA_VERIFY_DETAIL_FAIL = 2
 } omc_c2pa_verify_detail_status;
 
+typedef struct omc_c2pa_profile_summary {
+    int available;
+    omc_u64 manifest_present;
+    omc_u64 claim_present;
+    omc_u64 signature_present;
+    omc_u64 claim_count;
+    omc_u64 signature_count;
+    omc_u64 signature_linked;
+    omc_u64 signature_orphan;
+    omc_u64 explicit_reference_signature_count;
+    omc_u64 explicit_reference_unresolved_signature_count;
+    omc_u64 explicit_reference_ambiguous_signature_count;
+} omc_c2pa_profile_summary;
+
+typedef struct omc_c2pa_verify_evaluation {
+    omc_c2pa_verify_status status;
+    omc_c2pa_verify_detail_status profile_status;
+    const char* profile_reason;
+    omc_c2pa_verify_detail_status chain_status;
+    const char* chain_reason;
+    omc_c2pa_profile_summary profile_summary;
+} omc_c2pa_verify_evaluation;
+
+typedef struct omc_c2pa_verify_candidate {
+    char prefix[OMC_JUMBF_PATH_CAP];
+    omc_u32 prefix_len;
+    int has_source_box_prefix;
+    char source_box_prefix[OMC_JUMBF_PATH_CAP];
+    omc_u32 source_box_prefix_len;
+    int has_source_claim_prefix;
+    char source_claim_prefix[OMC_JUMBF_PATH_CAP];
+    omc_u32 source_claim_prefix_len;
+    int has_algorithm;
+    char algorithm[32];
+    omc_u32 algorithm_len;
+    int has_cose_unprotected_alg_int;
+    omc_s64 cose_unprotected_alg_int;
+    int has_cose_protected_ref;
+    omc_byte_ref cose_protected_ref;
+    int has_cose_payload_ref;
+    omc_byte_ref cose_payload_ref;
+    int cose_payload_is_null;
+    int has_cose_signature_ref;
+    omc_byte_ref cose_signature_ref;
+    int has_signature_ref;
+    omc_byte_ref signature_ref;
+    int has_public_key_ref;
+    omc_byte_ref public_key_ref;
+    int has_certificate_ref;
+    omc_byte_ref certificate_ref;
+    omc_u32 certificate_chain_ref_count;
+    omc_byte_ref certificate_chain_refs[8];
+    omc_u32 detached_payload_ref_count;
+    omc_byte_ref detached_payload_refs[8];
+} omc_c2pa_verify_candidate;
+
+typedef struct omc_c2pa_verify_candidate_list {
+    omc_u32 count;
+    omc_c2pa_verify_candidate items[16];
+} omc_c2pa_verify_candidate_list;
+
 static int
 omc_jumbf_emit_c2pa_marker(omc_jumbf_ctx* ctx, const char* marker_path,
                            omc_u32 marker_len);
@@ -237,6 +299,28 @@ omc_c2pa_verify_status_name(omc_c2pa_verify_status status);
 
 static const char*
 omc_c2pa_verify_detail_status_name(omc_c2pa_verify_detail_status status);
+
+static void
+omc_c2pa_profile_summary_init(omc_c2pa_profile_summary* summary);
+
+static void
+omc_c2pa_verify_evaluation_init(omc_c2pa_verify_evaluation* evaluation);
+
+static void
+omc_c2pa_verify_candidate_list_init(omc_c2pa_verify_candidate_list* list);
+
+static int
+omc_c2pa_collect_verify_candidates(
+    omc_jumbf_ctx* ctx, omc_size scan_limit,
+    omc_c2pa_verify_candidate_list* out_list, int* out_has_signatures);
+
+#if OMC_ENABLE_C2PA_VERIFY
+static void
+omc_evaluate_c2pa_profile_summary(
+    const omc_c2pa_profile_summary* summary,
+    int require_resolved_explicit_references,
+    omc_c2pa_verify_evaluation* evaluation);
+#endif
 
 typedef struct omc_jumbf_exp_ref_scope_stats {
     omc_u64 claim_count;
@@ -1112,27 +1196,54 @@ omc_jumbf_emit_field_u8(omc_jumbf_ctx* ctx, const char* field_key,
 
 static int
 omc_jumbf_emit_c2pa_verify_scaffold(omc_jumbf_ctx* ctx, int has_signatures,
-                                    int c2pa_detected)
+                                    int c2pa_detected,
+                                    const omc_c2pa_profile_summary* summary)
 {
     const int requested = ctx != (omc_jumbf_ctx*)0 && ctx->opts.verify_c2pa;
     omc_c2pa_verify_backend selected;
     omc_c2pa_verify_status verify_status;
+    omc_c2pa_verify_evaluation evaluation;
 
     if (ctx == (omc_jumbf_ctx*)0) {
         return 0;
     }
 
+    if (ctx->store != (omc_store*)0) {
+        omc_c2pa_verify_candidate_list candidates;
+        int collected_has_signatures;
+
+        collected_has_signatures = 0;
+        if (omc_c2pa_collect_verify_candidates(
+                ctx, ctx->store->entry_count, &candidates,
+                &collected_has_signatures)) {
+            if (collected_has_signatures || candidates.count != 0U) {
+                has_signatures = 1;
+            }
+        } else if (ctx->res.status != OMC_JUMBF_OK) {
+            return 0;
+        }
+    }
+
+    omc_c2pa_verify_evaluation_init(&evaluation);
     selected = OMC_C2PA_VERIFY_BACKEND_NONE;
     verify_status = OMC_C2PA_VERIFY_NOT_REQUESTED;
     if (requested) {
 #if OMC_ENABLE_C2PA_VERIFY
         selected = ctx->opts.verify_backend;
         if (has_signatures) {
-            verify_status = OMC_C2PA_VERIFY_NOT_IMPLEMENTED;
+            omc_evaluate_c2pa_profile_summary(
+                summary, ctx->opts.verify_require_resolved_references,
+                &evaluation);
+            if (evaluation.profile_status == OMC_C2PA_VERIFY_DETAIL_FAIL) {
+                verify_status = OMC_C2PA_VERIFY_VERIFICATION_FAILED;
+            } else {
+                verify_status = OMC_C2PA_VERIFY_NOT_IMPLEMENTED;
+            }
         } else {
             verify_status = OMC_C2PA_VERIFY_NO_SIGNATURES;
         }
 #else
+        (void)summary;
         verify_status = OMC_C2PA_VERIFY_DISABLED_BY_BUILD;
 #endif
     }
@@ -1190,51 +1301,61 @@ omc_jumbf_emit_c2pa_verify_scaffold(omc_jumbf_ctx* ctx, int has_signatures,
                ctx, "c2pa.verify.profile_status",
                omc_jumbf_cstr_size("c2pa.verify.profile_status"),
                omc_c2pa_verify_detail_status_name(
-                   OMC_C2PA_VERIFY_DETAIL_NOT_CHECKED),
-               omc_jumbf_cstr_size("not_checked"))
+                   evaluation.profile_status),
+               (omc_u32)strlen(omc_c2pa_verify_detail_status_name(
+                   evaluation.profile_status)))
         || !omc_jumbf_emit_field_text(
                ctx, "c2pa.verify.profile_reason",
                omc_jumbf_cstr_size("c2pa.verify.profile_reason"),
-               "not_checked", omc_jumbf_cstr_size("not_checked"))
+               evaluation.profile_reason,
+               (omc_u32)strlen(evaluation.profile_reason))
         || !omc_jumbf_emit_field_text(
                ctx, "c2pa.verify.chain_status",
                omc_jumbf_cstr_size("c2pa.verify.chain_status"),
                omc_c2pa_verify_detail_status_name(
-                   OMC_C2PA_VERIFY_DETAIL_NOT_CHECKED),
-               omc_jumbf_cstr_size("not_checked"))
+                   evaluation.chain_status),
+               (omc_u32)strlen(omc_c2pa_verify_detail_status_name(
+                   evaluation.chain_status)))
         || !omc_jumbf_emit_field_text(
                ctx, "c2pa.verify.chain_reason",
                omc_jumbf_cstr_size("c2pa.verify.chain_reason"),
-               "not_checked", omc_jumbf_cstr_size("not_checked"))
+               evaluation.chain_reason,
+               (omc_u32)strlen(evaluation.chain_reason))
         || !omc_jumbf_emit_field_u64(
                ctx, "c2pa.verify.claim_count",
-               omc_jumbf_cstr_size("c2pa.verify.claim_count"), 0U)
+               omc_jumbf_cstr_size("c2pa.verify.claim_count"),
+               evaluation.profile_summary.claim_count)
         || !omc_jumbf_emit_field_u64(
                ctx, "c2pa.verify.signature_count",
-               omc_jumbf_cstr_size("c2pa.verify.signature_count"), 0U)
+               omc_jumbf_cstr_size("c2pa.verify.signature_count"),
+               evaluation.profile_summary.signature_count)
         || !omc_jumbf_emit_field_u64(
                ctx, "c2pa.verify.signature_linked_count",
-               omc_jumbf_cstr_size("c2pa.verify.signature_linked_count"), 0U)
+               omc_jumbf_cstr_size("c2pa.verify.signature_linked_count"),
+               evaluation.profile_summary.signature_linked)
         || !omc_jumbf_emit_field_u64(
                ctx, "c2pa.verify.signature_orphan_count",
-               omc_jumbf_cstr_size("c2pa.verify.signature_orphan_count"), 0U)
+               omc_jumbf_cstr_size("c2pa.verify.signature_orphan_count"),
+               evaluation.profile_summary.signature_orphan)
         || !omc_jumbf_emit_field_u64(
                ctx, "c2pa.verify.explicit_reference_signature_count",
                omc_jumbf_cstr_size(
                    "c2pa.verify.explicit_reference_signature_count"),
-               0U)
+               evaluation.profile_summary.explicit_reference_signature_count)
         || !omc_jumbf_emit_field_u64(
                ctx,
                "c2pa.verify.explicit_reference_unresolved_signature_count",
                omc_jumbf_cstr_size(
                    "c2pa.verify.explicit_reference_unresolved_signature_count"),
-               0U)
+               evaluation.profile_summary
+                   .explicit_reference_unresolved_signature_count)
         || !omc_jumbf_emit_field_u64(
                ctx,
                "c2pa.verify.explicit_reference_ambiguous_signature_count",
                omc_jumbf_cstr_size(
                    "c2pa.verify.explicit_reference_ambiguous_signature_count"),
-               0U)) {
+               evaluation.profile_summary
+                   .explicit_reference_ambiguous_signature_count)) {
         return 0;
     }
     return 1;
@@ -1549,6 +1670,144 @@ omc_c2pa_verify_detail_status_name(omc_c2pa_verify_detail_status status)
     }
     return "unknown";
 }
+
+static void
+omc_c2pa_profile_summary_init(omc_c2pa_profile_summary* summary)
+{
+    if (summary == (omc_c2pa_profile_summary*)0) {
+        return;
+    }
+    memset(summary, 0, sizeof(*summary));
+}
+
+static void
+omc_c2pa_verify_evaluation_init(omc_c2pa_verify_evaluation* evaluation)
+{
+    if (evaluation == (omc_c2pa_verify_evaluation*)0) {
+        return;
+    }
+    evaluation->status = OMC_C2PA_VERIFY_NOT_REQUESTED;
+    evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_NOT_CHECKED;
+    evaluation->profile_reason = "not_checked";
+    evaluation->chain_status = OMC_C2PA_VERIFY_DETAIL_NOT_CHECKED;
+    evaluation->chain_reason = "not_checked";
+    omc_c2pa_profile_summary_init(&evaluation->profile_summary);
+}
+
+static void
+omc_c2pa_verify_candidate_list_init(omc_c2pa_verify_candidate_list* list)
+{
+    if (list == (omc_c2pa_verify_candidate_list*)0) {
+        return;
+    }
+    memset(list, 0, sizeof(*list));
+}
+
+#if OMC_ENABLE_C2PA_VERIFY
+static void
+omc_evaluate_c2pa_profile_summary(
+    const omc_c2pa_profile_summary* summary,
+    int require_resolved_explicit_references,
+    omc_c2pa_verify_evaluation* evaluation)
+{
+    if (evaluation == (omc_c2pa_verify_evaluation*)0) {
+        return;
+    }
+
+    if (summary == (const omc_c2pa_profile_summary*)0) {
+        omc_c2pa_profile_summary_init(&evaluation->profile_summary);
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_NOT_CHECKED;
+        evaluation->profile_reason = "semantic_fields_missing";
+        return;
+    }
+
+    evaluation->profile_summary = *summary;
+    if (!summary->available) {
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_NOT_CHECKED;
+        evaluation->profile_reason = "semantic_fields_missing";
+        return;
+    }
+
+    if (summary->manifest_present == 0U) {
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+        evaluation->profile_reason = "manifest_missing";
+        return;
+    }
+    if (summary->claim_count == 0U || summary->claim_present == 0U) {
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+        evaluation->profile_reason = "claim_missing";
+        return;
+    }
+    if (summary->signature_count == 0U || summary->signature_present == 0U) {
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+        evaluation->profile_reason = "signature_missing";
+        return;
+    }
+    if (summary->signature_linked > summary->signature_count) {
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+        evaluation->profile_reason = "signature_linked_count_invalid";
+        return;
+    }
+    if (summary->signature_orphan > summary->signature_count) {
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+        evaluation->profile_reason = "signature_orphan_count_invalid";
+        return;
+    }
+    if ((summary->signature_linked + summary->signature_orphan)
+        != summary->signature_count) {
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+        evaluation->profile_reason = "signature_link_consistency_invalid";
+        return;
+    }
+    if (summary->explicit_reference_signature_count > summary->signature_count) {
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+        evaluation->profile_reason = "explicit_reference_count_invalid";
+        return;
+    }
+    if (summary->explicit_reference_unresolved_signature_count
+        > summary->explicit_reference_signature_count) {
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+        evaluation->profile_reason
+            = "explicit_reference_unresolved_count_invalid";
+        return;
+    }
+    if (summary->explicit_reference_ambiguous_signature_count
+        > summary->explicit_reference_signature_count) {
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+        evaluation->profile_reason
+            = "explicit_reference_ambiguous_count_invalid";
+        return;
+    }
+    if (summary->explicit_reference_unresolved_signature_count
+        > (summary->explicit_reference_signature_count
+           - summary->explicit_reference_ambiguous_signature_count)) {
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+        evaluation->profile_reason = "explicit_reference_consistency_invalid";
+        return;
+    }
+    if (summary->signature_linked == 0U) {
+        evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+        evaluation->profile_reason = "signature_unlinked";
+        return;
+    }
+    if (require_resolved_explicit_references
+        && summary->explicit_reference_signature_count != 0U) {
+        if (summary->explicit_reference_unresolved_signature_count != 0U) {
+            evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+            evaluation->profile_reason = "explicit_reference_unresolved";
+            return;
+        }
+        if (summary->explicit_reference_ambiguous_signature_count != 0U) {
+            evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_FAIL;
+            evaluation->profile_reason = "explicit_reference_ambiguous";
+            return;
+        }
+    }
+
+    evaluation->profile_status = OMC_C2PA_VERIFY_DETAIL_PASS;
+    evaluation->profile_reason = "ok";
+}
+#endif
 
 static int
 omc_jumbf_find_indexed_segment_prefix(omc_const_bytes key, const char* marker,
@@ -3732,6 +3991,155 @@ omc_jumbf_find_claim_prefix_by_label(omc_jumbf_ctx* ctx, omc_size scan_limit,
         *out_matches = match_state;
     }
     return match_state != 0U;
+}
+
+static int
+omc_jumbf_find_claim_payload_ref(omc_jumbf_ctx* ctx, omc_size scan_limit,
+                                 const char* claim_prefix,
+                                 omc_u32 claim_prefix_len,
+                                 omc_byte_ref* out_ref)
+{
+    omc_size i;
+
+    if (ctx == (omc_jumbf_ctx*)0 || ctx->store == (omc_store*)0
+        || claim_prefix == (const char*)0 || out_ref == (omc_byte_ref*)0) {
+        return 0;
+    }
+
+    for (i = 0U; i < scan_limit && i < ctx->store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes key;
+
+        entry = &ctx->store->entries[i];
+        if (entry->origin.block != ctx->block
+            || entry->key.kind != OMC_KEY_JUMBF_CBOR_KEY
+            || (entry->value.kind != OMC_VAL_BYTES
+                && entry->value.kind != OMC_VAL_TEXT)) {
+            continue;
+        }
+        key = omc_jumbf_entry_key_view(ctx->store, entry);
+        if (key.size != claim_prefix_len + 6U
+            || memcmp(key.data, claim_prefix, claim_prefix_len) != 0
+            || key.data[claim_prefix_len] != (omc_u8)'.'
+            || memcmp(key.data + claim_prefix_len + 1U, "claim", 5U) != 0) {
+            continue;
+        }
+        *out_ref = entry->value.u.ref;
+        return 1;
+    }
+    return 0;
+}
+
+static int
+omc_jumbf_detached_payload_add_ref(omc_byte_ref* refs, omc_u32 cap,
+                                   omc_u32* io_count, omc_byte_ref ref)
+{
+    omc_u32 i;
+
+    if (refs == (omc_byte_ref*)0 || io_count == (omc_u32*)0 || cap == 0U) {
+        return 0;
+    }
+    for (i = 0U; i < *io_count; ++i) {
+        if (refs[i].offset == ref.offset && refs[i].size == ref.size) {
+            return 1;
+        }
+    }
+    if (*io_count >= cap) {
+        return 0;
+    }
+    refs[*io_count] = ref;
+    *io_count += 1U;
+    return 1;
+}
+
+static int
+omc_jumbf_collect_detached_payload_refs(omc_jumbf_ctx* ctx,
+                                        omc_size scan_limit,
+                                        const omc_jumbf_sig_proj* sig,
+                                        omc_byte_ref* refs, omc_u32 cap,
+                                        omc_u32* out_count)
+{
+    omc_u32 count;
+    int explicit_refs;
+    int ambiguous;
+
+    if (ctx == (omc_jumbf_ctx*)0 || sig == (const omc_jumbf_sig_proj*)0
+        || refs == (omc_byte_ref*)0 || out_count == (omc_u32*)0
+        || cap == 0U) {
+        return 0;
+    }
+
+    count = 0U;
+    explicit_refs = (sig->ref_index_count != 0U || sig->ref_label_count != 0U);
+    ambiguous = 0;
+
+    if (explicit_refs) {
+        omc_u32 i;
+
+        for (i = 0U; i < sig->ref_index_count; ++i) {
+            char claim_prefix[OMC_JUMBF_PATH_CAP];
+            omc_u32 claim_prefix_len;
+            omc_byte_ref payload_ref;
+
+            if (!omc_jumbf_find_claim_prefix_by_semantic_index(
+                    ctx, scan_limit, sig->ref_indices[i], claim_prefix,
+                    (omc_u32)sizeof(claim_prefix), &claim_prefix_len)) {
+                continue;
+            }
+            if (!omc_jumbf_find_claim_payload_ref(ctx, scan_limit, claim_prefix,
+                                                  claim_prefix_len,
+                                                  &payload_ref)
+                || !omc_jumbf_detached_payload_add_ref(refs, cap, &count,
+                                                       payload_ref)) {
+                return 0;
+            }
+        }
+
+        for (i = 0U; i < sig->ref_label_count; ++i) {
+            char claim_prefix[OMC_JUMBF_PATH_CAP];
+            omc_u32 claim_prefix_len;
+            omc_u32 claim_matches;
+            omc_byte_ref payload_ref;
+
+            claim_matches = 0U;
+            if (!omc_jumbf_find_claim_prefix_by_label(
+                    ctx, scan_limit, sig->ref_labels[i], sig->ref_label_lens[i],
+                    claim_prefix, (omc_u32)sizeof(claim_prefix),
+                    &claim_prefix_len, &claim_matches)) {
+                continue;
+            }
+            if (claim_matches > 1U) {
+                ambiguous = 1;
+                continue;
+            }
+            if (!omc_jumbf_find_claim_payload_ref(ctx, scan_limit, claim_prefix,
+                                                  claim_prefix_len,
+                                                  &payload_ref)
+                || !omc_jumbf_detached_payload_add_ref(refs, cap, &count,
+                                                       payload_ref)) {
+                return 0;
+            }
+        }
+
+        *out_count = count;
+        return !ambiguous && count == 1U;
+    }
+
+    if (sig->has_direct_claim_prefix) {
+        omc_byte_ref payload_ref;
+
+        if (omc_jumbf_find_claim_payload_ref(ctx, scan_limit,
+                                             sig->direct_claim_prefix,
+                                             sig->direct_claim_prefix_len,
+                                             &payload_ref)
+            && !omc_jumbf_detached_payload_add_ref(refs, cap, &count,
+                                                   payload_ref)) {
+            return 0;
+        }
+    }
+
+    *out_count = count;
+    return count == 1U;
 }
 
 static int
@@ -6088,6 +6496,16 @@ omc_jumbf_collect_signature_projection(omc_jumbf_ctx* ctx, omc_size scan_limit,
                            && omc_jumbf_view_eq_cstr(value_view, "null")) {
                     out_sig->payload_is_null = 1;
                 }
+            } else if (omc_jumbf_key_matches_field(key, prefix, prefix_len,
+                                                   "payload")) {
+                if (entry->value.kind == OMC_VAL_BYTES && !out_sig->has_payload_ref) {
+                    out_sig->payload_ref = entry->value.u.ref;
+                    out_sig->has_payload_ref = 1;
+                    out_sig->payload_is_null = 0;
+                } else if (entry->value.kind == OMC_VAL_TEXT
+                           && omc_jumbf_view_eq_cstr(value_view, "null")) {
+                    out_sig->payload_is_null = 1;
+                }
             } else if (omc_jumbf_key_is_indexed_item(key, prefix, prefix_len, 3U)
                        && entry->value.kind == OMC_VAL_BYTES
                        && !out_sig->has_signature_ref) {
@@ -6157,6 +6575,12 @@ omc_jumbf_collect_signature_projection(omc_jumbf_ctx* ctx, omc_size scan_limit,
                 || omc_jumbf_view_has_segment(key, "x5c")
                 || omc_jumbf_view_has_segment(key, "33"))
             && entry->value.kind == OMC_VAL_BYTES) {
+            if (out_sig->x5chain_count
+                < (omc_u32)(sizeof(out_sig->x5chain_refs)
+                            / sizeof(out_sig->x5chain_refs[0]))) {
+                out_sig->x5chain_refs[out_sig->x5chain_count]
+                    = entry->value.u.ref;
+            }
             out_sig->x5chain_count += 1U;
             if (!out_sig->has_certificate_ref) {
                 out_sig->certificate_ref = entry->value.u.ref;
@@ -6181,6 +6605,262 @@ omc_jumbf_collect_signature_projection(omc_jumbf_ctx* ctx, omc_size scan_limit,
             out_sig->has_algorithm = 1;
         }
     }
+    if (!out_sig->has_payload_ref && out_sig->payload_is_null) {
+        omc_byte_ref refs[8];
+        omc_u32 ref_count;
+
+        ref_count = 0U;
+        if (omc_jumbf_collect_detached_payload_refs(ctx, scan_limit, out_sig,
+                                                    refs,
+                                                    (omc_u32)(sizeof(refs)
+                                                              / sizeof(refs[0])),
+                                                    &ref_count)) {
+            out_sig->payload_ref = refs[0];
+            out_sig->has_payload_ref = 1;
+            out_sig->payload_is_null = 0;
+        }
+    }
+    return 1;
+}
+
+static omc_c2pa_verify_candidate*
+omc_c2pa_add_or_get_verify_candidate(omc_c2pa_verify_candidate_list* list,
+                                     const char* prefix, omc_u32 prefix_len)
+{
+    omc_u32 i;
+
+    if (list == (omc_c2pa_verify_candidate_list*)0
+        || prefix == (const char*)0) {
+        return (omc_c2pa_verify_candidate*)0;
+    }
+    for (i = 0U; i < list->count; ++i) {
+        if (list->items[i].prefix_len == prefix_len
+            && memcmp(list->items[i].prefix, prefix, prefix_len) == 0) {
+            return &list->items[i];
+        }
+    }
+    if (list->count >= (omc_u32)(sizeof(list->items) / sizeof(list->items[0]))
+        || prefix_len + 1U > (omc_u32)sizeof(list->items[0].prefix)) {
+        return (omc_c2pa_verify_candidate*)0;
+    }
+    memset(&list->items[list->count], 0, sizeof(list->items[list->count]));
+    memcpy(list->items[list->count].prefix, prefix, prefix_len);
+    list->items[list->count].prefix[prefix_len] = '\0';
+    list->items[list->count].prefix_len = prefix_len;
+    list->count += 1U;
+    return &list->items[list->count - 1U];
+}
+
+static int
+omc_c2pa_add_verify_candidate_from_signature_prefix(
+    omc_jumbf_ctx* ctx, omc_size scan_limit, const char* prefix,
+    omc_u32 prefix_len, const char* source_box_prefix,
+    omc_u32 source_box_prefix_len, omc_c2pa_verify_candidate_list* list)
+{
+    omc_jumbf_sig_proj sig;
+    omc_c2pa_verify_candidate* candidate;
+    omc_u32 i;
+    omc_u32 detached_count;
+
+    if (ctx == (omc_jumbf_ctx*)0 || prefix == (const char*)0
+        || list == (omc_c2pa_verify_candidate_list*)0) {
+        return 0;
+    }
+    if (!omc_jumbf_collect_signature_projection(ctx, scan_limit, prefix,
+                                                prefix_len, &sig)) {
+        return 0;
+    }
+    candidate = omc_c2pa_add_or_get_verify_candidate(list, prefix, prefix_len);
+    if (candidate == (omc_c2pa_verify_candidate*)0) {
+        ctx->res.status = OMC_JUMBF_LIMIT;
+        return 0;
+    }
+
+    if (source_box_prefix != (const char*)0 && source_box_prefix_len != 0U
+        && source_box_prefix_len + 1U
+               <= (omc_u32)sizeof(candidate->source_box_prefix)) {
+        memcpy(candidate->source_box_prefix, source_box_prefix,
+               source_box_prefix_len);
+        candidate->source_box_prefix[source_box_prefix_len] = '\0';
+        candidate->source_box_prefix_len = source_box_prefix_len;
+        candidate->has_source_box_prefix = 1;
+    }
+    if (sig.has_direct_claim_prefix
+        && sig.direct_claim_prefix_len + 1U
+               <= (omc_u32)sizeof(candidate->source_claim_prefix)) {
+        memcpy(candidate->source_claim_prefix, sig.direct_claim_prefix,
+               sig.direct_claim_prefix_len);
+        candidate->source_claim_prefix[sig.direct_claim_prefix_len] = '\0';
+        candidate->source_claim_prefix_len = sig.direct_claim_prefix_len;
+        candidate->has_source_claim_prefix = 1;
+    }
+    if (sig.has_algorithm
+        && sig.algorithm_len + 1U <= (omc_u32)sizeof(candidate->algorithm)) {
+        memcpy(candidate->algorithm, sig.algorithm, sig.algorithm_len);
+        candidate->algorithm[sig.algorithm_len] = '\0';
+        candidate->algorithm_len = sig.algorithm_len;
+        candidate->has_algorithm = 1;
+    }
+    if (sig.has_unprotected_alg_int) {
+        candidate->cose_unprotected_alg_int = sig.unprotected_alg_int;
+        candidate->has_cose_unprotected_alg_int = 1;
+    }
+    if (sig.has_protected_ref) {
+        candidate->cose_protected_ref = sig.protected_ref;
+        candidate->has_cose_protected_ref = 1;
+    }
+    if (sig.has_payload_ref) {
+        candidate->cose_payload_ref = sig.payload_ref;
+        candidate->has_cose_payload_ref = 1;
+    }
+    candidate->cose_payload_is_null = sig.payload_is_null;
+    if (sig.has_signature_ref) {
+        candidate->cose_signature_ref = sig.signature_ref;
+        candidate->has_cose_signature_ref = 1;
+        candidate->signature_ref = sig.signature_ref;
+        candidate->has_signature_ref = 1;
+    }
+    if (sig.has_public_key_ref) {
+        candidate->public_key_ref = sig.public_key_ref;
+        candidate->has_public_key_ref = 1;
+    }
+    if (sig.has_certificate_ref) {
+        candidate->certificate_ref = sig.certificate_ref;
+        candidate->has_certificate_ref = 1;
+    }
+    candidate->certificate_chain_ref_count = 0U;
+    for (i = 0U; i < sig.x5chain_count
+                && i < (omc_u32)(sizeof(candidate->certificate_chain_refs)
+                                 / sizeof(candidate->certificate_chain_refs[0]));
+         ++i) {
+        candidate->certificate_chain_refs[i] = sig.x5chain_refs[i];
+        candidate->certificate_chain_ref_count += 1U;
+    }
+
+    detached_count = 0U;
+    (void)omc_jumbf_collect_detached_payload_refs(
+        ctx, scan_limit, &sig, candidate->detached_payload_refs,
+        (omc_u32)(sizeof(candidate->detached_payload_refs)
+                  / sizeof(candidate->detached_payload_refs[0])),
+        &detached_count);
+    candidate->detached_payload_ref_count = detached_count;
+    return 1;
+}
+
+static int
+omc_c2pa_collect_verify_candidates(
+    omc_jumbf_ctx* ctx, omc_size scan_limit,
+    omc_c2pa_verify_candidate_list* out_list, int* out_has_signatures)
+{
+    omc_size i;
+
+    if (ctx == (omc_jumbf_ctx*)0 || ctx->store == (omc_store*)0
+        || out_list == (omc_c2pa_verify_candidate_list*)0
+        || out_has_signatures == (int*)0) {
+        return 0;
+    }
+
+    omc_c2pa_verify_candidate_list_init(out_list);
+    *out_has_signatures = 0;
+
+    for (i = 0U; i < scan_limit && i < ctx->store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes key;
+        char sig_prefix[OMC_JUMBF_PATH_CAP];
+        omc_u32 sig_prefix_len;
+
+        entry = &ctx->store->entries[i];
+        if (entry->origin.block != ctx->block
+            || entry->key.kind != OMC_KEY_JUMBF_CBOR_KEY) {
+            continue;
+        }
+        key = omc_jumbf_entry_key_view(ctx->store, entry);
+        if (omc_jumbf_view_has_segment(key, "signature")
+            || omc_jumbf_view_has_segment(key, "signatures")) {
+            *out_has_signatures = 1;
+        }
+        if (!omc_jumbf_find_indexed_segment_prefix(key, ".signatures[",
+                                                   sig_prefix,
+                                                   (omc_u32)sizeof(sig_prefix),
+                                                   &sig_prefix_len)
+            || omc_jumbf_prefix_seen_before(ctx->store, ctx->block, scan_limit,
+                                            i, ".signatures[", sig_prefix,
+                                            sig_prefix_len)) {
+            continue;
+        }
+        *out_has_signatures = 1;
+        if (!omc_c2pa_add_verify_candidate_from_signature_prefix(
+                ctx, scan_limit, sig_prefix, sig_prefix_len,
+                (const char*)0, 0U, out_list)) {
+            if (ctx->res.status != OMC_JUMBF_OK) {
+                return 0;
+            }
+        }
+    }
+
+    for (i = 0U; i < scan_limit && i < ctx->store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes field_key;
+        omc_const_bytes label_view;
+        char box_prefix[OMC_JUMBF_PATH_CAP];
+        omc_u32 box_prefix_len;
+        omc_size j;
+
+        entry = &ctx->store->entries[i];
+        if (entry->origin.block != ctx->block
+            || entry->key.kind != OMC_KEY_JUMBF_FIELD
+            || entry->value.kind != OMC_VAL_TEXT) {
+            continue;
+        }
+        field_key = omc_jumbf_entry_key_view(ctx->store, entry);
+        label_view = omc_jumbf_entry_value_view(ctx->store, entry);
+        if (field_key.size < 6U
+            || memcmp(field_key.data + field_key.size - 6U, ".label", 6U)
+                   != 0
+            || !omc_jumbf_ascii_icase_contains(label_view.data, label_view.size,
+                                               "signature", 256U)) {
+            continue;
+        }
+        if (field_key.size - 6U + 1U > (omc_u32)sizeof(box_prefix)) {
+            ctx->res.status = OMC_JUMBF_LIMIT;
+            return 0;
+        }
+        memcpy(box_prefix, field_key.data, field_key.size - 6U);
+        box_prefix[field_key.size - 6U] = '\0';
+        box_prefix_len = (omc_u32)(field_key.size - 6U);
+        *out_has_signatures = 1;
+
+        for (j = 0U; j < scan_limit && j < ctx->store->entry_count; ++j) {
+            const omc_entry* cbor_entry;
+            omc_const_bytes key_view;
+            char cbor_prefix[OMC_JUMBF_PATH_CAP];
+            omc_u32 cbor_prefix_len;
+
+            cbor_entry = &ctx->store->entries[j];
+            if (cbor_entry->origin.block != ctx->block
+                || cbor_entry->key.kind != OMC_KEY_JUMBF_CBOR_KEY) {
+                continue;
+            }
+            key_view = omc_jumbf_entry_key_view(ctx->store, cbor_entry);
+            if (key_view.size <= box_prefix_len
+                || memcmp(key_view.data, box_prefix, box_prefix_len) != 0
+                || key_view.data[box_prefix_len] != (omc_u8)'.'
+                || !omc_jumbf_extract_cbor_root_prefix(
+                       key_view, cbor_prefix, (omc_u32)sizeof(cbor_prefix),
+                       &cbor_prefix_len)) {
+                continue;
+            }
+            if (!omc_c2pa_add_verify_candidate_from_signature_prefix(
+                    ctx, scan_limit, cbor_prefix, cbor_prefix_len, box_prefix,
+                    box_prefix_len, out_list)) {
+                if (ctx->res.status != OMC_JUMBF_OK) {
+                    return 0;
+                }
+            }
+            break;
+        }
+    }
+
     return 1;
 }
 
@@ -6522,6 +7202,10 @@ omc_jumbf_sem_sig_note_text(omc_jumbf_ctx* ctx, omc_jumbf_sig_proj* sig,
     if (omc_jumbf_key_is_indexed_item(key, sig->prefix, sig->prefix_len, 2U)
         && text_len == 4U && memcmp(text, "null", 4U) == 0) {
         sig->payload_is_null = 1;
+    } else if (omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
+                                           "payload")
+               && text_len == 4U && memcmp(text, "null", 4U) == 0) {
+        sig->payload_is_null = 1;
     }
     return omc_jumbf_sig_proj_note_ref_text(sig, key, text, text_len);
 }
@@ -6607,6 +7291,11 @@ omc_jumbf_sem_sig_note_bytes(omc_jumbf_ctx* ctx, omc_jumbf_sig_proj* sig,
         sig->has_protected_ref = 1;
     } else if (omc_jumbf_key_is_indexed_item(key, sig->prefix,
                                              sig->prefix_len, 2U)
+               && !sig->has_payload_ref) {
+        sig->has_payload_ref = 1;
+        sig->payload_is_null = 0;
+    } else if (omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
+                                           "payload")
                && !sig->has_payload_ref) {
         sig->has_payload_ref = 1;
         sig->payload_is_null = 0;
@@ -7043,6 +7732,13 @@ omc_jumbf_measure_cbor_item_from_head(omc_jumbf_ctx* ctx, const omc_u8* bytes,
                         sem->signature_linked_count += 1U;
                     }
                 }
+                if (!sig.has_payload_ref && sig.payload_is_null
+                    && sig.has_direct_claim_prefix
+                    && sig.ref_index_count == 0U
+                    && sig.ref_label_count == 0U) {
+                    sig.has_payload_ref = 1;
+                    sig.payload_is_null = 0;
+                }
                 if (!omc_jumbf_emit_signature_projection(
                         ctx, sem->semantic_sig_index, &sig)
                     || !omc_jumbf_emit_signature_ingredient_projection(
@@ -7307,8 +8003,29 @@ omc_jumbf_project_c2pa_semantics_meas(omc_jumbf_ctx* ctx, const omc_u8* bytes,
         return 0;
     }
     if (sem.cbor_key_count == 0U && !ctx->c2pa_emitted) {
+        omc_c2pa_profile_summary verify_summary;
+
+        omc_c2pa_profile_summary_init(&verify_summary);
+        verify_summary.available = 1;
+        verify_summary.manifest_present = sem.has_manifest ? 1U : 0U;
+        verify_summary.claim_present = sem.has_claim ? 1U : 0U;
+        verify_summary.signature_present = sem.has_signature ? 1U : 0U;
+        verify_summary.claim_count = sem.claim_count;
+        verify_summary.signature_count = sem.signature_count;
+        verify_summary.signature_linked = sem.signature_linked_count;
+        verify_summary.signature_orphan
+            = sem.signature_count >= sem.signature_linked_count
+                  ? (sem.signature_count - sem.signature_linked_count)
+                  : 0U;
+        verify_summary.explicit_reference_signature_count
+            = sem.explicit_reference_signature_count;
+        verify_summary.explicit_reference_unresolved_signature_count
+            = sem.explicit_reference_unresolved_signature_count;
+        verify_summary.explicit_reference_ambiguous_signature_count
+            = sem.explicit_reference_ambiguous_signature_count;
         return omc_jumbf_emit_c2pa_verify_scaffold(
-            ctx, sem.signature_count != 0U || sem.has_signature, 0);
+            ctx, sem.signature_count != 0U || sem.has_signature, 0,
+            &verify_summary);
     }
 
     if (!omc_jumbf_emit_field_u64(
@@ -7621,9 +8338,31 @@ omc_jumbf_project_c2pa_semantics_meas(omc_jumbf_ctx* ctx, const omc_u8* bytes,
                omc_jumbf_cstr_size("c2pa.semantic.claim_generator"), "", 0U)) {
         return 0;
     }
-    return omc_jumbf_emit_c2pa_verify_scaffold(
-        ctx, sem.signature_count != 0U || sem.has_signature,
-        ctx->c2pa_emitted);
+    {
+        omc_c2pa_profile_summary verify_summary;
+
+        omc_c2pa_profile_summary_init(&verify_summary);
+        verify_summary.available = 1;
+        verify_summary.manifest_present = sem.has_manifest ? 1U : 0U;
+        verify_summary.claim_present = sem.has_claim ? 1U : 0U;
+        verify_summary.signature_present = sem.has_signature ? 1U : 0U;
+        verify_summary.claim_count = sem.claim_count;
+        verify_summary.signature_count = sem.signature_count;
+        verify_summary.signature_linked = sem.signature_linked_count;
+        verify_summary.signature_orphan
+            = sem.signature_count >= sem.signature_linked_count
+                  ? (sem.signature_count - sem.signature_linked_count)
+                  : 0U;
+        verify_summary.explicit_reference_signature_count
+            = sem.explicit_reference_signature_count;
+        verify_summary.explicit_reference_unresolved_signature_count
+            = sem.explicit_reference_unresolved_signature_count;
+        verify_summary.explicit_reference_ambiguous_signature_count
+            = sem.explicit_reference_ambiguous_signature_count;
+        return omc_jumbf_emit_c2pa_verify_scaffold(
+            ctx, sem.signature_count != 0U || sem.has_signature,
+            ctx->c2pa_emitted, &verify_summary);
+    }
 }
 
 static int
@@ -8123,8 +8862,29 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
         return 0;
     }
     if (cbor_key_count == 0U && !ctx->c2pa_emitted) {
+        omc_c2pa_profile_summary verify_summary;
+
+        omc_c2pa_profile_summary_init(&verify_summary);
+        verify_summary.available = 1;
+        verify_summary.manifest_present = has_manifest ? 1U : 0U;
+        verify_summary.claim_present = has_claim ? 1U : 0U;
+        verify_summary.signature_present = has_signature ? 1U : 0U;
+        verify_summary.claim_count = claim_count;
+        verify_summary.signature_count = signature_count;
+        verify_summary.signature_linked = signature_linked_count;
+        verify_summary.signature_orphan
+            = signature_count >= signature_linked_count
+                  ? (signature_count - signature_linked_count)
+                  : 0U;
+        verify_summary.explicit_reference_signature_count
+            = explicit_reference_signature_count;
+        verify_summary.explicit_reference_unresolved_signature_count
+            = explicit_reference_unresolved_signature_count;
+        verify_summary.explicit_reference_ambiguous_signature_count
+            = explicit_reference_ambiguous_signature_count;
         return omc_jumbf_emit_c2pa_verify_scaffold(
-            ctx, signature_count != 0U || has_signature, 0);
+            ctx, signature_count != 0U || has_signature, 0,
+            &verify_summary);
     }
 
     if (!omc_jumbf_emit_field_u64(
@@ -9347,8 +10107,31 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
                claim_generator, claim_generator_len)) {
         return 0;
     }
-    return omc_jumbf_emit_c2pa_verify_scaffold(
-        ctx, signature_count != 0U || has_signature, ctx->c2pa_emitted);
+    {
+        omc_c2pa_profile_summary verify_summary;
+
+        omc_c2pa_profile_summary_init(&verify_summary);
+        verify_summary.available = 1;
+        verify_summary.manifest_present = has_manifest ? 1U : 0U;
+        verify_summary.claim_present = has_claim ? 1U : 0U;
+        verify_summary.signature_present = has_signature ? 1U : 0U;
+        verify_summary.claim_count = claim_count;
+        verify_summary.signature_count = signature_count;
+        verify_summary.signature_linked = signature_linked_count;
+        verify_summary.signature_orphan
+            = signature_count >= signature_linked_count
+                  ? (signature_count - signature_linked_count)
+                  : 0U;
+        verify_summary.explicit_reference_signature_count
+            = explicit_reference_signature_count;
+        verify_summary.explicit_reference_unresolved_signature_count
+            = explicit_reference_unresolved_signature_count;
+        verify_summary.explicit_reference_ambiguous_signature_count
+            = explicit_reference_ambiguous_signature_count;
+        return omc_jumbf_emit_c2pa_verify_scaffold(
+            ctx, signature_count != 0U || has_signature, ctx->c2pa_emitted,
+            &verify_summary);
+    }
 }
 
 static int omc_jumbf_decode_boxes(omc_jumbf_ctx* ctx, const omc_u8* bytes,
