@@ -2,6 +2,10 @@ add_executable(omc_test_store test_omc_store.c)
 target_link_libraries(omc_test_store PRIVATE omc)
 add_test(NAME omc_test_store COMMAND omc_test_store)
 
+add_executable(omc_test_edit test_omc_edit.c)
+target_link_libraries(omc_test_edit PRIVATE omc)
+add_test(NAME omc_test_edit COMMAND omc_test_edit)
+
 add_executable(omc_test_scan test_omc_scan.c)
 target_link_libraries(omc_test_scan PRIVATE omc)
 add_test(NAME omc_test_scan COMMAND omc_test_scan)
@@ -41,6 +45,10 @@ add_test(NAME omc_test_jumbf COMMAND omc_test_jumbf)
 add_executable(omc_test_xmp test_omc_xmp.c)
 target_link_libraries(omc_test_xmp PRIVATE omc)
 add_test(NAME omc_test_xmp COMMAND omc_test_xmp)
+
+add_executable(omc_test_xmp_dump test_omc_xmp_dump.c)
+target_link_libraries(omc_test_xmp_dump PRIVATE omc)
+add_test(NAME omc_test_xmp_dump COMMAND omc_test_xmp_dump)
 
 if(OMC_BUILD_PARITY_TESTS)
   set(omc_openmeta_paths)

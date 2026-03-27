@@ -15,6 +15,7 @@ extern "C" {
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -180,6 +181,162 @@ append_bmff_box(unsigned char* out, std::size_t* io_size, std::uint32_t type,
     if (payload_size != 0U) {
         append_bytes(out, io_size, payload, payload_size);
     }
+}
+
+static void
+append_box(unsigned char* out, std::size_t* io_size, const char* type,
+           const unsigned char* payload, std::size_t payload_size)
+{
+    append_u32be(out, io_size, (std::uint32_t)(8U + payload_size));
+    append_bytes(out, io_size, type, 4U);
+    if (payload_size != 0U) {
+        append_bytes(out, io_size, payload, payload_size);
+    }
+}
+
+static void
+append_cbor_head(unsigned char* out, std::size_t* io_size,
+                 unsigned char major, unsigned char arg)
+{
+    assert(arg < 24U);
+    append_u8(out, io_size, (unsigned char)((major << 5) | arg));
+}
+
+static void
+append_cbor_map(unsigned char* out, std::size_t* io_size, unsigned char count)
+{
+    append_cbor_head(out, io_size, 5U, count);
+}
+
+static void
+append_cbor_array(unsigned char* out, std::size_t* io_size,
+                  unsigned char count)
+{
+    append_cbor_head(out, io_size, 4U, count);
+}
+
+static void
+append_cbor_text(unsigned char* out, std::size_t* io_size, const char* text)
+{
+    const std::size_t len = std::strlen(text);
+
+    assert(len < 256U);
+    if (len < 24U) {
+        append_cbor_head(out, io_size, 3U, (unsigned char)len);
+    } else {
+        append_u8(out, io_size, (unsigned char)((3U << 5) | 24U));
+        append_u8(out, io_size, (unsigned char)len);
+    }
+    append_bytes(out, io_size, text, len);
+}
+
+static void
+append_cbor_bytes(unsigned char* out, std::size_t* io_size,
+                  const unsigned char* bytes, std::size_t size)
+{
+    assert(size < 256U);
+    if (size < 24U) {
+        append_cbor_head(out, io_size, 2U, (unsigned char)size);
+    } else {
+        append_u8(out, io_size, (unsigned char)((2U << 5) | 24U));
+        append_u8(out, io_size, (unsigned char)size);
+    }
+    append_bytes(out, io_size, bytes, size);
+}
+
+static void
+append_cbor_null(unsigned char* out, std::size_t* io_size)
+{
+    append_u8(out, io_size, 0xF6U);
+}
+
+static void
+append_cbor_i64(unsigned char* out, std::size_t* io_size, std::int64_t value)
+{
+    std::uint64_t arg;
+    unsigned char major;
+
+    if (value >= 0) {
+        major = 0U;
+        arg = (std::uint64_t)value;
+    } else {
+        major = 1U;
+        arg = (std::uint64_t)(-1 - value);
+    }
+    if (arg < 24U) {
+        append_cbor_head(out, io_size, major, (unsigned char)arg);
+    } else if (arg <= 0xFFU) {
+        append_u8(out, io_size, (unsigned char)((major << 5) | 24U));
+        append_u8(out, io_size, (unsigned char)arg);
+    } else if (arg <= 0xFFFFU) {
+        append_u8(out, io_size, (unsigned char)((major << 5) | 25U));
+        append_u8(out, io_size, (unsigned char)((arg >> 8) & 0xFFU));
+        append_u8(out, io_size, (unsigned char)(arg & 0xFFU));
+    } else {
+        append_u8(out, io_size, (unsigned char)((major << 5) | 26U));
+        append_u32be(out, io_size, (std::uint32_t)arg);
+    }
+}
+
+static std::size_t
+make_jumb_box_with_label(unsigned char* out, const char* label,
+                         const unsigned char* payload_boxes,
+                         std::size_t payload_boxes_size)
+{
+    const std::size_t label_len = std::strlen(label);
+    const std::size_t jumd_payload_size = label_len + 1U;
+    const std::size_t jumb_payload_size = 8U + jumd_payload_size
+                                          + payload_boxes_size;
+    std::size_t out_size = 0U;
+
+    append_u32be(out, &out_size, (std::uint32_t)(8U + jumb_payload_size));
+    append_bytes(out, &out_size, "jumb", 4U);
+    append_u32be(out, &out_size, (std::uint32_t)(8U + jumd_payload_size));
+    append_bytes(out, &out_size, "jumd", 4U);
+    append_bytes(out, &out_size, label, label_len);
+    append_u8(out, &out_size, 0U);
+    if (payload_boxes_size != 0U) {
+        append_bytes(out, &out_size, payload_boxes, payload_boxes_size);
+    }
+    return out_size;
+}
+
+static std::size_t
+make_claim_jumb_box(unsigned char* out, const char* label,
+                    const unsigned char* claim_cbor,
+                    std::size_t claim_cbor_size)
+{
+    std::array<unsigned char, 512> cbor_box {};
+    std::size_t cbor_box_size = 0U;
+
+    append_box(cbor_box.data(), &cbor_box_size, "cbor", claim_cbor,
+               claim_cbor_size);
+    return make_jumb_box_with_label(out, label, cbor_box.data(),
+                                    cbor_box_size);
+}
+
+static std::size_t
+make_jumbf_with_cbor(unsigned char* out, const unsigned char* cbor_payload,
+                     std::size_t cbor_payload_size)
+{
+    std::array<unsigned char, 64> jumd_box {};
+    std::array<unsigned char, 512> cbor_box {};
+    std::array<unsigned char, 640> jumb_payload {};
+    std::size_t jumd_size = 0U;
+    std::size_t cbor_size = 0U;
+    std::size_t jumb_payload_size = 0U;
+    std::size_t out_size = 0U;
+
+    append_box(jumd_box.data(), &jumd_size, "jumd",
+               (const unsigned char*)"c2pa\0", 5U);
+    append_box(cbor_box.data(), &cbor_size, "cbor", cbor_payload,
+               cbor_payload_size);
+    append_bytes(jumb_payload.data(), &jumb_payload_size, jumd_box.data(),
+                 jumd_size);
+    append_bytes(jumb_payload.data(), &jumb_payload_size, cbor_box.data(),
+                 cbor_size);
+    append_box(out, &out_size, "jumb", jumb_payload.data(), jumb_payload_size);
+    return out_size;
 }
 
 static std::uint32_t
@@ -437,6 +594,1147 @@ build_png_text_fixture()
     append_png_chunk(file.data(), &size, "IEND", (const unsigned char*)0, 0U);
 
     return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_jumbf_verify_percent_encoded_jumbf_label_fixture()
+{
+    static const unsigned char k_claim_bad[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const unsigned char k_claim_good[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    std::array<unsigned char, 1024> cbor_payload {};
+    std::array<unsigned char, 1152> cbor_box {};
+    std::array<unsigned char, 128> claim_bad_jumb {};
+    std::array<unsigned char, 128> claim_good_jumb {};
+    std::array<unsigned char, 1536> root_payload {};
+    std::array<unsigned char, 1792> jumbf {};
+    std::size_t cbor_size;
+    std::size_t cbor_box_size;
+    std::size_t claim_bad_jumb_size;
+    std::size_t claim_good_jumb_size;
+    std::size_t root_payload_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim_bad,
+                      sizeof(k_claim_bad));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 4U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "alg");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "es256");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "payload");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "null");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_reference");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "c2pa.claim.bad");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_uri");
+    append_cbor_text(
+        cbor_payload.data(), &cbor_size,
+        "https://example.test/asset?jumbf=%63%32%70%61%2E%63%6C%61%69%6D%2E%67%6F%6F%64");
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim_good,
+                      sizeof(k_claim_good));
+
+    cbor_box_size = 0U;
+    append_box(cbor_box.data(), &cbor_box_size, "cbor", cbor_payload.data(),
+               cbor_size);
+    claim_bad_jumb_size = make_claim_jumb_box(claim_bad_jumb.data(),
+                                              "c2pa.claim.bad", k_claim_bad,
+                                              sizeof(k_claim_bad));
+    claim_good_jumb_size = make_claim_jumb_box(claim_good_jumb.data(),
+                                               "c2pa.claim.good", k_claim_good,
+                                               sizeof(k_claim_good));
+
+    root_payload_size = 0U;
+    append_bytes(root_payload.data(), &root_payload_size, claim_bad_jumb.data(),
+                 claim_bad_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size,
+                 claim_good_jumb.data(), claim_good_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size, cbor_box.data(),
+                 cbor_box_size);
+
+    jumbf_size = make_jumb_box_with_label(jumbf.data(), "c2pa",
+                                          root_payload.data(),
+                                          root_payload_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_detached_payload_resolution_fixture()
+{
+    static const unsigned char k_claim_bytes[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    std::array<unsigned char, 512> cbor_payload {};
+    std::array<unsigned char, 768> jumbf {};
+    std::size_t cbor_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim_bytes,
+                      sizeof(k_claim_bytes));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "alg");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "es256");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "payload");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "null");
+
+    jumbf_size = make_jumbf_with_cbor(jumbf.data(), cbor_payload.data(),
+                                      cbor_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_explicit_claim_ref_detached_payload_fixture()
+{
+    static const unsigned char k_claim_bad[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const unsigned char k_claim_good[] = { 0xA1U, 0x61U, 'a', 0x44U };
+    std::array<unsigned char, 768> cbor_payload {};
+    std::array<unsigned char, 1024> jumbf {};
+    std::size_t cbor_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim_bad,
+                      sizeof(k_claim_bad));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 3U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "alg");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "es256");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "payload");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "null");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_ref_id");
+    append_cbor_i64(cbor_payload.data(), &cbor_size, 1);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim_good,
+                      sizeof(k_claim_good));
+
+    jumbf_size = make_jumbf_with_cbor(jumbf.data(), cbor_payload.data(),
+                                      cbor_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_explicit_label_detached_payload_fixture()
+{
+    static const unsigned char k_claim_bad[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const unsigned char k_claim_good[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    std::array<unsigned char, 1024> cbor_payload {};
+    std::array<unsigned char, 1152> cbor_box {};
+    std::array<unsigned char, 128> claim_bad_jumb {};
+    std::array<unsigned char, 128> claim_good_jumb {};
+    std::array<unsigned char, 1536> root_payload {};
+    std::array<unsigned char, 1792> jumbf {};
+    std::size_t cbor_size;
+    std::size_t cbor_box_size;
+    std::size_t claim_bad_jumb_size;
+    std::size_t claim_good_jumb_size;
+    std::size_t root_payload_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim_bad,
+                      sizeof(k_claim_bad));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 3U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "alg");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "es256");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "payload");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "null");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "jumbf_uri");
+    append_cbor_text(cbor_payload.data(), &cbor_size,
+                     "https://example.test/asset?jumbf=c2pa.claim.good");
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim_good,
+                      sizeof(k_claim_good));
+
+    cbor_box_size = 0U;
+    append_box(cbor_box.data(), &cbor_box_size, "cbor", cbor_payload.data(),
+               cbor_size);
+    claim_bad_jumb_size = make_claim_jumb_box(claim_bad_jumb.data(),
+                                              "c2pa.claim.bad", k_claim_bad,
+                                              sizeof(k_claim_bad));
+    claim_good_jumb_size = make_claim_jumb_box(claim_good_jumb.data(),
+                                               "c2pa.claim.good", k_claim_good,
+                                               sizeof(k_claim_good));
+
+    root_payload_size = 0U;
+    append_bytes(root_payload.data(), &root_payload_size, claim_bad_jumb.data(),
+                 claim_bad_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size,
+                 claim_good_jumb.data(), claim_good_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size, cbor_box.data(),
+                 cbor_box_size);
+
+    jumbf_size = make_jumb_box_with_label(jumbf.data(), "c2pa",
+                                          root_payload.data(),
+                                          root_payload_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_unresolved_detached_payload_fixture()
+{
+    static const unsigned char k_claim_bad[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const unsigned char k_claim_other[] = { 0xA1U, 0x61U, 'a', 0x77U };
+    std::array<unsigned char, 1024> cbor_payload {};
+    std::array<unsigned char, 1280> jumbf {};
+    std::size_t cbor_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim_bad,
+                      sizeof(k_claim_bad));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 3U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "alg");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "es256");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "payload");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "null");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_ref_id");
+    append_cbor_i64(cbor_payload.data(), &cbor_size, 999);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim_other,
+                      sizeof(k_claim_other));
+
+    jumbf_size = make_jumbf_with_cbor(jumbf.data(), cbor_payload.data(),
+                                      cbor_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_percent_encoded_claim_ref_fixture()
+{
+    static const unsigned char k_claim_good[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    std::array<unsigned char, 2048> cbor_payload {};
+    std::array<unsigned char, 2560> jumbf {};
+    std::size_t cbor_size;
+    std::size_t jumbf_size;
+    std::uint32_t i;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 12U);
+
+    for (i = 0U; i < 11U; ++i) {
+        unsigned char claim_value[4];
+
+        claim_value[0] = 0xA1U;
+        claim_value[1] = 0x61U;
+        claim_value[2] = (unsigned char)'a';
+        claim_value[3] = (unsigned char)(i + 1U);
+
+        append_cbor_map(cbor_payload.data(), &cbor_size,
+                        (i == 0U) ? 2U : 1U);
+        append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+        append_cbor_bytes(cbor_payload.data(), &cbor_size, claim_value,
+                          sizeof(claim_value));
+        if (i == 0U) {
+            append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+            append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+            append_cbor_map(cbor_payload.data(), &cbor_size, 3U);
+            append_cbor_text(cbor_payload.data(), &cbor_size, "alg");
+            append_cbor_text(cbor_payload.data(), &cbor_size, "es256");
+            append_cbor_text(cbor_payload.data(), &cbor_size, "payload");
+            append_cbor_text(cbor_payload.data(), &cbor_size, "null");
+            append_cbor_text(cbor_payload.data(), &cbor_size, "claim_ref");
+            append_cbor_text(
+                cbor_payload.data(), &cbor_size,
+                "https://example.test/media/%63%6C%61%69%6D%73%5B11%5D");
+        }
+    }
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim_good,
+                      sizeof(k_claim_good));
+
+    jumbf_size = make_jumbf_with_cbor(jumbf.data(), cbor_payload.data(),
+                                      cbor_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_require_resolved_references_unresolved_fixture()
+{
+    static const unsigned char k_claim0[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const unsigned char k_claim1[] = { 0xA1U, 0x61U, 'a', 0x02U };
+    std::array<unsigned char, 512> cbor_payload {};
+    std::array<unsigned char, 768> jumbf {};
+    std::size_t cbor_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim0,
+                      sizeof(k_claim0));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "alg");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "es256");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_ref_id");
+    append_cbor_i64(cbor_payload.data(), &cbor_size, 99);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim1,
+                      sizeof(k_claim1));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "alg");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "es256");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_ref_id");
+    append_cbor_i64(cbor_payload.data(), &cbor_size, 0);
+
+    jumbf_size = make_jumbf_with_cbor(jumbf.data(), cbor_payload.data(),
+                                      cbor_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_require_resolved_references_ambiguous_fixture()
+{
+    static const unsigned char k_claim0[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const unsigned char k_claim1[] = { 0xA1U, 0x61U, 'a', 0x02U };
+    std::array<unsigned char, 512> cbor_payload {};
+    std::array<unsigned char, 768> jumbf {};
+    std::size_t cbor_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim0,
+                      sizeof(k_claim0));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 3U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "alg");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "es256");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_ref_id");
+    append_cbor_i64(cbor_payload.data(), &cbor_size, 0);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_reference");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims[1]");
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim1,
+                      sizeof(k_claim1));
+
+    jumbf_size = make_jumbf_with_cbor(jumbf.data(), cbor_payload.data(),
+                                      cbor_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_scaffold_requested_fixture()
+{
+    std::array<unsigned char, 256> cbor_payload {};
+    std::array<unsigned char, 512> jumbf {};
+    std::size_t cbor_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signature");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "ok");
+
+    jumbf_size = make_jumbf_with_cbor(jumbf.data(), cbor_payload.data(),
+                                      cbor_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_cose_signature_fields_fixture()
+{
+    static const unsigned char k_cbor_payload[] = {
+        0xA1U,
+        0x69U, 'm', 'a', 'n', 'i', 'f', 'e', 's', 't', 's',
+        0xA1U,
+        0x6FU, 'a', 'c', 't', 'i', 'v', 'e', '_', 'm',
+        'a', 'n', 'i', 'f', 'e', 's', 't',
+        0xA1U,
+        0x6AU, 's', 'i', 'g', 'n', 'a', 't', 'u', 'r', 'e', 's',
+        0x81U,
+        0x84U,
+        0x43U, 0xA1U, 0x01U, 0x26U,
+        0xA3U,
+        0x01U, 0x26U,
+        0x6EU, 'p', 'u', 'b', 'l', 'i', 'c', '_', 'k', 'e',
+        'y', '_', 'd', 'e', 'r',
+        0x43U, 0x01U, 0x02U, 0x03U,
+        0x6FU, 'c', 'e', 'r', 't', 'i', 'f', 'i', 'c', 'a',
+        't', 'e', '_', 'd', 'e', 'r',
+        0x43U, 0x04U, 0x05U, 0x06U,
+        0xF6U,
+        0x42U, 0xAAU, 0x55U
+    };
+    std::array<unsigned char, 384> jumbf {};
+    std::size_t jumbf_size;
+
+    jumbf_size = make_jumbf_with_cbor(jumbf.data(), k_cbor_payload,
+                                      sizeof(k_cbor_payload));
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_cose_detached_payload_from_claim_bytes_fixture()
+{
+    static const unsigned char k_payload_bytes[] = { 'a', 'b', 'c' };
+    static const unsigned char k_protected_header[] = { 0xA1U, 0x01U, 0x26U };
+    static const unsigned char k_empty_bytes[] = { 0x00U };
+    static const unsigned char k_raw_sig[64] = {
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U
+    };
+    std::array<unsigned char, 512> cbor_payload {};
+    std::array<unsigned char, 768> jumbf {};
+    std::size_t cbor_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_payload_bytes,
+                      sizeof(k_payload_bytes));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+
+    append_cbor_array(cbor_payload.data(), &cbor_size, 4U);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_protected_header,
+                      sizeof(k_protected_header));
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "public_key_der");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_empty_bytes, 0U);
+    append_cbor_null(cbor_payload.data(), &cbor_size);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_raw_sig,
+                      sizeof(k_raw_sig));
+
+    jumbf_size = make_jumbf_with_cbor(jumbf.data(), cbor_payload.data(),
+                                      cbor_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_reference_map_entries_fixture()
+{
+    static const unsigned char k_target_claim[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    static const unsigned char k_bad_claim[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const unsigned char k_protected_header[] = { 0xA1U, 0x01U, 0x26U };
+    static const unsigned char k_empty_bytes[] = { 0x00U };
+    static const unsigned char k_raw_sig[64] = {
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U
+    };
+    std::array<unsigned char, 1024> cbor_payload {};
+    std::array<unsigned char, 1152> cbor_box {};
+    std::array<unsigned char, 128> claim_bad_jumb {};
+    std::array<unsigned char, 128> claim_good_jumb {};
+    std::array<unsigned char, 1536> root_payload {};
+    std::array<unsigned char, 1792> jumbf {};
+    std::size_t cbor_size;
+    std::size_t cbor_box_size;
+    std::size_t claim_bad_jumb_size;
+    std::size_t claim_good_jumb_size;
+    std::size_t root_payload_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_bad_claim,
+                      sizeof(k_bad_claim));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_array(cbor_payload.data(), &cbor_size, 4U);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_protected_header,
+                      sizeof(k_protected_header));
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "public_key_der");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_empty_bytes, 0U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "references");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 3U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_ref");
+    append_cbor_i64(cbor_payload.data(), &cbor_size, 1);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_reference");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "c2pa.claim.bad");
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "uri");
+    append_cbor_text(cbor_payload.data(), &cbor_size,
+                     "https://example.test/asset?jumbf=c2pa.claim.good");
+
+    append_cbor_null(cbor_payload.data(), &cbor_size);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_raw_sig,
+                      sizeof(k_raw_sig));
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_target_claim,
+                      sizeof(k_target_claim));
+
+    cbor_box_size = 0U;
+    append_box(cbor_box.data(), &cbor_box_size, "cbor", cbor_payload.data(),
+               cbor_size);
+    claim_bad_jumb_size = make_claim_jumb_box(claim_bad_jumb.data(),
+                                              "c2pa.claim.bad", k_bad_claim,
+                                              sizeof(k_bad_claim));
+    claim_good_jumb_size = make_claim_jumb_box(claim_good_jumb.data(),
+                                               "c2pa.claim.good",
+                                               k_target_claim,
+                                               sizeof(k_target_claim));
+
+    root_payload_size = 0U;
+    append_bytes(root_payload.data(), &root_payload_size, claim_bad_jumb.data(),
+                 claim_bad_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size,
+                 claim_good_jumb.data(), claim_good_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size, cbor_box.data(),
+                 cbor_box_size);
+
+    jumbf_size = make_jumb_box_with_label(jumbf.data(), "c2pa",
+                                          root_payload.data(),
+                                          root_payload_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_reference_map_claims_array_fixture()
+{
+    static const unsigned char k_target_claim[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    static const unsigned char k_bad_claim[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const unsigned char k_protected_header[] = { 0xA1U, 0x01U, 0x26U };
+    static const unsigned char k_empty_bytes[] = { 0x00U };
+    static const unsigned char k_raw_sig[64] = {
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U
+    };
+    std::array<unsigned char, 768> cbor_payload {};
+    std::array<unsigned char, 1024> jumbf {};
+    std::size_t cbor_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_bad_claim,
+                      sizeof(k_bad_claim));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_array(cbor_payload.data(), &cbor_size, 4U);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_protected_header,
+                      sizeof(k_protected_header));
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "public_key_der");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_empty_bytes, 0U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "references");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_i64(cbor_payload.data(), &cbor_size, 1);
+    append_cbor_i64(cbor_payload.data(), &cbor_size, 999);
+
+    append_cbor_null(cbor_payload.data(), &cbor_size);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_raw_sig,
+                      sizeof(k_raw_sig));
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_target_claim,
+                      sizeof(k_target_claim));
+
+    jumbf_size = make_jumbf_with_cbor(jumbf.data(), cbor_payload.data(),
+                                      cbor_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_reference_map_index_uri_fixture()
+{
+    static const unsigned char k_target_claim[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    static const unsigned char k_bad_claim[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const unsigned char k_protected_header[] = { 0xA1U, 0x01U, 0x26U };
+    static const unsigned char k_empty_bytes[] = { 0x00U };
+    static const unsigned char k_raw_sig[64] = {
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U
+    };
+    std::array<unsigned char, 768> cbor_payload {};
+    std::array<unsigned char, 1024> jumbf {};
+    std::size_t cbor_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_bad_claim,
+                      sizeof(k_bad_claim));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_array(cbor_payload.data(), &cbor_size, 4U);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_protected_header,
+                      sizeof(k_protected_header));
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "public_key_der");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_empty_bytes, 0U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "reference");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "index");
+    append_cbor_i64(cbor_payload.data(), &cbor_size, 1);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "uri");
+    append_cbor_text(cbor_payload.data(), &cbor_size,
+                     "https://example.test/asset?jumbf=c2pa.claim.missing");
+
+    append_cbor_null(cbor_payload.data(), &cbor_size);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_raw_sig,
+                      sizeof(k_raw_sig));
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_target_claim,
+                      sizeof(k_target_claim));
+
+    jumbf_size = make_jumbf_with_cbor(jumbf.data(), cbor_payload.data(),
+                                      cbor_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_multiclaim_multisig_query_index_fixture()
+{
+    static const unsigned char k_claim0[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    static const unsigned char k_claim1[] = { 0xA1U, 0x61U, 'b', 0x2BU };
+    static const unsigned char k_protected_header[] = { 0xA1U, 0x01U, 0x26U };
+    static const unsigned char k_empty_bytes[] = { 0x00U };
+    static const unsigned char k_raw_sig0[64] = {
+        0x10U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U
+    };
+    static const unsigned char k_raw_sig1[64] = {
+        0x20U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U
+    };
+    std::array<unsigned char, 1536> cbor_payload {};
+    std::array<unsigned char, 2048> jumbf {};
+    std::size_t cbor_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim0,
+                      sizeof(k_claim0));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_array(cbor_payload.data(), &cbor_size, 4U);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_protected_header,
+                      sizeof(k_protected_header));
+    append_cbor_map(cbor_payload.data(), &cbor_size, 3U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "public_key_der");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_empty_bytes, 0U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim-uri");
+    append_cbor_text(cbor_payload.data(), &cbor_size,
+                     "https://example.test/a?claim-index=1&jumbf="
+                     "c2pa.claim.missing0");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim-reference");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "c2pa.claim.missing0");
+    append_cbor_null(cbor_payload.data(), &cbor_size);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_raw_sig0,
+                      sizeof(k_raw_sig0));
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim1,
+                      sizeof(k_claim1));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_array(cbor_payload.data(), &cbor_size, 4U);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_protected_header,
+                      sizeof(k_protected_header));
+    append_cbor_map(cbor_payload.data(), &cbor_size, 3U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "public_key_der");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_empty_bytes, 0U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim-uri");
+    append_cbor_text(cbor_payload.data(), &cbor_size,
+                     "https://example.test/b?claim_ref=0&jumbf="
+                     "c2pa.claim.missing1");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim-reference");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "c2pa.claim.missing1");
+    append_cbor_null(cbor_payload.data(), &cbor_size);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_raw_sig1,
+                      sizeof(k_raw_sig1));
+
+    jumbf_size = make_jumbf_with_cbor(jumbf.data(), cbor_payload.data(),
+                                      cbor_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_multiclaim_multisig_nested_refs_fixture()
+{
+    static const unsigned char k_claim0[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    static const unsigned char k_claim1[] = { 0xA1U, 0x61U, 'b', 0x2BU };
+    static const unsigned char k_claim0_bad[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const unsigned char k_claim1_bad[] = { 0xA1U, 0x61U, 'b', 0x02U };
+    static const unsigned char k_protected_header[] = { 0xA1U, 0x01U, 0x26U };
+    static const unsigned char k_empty_bytes[] = { 0x00U };
+    static const unsigned char k_raw_sig0[64] = {
+        0x30U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U
+    };
+    static const unsigned char k_raw_sig1[64] = {
+        0x40U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U
+    };
+    std::array<unsigned char, 2048> cbor_payload {};
+    std::array<unsigned char, 2304> cbor_box {};
+    std::array<unsigned char, 128> claim_bad0_jumb {};
+    std::array<unsigned char, 128> claim_bad1_jumb {};
+    std::array<unsigned char, 128> claim_good0_jumb {};
+    std::array<unsigned char, 128> claim_good1_jumb {};
+    std::array<unsigned char, 3072> root_payload {};
+    std::array<unsigned char, 3328> jumbf {};
+    std::size_t cbor_size;
+    std::size_t cbor_box_size;
+    std::size_t claim_bad0_jumb_size;
+    std::size_t claim_bad1_jumb_size;
+    std::size_t claim_good0_jumb_size;
+    std::size_t claim_good1_jumb_size;
+    std::size_t root_payload_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim0_bad,
+                      sizeof(k_claim0_bad));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_array(cbor_payload.data(), &cbor_size, 4U);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_protected_header,
+                      sizeof(k_protected_header));
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "public_key_der");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_empty_bytes, 0U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "references");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_ref");
+    append_cbor_text(cbor_payload.data(), &cbor_size,
+                     "https://example.test/a?claim-index=1");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_reference");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "c2pa.claim.bad0");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "uri");
+    append_cbor_text(cbor_payload.data(), &cbor_size,
+                     "https://example.test/a?jumbf=c2pa.claim.bad0");
+    append_cbor_null(cbor_payload.data(), &cbor_size);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_raw_sig0,
+                      sizeof(k_raw_sig0));
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim1_bad,
+                      sizeof(k_claim1_bad));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_array(cbor_payload.data(), &cbor_size, 4U);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_protected_header,
+                      sizeof(k_protected_header));
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "public_key_der");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_empty_bytes, 0U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "references");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim-uri");
+    append_cbor_text(cbor_payload.data(), &cbor_size,
+                     "https://example.test/b?claim_ref=0");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim-reference");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "c2pa.claim.bad1");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "uri");
+    append_cbor_text(cbor_payload.data(), &cbor_size,
+                     "https://example.test/b?jumbf=c2pa.claim.bad1");
+    append_cbor_null(cbor_payload.data(), &cbor_size);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_raw_sig1,
+                      sizeof(k_raw_sig1));
+
+    cbor_box_size = 0U;
+    append_box(cbor_box.data(), &cbor_box_size, "cbor", cbor_payload.data(),
+               cbor_size);
+    claim_bad0_jumb_size = make_claim_jumb_box(claim_bad0_jumb.data(),
+                                               "c2pa.claim.bad0",
+                                               k_claim0_bad,
+                                               sizeof(k_claim0_bad));
+    claim_bad1_jumb_size = make_claim_jumb_box(claim_bad1_jumb.data(),
+                                               "c2pa.claim.bad1",
+                                               k_claim1_bad,
+                                               sizeof(k_claim1_bad));
+    claim_good0_jumb_size = make_claim_jumb_box(claim_good0_jumb.data(),
+                                                "c2pa.claim.good0", k_claim0,
+                                                sizeof(k_claim0));
+    claim_good1_jumb_size = make_claim_jumb_box(claim_good1_jumb.data(),
+                                                "c2pa.claim.good1", k_claim1,
+                                                sizeof(k_claim1));
+
+    root_payload_size = 0U;
+    append_bytes(root_payload.data(), &root_payload_size,
+                 claim_bad0_jumb.data(), claim_bad0_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size,
+                 claim_bad1_jumb.data(), claim_bad1_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size,
+                 claim_good0_jumb.data(), claim_good0_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size,
+                 claim_good1_jumb.data(), claim_good1_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size, cbor_box.data(),
+                 cbor_box_size);
+
+    jumbf_size = make_jumb_box_with_label(jumbf.data(), "c2pa",
+                                          root_payload.data(),
+                                          root_payload_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
+}
+
+static ByteVec
+build_jumbf_verify_multiclaim_multisig_nested_idrefs_fixture()
+{
+    static const unsigned char k_claim0[] = { 0xA1U, 0x61U, 'a', 0x2AU };
+    static const unsigned char k_claim1[] = { 0xA1U, 0x61U, 'b', 0x2BU };
+    static const unsigned char k_claim0_bad[] = { 0xA1U, 0x61U, 'a', 0x01U };
+    static const unsigned char k_claim1_bad[] = { 0xA1U, 0x61U, 'b', 0x02U };
+    static const unsigned char k_protected_header[] = { 0xA1U, 0x01U, 0x26U };
+    static const unsigned char k_empty_bytes[] = { 0x00U };
+    static const unsigned char k_raw_sig0[64] = {
+        0x50U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U
+    };
+    static const unsigned char k_raw_sig1[64] = {
+        0x60U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U
+    };
+    std::array<unsigned char, 2304> cbor_payload {};
+    std::array<unsigned char, 2560> cbor_box {};
+    std::array<unsigned char, 128> claim_bad0_jumb {};
+    std::array<unsigned char, 128> claim_bad1_jumb {};
+    std::array<unsigned char, 128> claim_good0_jumb {};
+    std::array<unsigned char, 128> claim_good1_jumb {};
+    std::array<unsigned char, 3328> root_payload {};
+    std::array<unsigned char, 3584> jumbf {};
+    std::size_t cbor_size;
+    std::size_t cbor_box_size;
+    std::size_t claim_bad0_jumb_size;
+    std::size_t claim_bad1_jumb_size;
+    std::size_t claim_good0_jumb_size;
+    std::size_t claim_good1_jumb_size;
+    std::size_t root_payload_size;
+    std::size_t jumbf_size;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "manifests");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "active_manifest");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claims");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim0_bad,
+                      sizeof(k_claim0_bad));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_array(cbor_payload.data(), &cbor_size, 4U);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_protected_header,
+                      sizeof(k_protected_header));
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "public_key_der");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_empty_bytes, 0U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "references");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_ref_id");
+    append_cbor_i64(cbor_payload.data(), &cbor_size, 1);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_reference");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "c2pa.claim.bad0");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "reference");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_id");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "1");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "uri");
+    append_cbor_text(cbor_payload.data(), &cbor_size,
+                     "https://example.test/a?jumbf=c2pa.claim.bad0");
+    append_cbor_null(cbor_payload.data(), &cbor_size);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_raw_sig0,
+                      sizeof(k_raw_sig0));
+
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_claim1_bad,
+                      sizeof(k_claim1_bad));
+    append_cbor_text(cbor_payload.data(), &cbor_size, "signatures");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_array(cbor_payload.data(), &cbor_size, 4U);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_protected_header,
+                      sizeof(k_protected_header));
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "public_key_der");
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_empty_bytes, 0U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "references");
+    append_cbor_array(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_map(cbor_payload.data(), &cbor_size, 2U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim-reference-id");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "0");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_reference");
+    append_cbor_text(cbor_payload.data(), &cbor_size, "c2pa.claim.bad1");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "reference");
+    append_cbor_map(cbor_payload.data(), &cbor_size, 1U);
+    append_cbor_text(cbor_payload.data(), &cbor_size, "claim_id");
+    append_cbor_i64(cbor_payload.data(), &cbor_size, 0);
+    append_cbor_null(cbor_payload.data(), &cbor_size);
+    append_cbor_bytes(cbor_payload.data(), &cbor_size, k_raw_sig1,
+                      sizeof(k_raw_sig1));
+
+    cbor_box_size = 0U;
+    append_box(cbor_box.data(), &cbor_box_size, "cbor", cbor_payload.data(),
+               cbor_size);
+    claim_bad0_jumb_size = make_claim_jumb_box(claim_bad0_jumb.data(),
+                                               "c2pa.claim.bad0",
+                                               k_claim0_bad,
+                                               sizeof(k_claim0_bad));
+    claim_bad1_jumb_size = make_claim_jumb_box(claim_bad1_jumb.data(),
+                                               "c2pa.claim.bad1",
+                                               k_claim1_bad,
+                                               sizeof(k_claim1_bad));
+    claim_good0_jumb_size = make_claim_jumb_box(claim_good0_jumb.data(),
+                                                "c2pa.claim.good0", k_claim0,
+                                                sizeof(k_claim0));
+    claim_good1_jumb_size = make_claim_jumb_box(claim_good1_jumb.data(),
+                                                "c2pa.claim.good1", k_claim1,
+                                                sizeof(k_claim1));
+
+    root_payload_size = 0U;
+    append_bytes(root_payload.data(), &root_payload_size,
+                 claim_bad0_jumb.data(), claim_bad0_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size,
+                 claim_bad1_jumb.data(), claim_bad1_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size,
+                 claim_good0_jumb.data(), claim_good0_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size,
+                 claim_good1_jumb.data(), claim_good1_jumb_size);
+    append_bytes(root_payload.data(), &root_payload_size, cbor_box.data(),
+                 cbor_box_size);
+
+    jumbf_size = make_jumb_box_with_label(jumbf.data(), "c2pa",
+                                          root_payload.data(),
+                                          root_payload_size);
+    return ByteVec(jumbf.begin(), jumbf.begin() + (std::ptrdiff_t)jumbf_size);
 }
 
 static ByteVec
@@ -5944,8 +7242,15 @@ canonical_cpp_entry(const openmeta::MetaStore& store,
     return out;
 }
 
+struct ReadCaseOptions final {
+    bool decode_makernote = false;
+    bool verify_c2pa = false;
+    bool verify_require_resolved_references = false;
+    bool verify_backend_openssl = false;
+};
+
 static std::vector<std::string>
-read_omc_records(const ByteVec& file_bytes, bool decode_makernote)
+read_omc_records(const ByteVec& file_bytes, const ReadCaseOptions& options)
 {
     omc_store store;
     omc_read_res res;
@@ -5959,8 +7264,17 @@ read_omc_records(const ByteVec& file_bytes, bool decode_makernote)
 
     omc_store_init(&store);
     omc_read_opts_init(&opts);
-    if (decode_makernote) {
+    if (options.decode_makernote) {
         opts.exif.decode_makernote = 1;
+    }
+    if (options.verify_c2pa) {
+        opts.jumbf.verify_c2pa = 1;
+        if (options.verify_require_resolved_references) {
+            opts.jumbf.verify_require_resolved_references = 1;
+        }
+        if (options.verify_backend_openssl) {
+            opts.jumbf.verify_backend = OMC_C2PA_VERIFY_BACKEND_OPENSSL;
+        }
     }
     res = omc_read_simple(file_bytes.data(), (omc_size)file_bytes.size(),
                           &store, blocks.data(),
@@ -5983,7 +7297,7 @@ read_omc_records(const ByteVec& file_bytes, bool decode_makernote)
 }
 
 static std::vector<std::string>
-read_cpp_records(const ByteVec& file_bytes, bool decode_makernote)
+read_cpp_records(const ByteVec& file_bytes, const ReadCaseOptions& options)
 {
     openmeta::MetaStore store;
     openmeta::SimpleMetaDecodeOptions opts {};
@@ -5995,8 +7309,17 @@ read_cpp_records(const ByteVec& file_bytes, bool decode_makernote)
     std::vector<std::string> out;
     std::size_t i;
 
-    if (decode_makernote) {
+    if (options.decode_makernote) {
         opts.exif.decode_makernote = true;
+    }
+    if (options.verify_c2pa) {
+        opts.jumbf.verify_c2pa = true;
+        if (options.verify_require_resolved_references) {
+            opts.jumbf.verify_require_resolved_references = true;
+        }
+        if (options.verify_backend_openssl) {
+            opts.jumbf.verify_backend = openmeta::C2paVerifyBackend::OpenSsl;
+        }
     }
 
     res = openmeta::simple_meta_read(as_byte_span(file_bytes), store, blocks,
@@ -6083,15 +7406,56 @@ compare_records(const char* case_name, const std::vector<std::string>& omc,
 
 static bool
 run_case(const char* case_name, const ByteVec& file_bytes,
-         bool decode_makernote)
+         const ReadCaseOptions& options)
 {
     std::vector<std::string> omc;
     std::vector<std::string> cpp;
 
-    omc = read_omc_records(file_bytes, decode_makernote);
-    cpp = read_cpp_records(file_bytes, decode_makernote);
+    omc = read_omc_records(file_bytes, options);
+    cpp = read_cpp_records(file_bytes, options);
     normalize_case_records(case_name, &omc, &cpp);
     return compare_records(case_name, omc, cpp);
+}
+
+static bool
+run_case(const char* case_name, const ByteVec& file_bytes,
+         bool decode_makernote)
+{
+    ReadCaseOptions options {};
+
+    options.decode_makernote = decode_makernote;
+    return run_case(case_name, file_bytes, options);
+}
+
+static bool
+run_verify_case(const char* case_name, const ByteVec& file_bytes)
+{
+    ReadCaseOptions options {};
+
+    options.verify_c2pa = true;
+    return run_case(case_name, file_bytes, options);
+}
+
+static bool
+run_verify_policy_case(const char* case_name, const ByteVec& file_bytes,
+                       bool require_resolved_references)
+{
+    ReadCaseOptions options {};
+
+    options.verify_c2pa = true;
+    options.verify_require_resolved_references = require_resolved_references;
+    return run_case(case_name, file_bytes, options);
+}
+
+static bool
+run_verify_backend_case(const char* case_name, const ByteVec& file_bytes,
+                        bool request_openssl_backend)
+{
+    ReadCaseOptions options {};
+
+    options.verify_c2pa = true;
+    options.verify_backend_openssl = request_openssl_backend;
+    return run_case(case_name, file_bytes, options);
 }
 
 struct BenchCase final {
@@ -6324,6 +7688,81 @@ main(int argc, char** argv)
     ok = run_case("jpeg_irb_fields", build_jpeg_irb_fields_fixture(), false)
          && ok;
     ok = run_case("png_text", build_png_text_fixture(), false) && ok;
+    ok = run_case("jumbf_verify_not_requested",
+                  build_jumbf_verify_scaffold_requested_fixture(), false)
+         && ok;
+    ok = run_verify_backend_case("jumbf_verify_requested_openssl",
+                                 build_jumbf_verify_scaffold_requested_fixture(),
+                                 true)
+         && ok;
+    ok = run_verify_case("jumbf_verify_detached_payload",
+                         build_jumbf_verify_detached_payload_resolution_fixture())
+         && ok;
+    ok = run_verify_case("jumbf_verify_explicit_claim_ref",
+                         build_jumbf_verify_explicit_claim_ref_detached_payload_fixture())
+         && ok;
+    ok = run_verify_case("jumbf_verify_explicit_label",
+                         build_jumbf_verify_explicit_label_detached_payload_fixture())
+         && ok;
+    ok = run_verify_case("jumbf_verify_unresolved_no_fallback",
+                         build_jumbf_verify_unresolved_detached_payload_fixture())
+         && ok;
+    ok = run_verify_case("jumbf_verify_percent_encoded_claim_ref",
+                         build_jumbf_verify_percent_encoded_claim_ref_fixture())
+         && ok;
+    ok = run_verify_case("jumbf_verify_percent_encoded_jumbf_label",
+                         build_jumbf_verify_percent_encoded_jumbf_label_fixture())
+         && ok;
+    ok = run_verify_policy_case(
+             "jumbf_verify_require_resolved_refs_unresolved",
+             build_jumbf_verify_require_resolved_references_unresolved_fixture(),
+             true)
+         && ok;
+    ok = run_verify_policy_case(
+             "jumbf_verify_require_resolved_refs_ambiguous",
+             build_jumbf_verify_require_resolved_references_ambiguous_fixture(),
+             true)
+         && ok;
+    ok = run_verify_policy_case(
+             "jumbf_verify_require_resolved_refs_disabled",
+             build_jumbf_verify_require_resolved_references_unresolved_fixture(),
+             false)
+         && ok;
+    ok = run_case("jumbf_cose_signature_fields",
+                  build_jumbf_cose_signature_fields_fixture(), false)
+         && ok;
+    ok = run_verify_backend_case(
+             "jumbf_verify_cose_detached_payload_claim_bytes",
+             build_jumbf_verify_cose_detached_payload_from_claim_bytes_fixture(),
+             true)
+         && ok;
+    ok = run_verify_backend_case(
+             "jumbf_verify_reference_map_entries",
+             build_jumbf_verify_reference_map_entries_fixture(), true)
+         && ok;
+    ok = run_verify_backend_case(
+             "jumbf_verify_reference_map_claims_array",
+             build_jumbf_verify_reference_map_claims_array_fixture(), true)
+         && ok;
+    ok = run_verify_backend_case(
+             "jumbf_verify_reference_map_index_uri",
+             build_jumbf_verify_reference_map_index_uri_fixture(), true)
+         && ok;
+    ok = run_verify_backend_case(
+             "jumbf_verify_multiclaim_multisig_query_index",
+             build_jumbf_verify_multiclaim_multisig_query_index_fixture(),
+             true)
+         && ok;
+    ok = run_verify_backend_case(
+             "jumbf_verify_multiclaim_multisig_nested_refs",
+             build_jumbf_verify_multiclaim_multisig_nested_refs_fixture(),
+             true)
+         && ok;
+    ok = run_verify_backend_case(
+             "jumbf_verify_multiclaim_multisig_nested_idrefs",
+             build_jumbf_verify_multiclaim_multisig_nested_idrefs_fixture(),
+             true)
+         && ok;
     ok = run_case("bmff_auxc_semantics",
                   build_bmff_auxc_semantics_fixture(), false)
          && ok;

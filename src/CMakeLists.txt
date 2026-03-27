@@ -39,9 +39,11 @@ endfunction()
 
 set(OMC_SOURCES
   base/omc_arena.c
+  core/omc_edit.c
   core/omc_key.c
   core/omc_val.c
   core/omc_store.c
+  edit/omc_xmp_dump.c
   read/omc_bmff.c
   read/omc_ciff.c
   read/omc_exif.c
