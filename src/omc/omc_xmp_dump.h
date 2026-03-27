@@ -21,6 +21,8 @@ typedef struct omc_xmp_dump_limits {
 typedef struct omc_xmp_sidecar_opts {
     omc_xmp_dump_limits limits;
     int include_existing_xmp;
+    int include_exif;
+    int include_iptc;
 } omc_xmp_sidecar_opts;
 
 typedef struct omc_xmp_dump_res {
@@ -37,6 +39,11 @@ OMC_API omc_status
 omc_xmp_dump_sidecar(const omc_store* store, omc_u8* out, omc_size out_cap,
                      const omc_xmp_sidecar_opts* opts,
                      omc_xmp_dump_res* out_res);
+
+OMC_API omc_status
+omc_xmp_dump_sidecar_arena(const omc_store* store, omc_arena* out,
+                           const omc_xmp_sidecar_opts* opts,
+                           omc_xmp_dump_res* out_res);
 
 OMC_EXTERN_C_END
 
