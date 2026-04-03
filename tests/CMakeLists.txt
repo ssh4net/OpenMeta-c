@@ -50,6 +50,18 @@ add_executable(omc_test_xmp_dump test_omc_xmp_dump.c)
 target_link_libraries(omc_test_xmp_dump PRIVATE omc)
 add_test(NAME omc_test_xmp_dump COMMAND omc_test_xmp_dump)
 
+add_executable(omc_test_xmp_embed test_omc_xmp_embed.c)
+target_link_libraries(omc_test_xmp_embed PRIVATE omc)
+add_test(NAME omc_test_xmp_embed COMMAND omc_test_xmp_embed)
+
+add_executable(omc_test_xmp_apply test_omc_xmp_apply.c)
+target_link_libraries(omc_test_xmp_apply PRIVATE omc)
+add_test(NAME omc_test_xmp_apply COMMAND omc_test_xmp_apply)
+
+add_executable(omc_test_xmp_write test_omc_xmp_write.c)
+target_link_libraries(omc_test_xmp_write PRIVATE omc)
+add_test(NAME omc_test_xmp_write COMMAND omc_test_xmp_write)
+
 if(OMC_BUILD_PARITY_TESTS)
   set(omc_openmeta_paths)
   set(omc_openmeta_build_root "")
