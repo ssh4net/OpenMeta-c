@@ -17,6 +17,9 @@ omc_read_init_res(omc_read_res* res)
     res->bmff.boxes_scanned = 0U;
     res->bmff.item_infos = 0U;
     res->bmff.entries_decoded = 0U;
+    res->exr.status = OMC_EXR_UNSUPPORTED;
+    res->exr.parts_decoded = 0U;
+    res->exr.entries_decoded = 0U;
     res->exif.status = OMC_EXIF_OK;
     res->exif.ifds_written = 0U;
     res->exif.ifds_needed = 0U;
@@ -1461,6 +1464,7 @@ omc_read_opts_init(omc_read_opts* opts)
     }
 
     omc_bmff_opts_init(&opts->bmff);
+    omc_exr_opts_init(&opts->exr);
     omc_exif_opts_init(&opts->exif);
     omc_icc_opts_init(&opts->icc);
     omc_iptc_opts_init(&opts->iptc);
@@ -1498,6 +1502,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
     if (file_bytes == (const omc_u8*)0 || store == (omc_store*)0) {
         res.scan.status = OMC_SCAN_MALFORMED;
         res.bmff.status = OMC_BMFF_MALFORMED;
+        res.exr.status = OMC_EXR_MALFORMED;
         res.exif.status = OMC_EXIF_MALFORMED;
         res.icc.status = OMC_ICC_MALFORMED;
         res.iptc.status = OMC_IPTC_MALFORMED;
@@ -1808,6 +1813,9 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
             res.xmp.status = OMC_XMP_NOMEM;
         }
     }
+
+    res.exr = omc_exr_dec(file_bytes, file_size, store, OMC_ENTRY_FLAG_NONE,
+                          &use_opts->exr);
 
     res.entries_added = (omc_u32)(store->entry_count - entries_before);
     return res;

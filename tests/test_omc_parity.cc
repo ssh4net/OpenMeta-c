@@ -6615,6 +6615,51 @@ build_bmff_aux_subtype_upstream_fixture()
     return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
 }
 
+static void
+append_exr_attr_raw(unsigned char* out, std::size_t* io_size,
+                    const char* name, const char* type,
+                    const unsigned char* value, std::size_t value_size)
+{
+    append_text(out, io_size, name);
+    append_u8(out, io_size, 0U);
+    append_text(out, io_size, type);
+    append_u8(out, io_size, 0U);
+    append_u32le(out, io_size, (std::uint32_t)value_size);
+    append_bytes(out, io_size, value, value_size);
+}
+
+static void
+append_exr_attr_text(unsigned char* out, std::size_t* io_size,
+                     const char* name, const char* type, const char* value)
+{
+    append_exr_attr_raw(out, io_size, name, type,
+                        reinterpret_cast<const unsigned char*>(value),
+                        std::strlen(value));
+}
+
+static ByteVec
+build_exr_single_part_fixture()
+{
+    std::array<unsigned char, 256> file {};
+    unsigned char float_payload[4];
+    std::size_t size;
+
+    float_payload[0] = 0x00U;
+    float_payload[1] = 0x00U;
+    float_payload[2] = 0x80U;
+    float_payload[3] = 0x3FU;
+
+    size = 0U;
+    append_u32le(file.data(), &size, 20000630U);
+    append_u32le(file.data(), &size, 2U);
+    append_exr_attr_text(file.data(), &size, "owner", "string", "Vlad");
+    append_exr_attr_raw(file.data(), &size, "pixelAspectRatio", "float",
+                        float_payload, sizeof(float_payload));
+    append_u8(file.data(), &size, 0U);
+
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
 static std::span<const std::byte>
 as_byte_span(const ByteVec& bytes)
 {
@@ -7792,6 +7837,8 @@ main(int argc, char** argv)
          && ok;
     ok = run_case("bmff_primary_uri_item_info",
                   build_bmff_primary_uri_item_info_fixture(), false)
+         && ok;
+    ok = run_case("exr_single_part", build_exr_single_part_fixture(), false)
          && ok;
     ok = run_case("tiff_geotiff", build_tiff_geotiff_fixture(), false) && ok;
     ok = run_case("tiff_printim", build_tiff_printim_fixture(), false) && ok;

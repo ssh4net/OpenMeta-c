@@ -92,6 +92,9 @@ OMC_API void
 omc_key_make_comment(omc_key* key);
 
 OMC_API void
+omc_key_make_exr_attr(omc_key* key, omc_u32 part_index, omc_byte_ref name);
+
+OMC_API void
 omc_key_make_xmp_property(omc_key* key, omc_byte_ref schema_ns,
                           omc_byte_ref property_path);
 

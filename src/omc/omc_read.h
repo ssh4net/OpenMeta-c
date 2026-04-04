@@ -2,6 +2,7 @@
 #define OMC_READ_H
 
 #include "omc/omc_bmff.h"
+#include "omc/omc_exr.h"
 #include "omc/omc_exif.h"
 #include "omc/omc_icc.h"
 #include "omc/omc_iptc.h"
@@ -16,6 +17,7 @@ OMC_EXTERN_C_BEGIN
 
 typedef struct omc_read_opts {
     omc_bmff_opts bmff;
+    omc_exr_opts exr;
     omc_exif_opts exif;
     omc_icc_opts icc;
     omc_iptc_opts iptc;
@@ -29,6 +31,7 @@ typedef struct omc_read_res {
     omc_scan_res scan;
     omc_pay_res pay;
     omc_bmff_res bmff;
+    omc_exr_res exr;
     omc_exif_res exif;
     omc_icc_res icc;
     omc_iptc_res iptc;

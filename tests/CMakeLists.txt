@@ -14,6 +14,10 @@ add_executable(omc_test_exif test_omc_exif.c)
 target_link_libraries(omc_test_exif PRIVATE omc)
 add_test(NAME omc_test_exif COMMAND omc_test_exif)
 
+add_executable(omc_test_exr test_omc_exr.c)
+target_link_libraries(omc_test_exr PRIVATE omc)
+add_test(NAME omc_test_exr COMMAND omc_test_exr)
+
 add_executable(omc_test_exif_name test_omc_exif_name.c)
 target_link_libraries(omc_test_exif_name PRIVATE omc)
 add_test(NAME omc_test_exif_name COMMAND omc_test_exif_name)
@@ -61,6 +65,14 @@ add_test(NAME omc_test_xmp_apply COMMAND omc_test_xmp_apply)
 add_executable(omc_test_xmp_write test_omc_xmp_write.c)
 target_link_libraries(omc_test_xmp_write PRIVATE omc)
 add_test(NAME omc_test_xmp_write COMMAND omc_test_xmp_write)
+
+add_executable(omc_test_transfer test_omc_transfer.c)
+target_link_libraries(omc_test_transfer PRIVATE omc)
+add_test(NAME omc_test_transfer COMMAND omc_test_transfer)
+
+add_executable(omc_test_transfer_persist test_omc_transfer_persist.c)
+target_link_libraries(omc_test_transfer_persist PRIVATE omc)
+add_test(NAME omc_test_transfer_persist COMMAND omc_test_transfer_persist)
 
 if(OMC_BUILD_PARITY_TESTS)
   set(omc_openmeta_paths)

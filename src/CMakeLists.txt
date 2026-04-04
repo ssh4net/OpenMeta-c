@@ -43,12 +43,15 @@ set(OMC_SOURCES
   core/omc_key.c
   core/omc_val.c
   core/omc_store.c
+  edit/omc_transfer.c
+  edit/omc_transfer_persist.c
   edit/omc_xmp_apply.c
   edit/omc_xmp_embed.c
   edit/omc_xmp_dump.c
   edit/omc_xmp_write.c
   read/omc_bmff.c
   read/omc_ciff.c
+  read/omc_exr.c
   read/omc_exif.c
   read/omc_exif_name.c
   read/omc_icc.c

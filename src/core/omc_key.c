@@ -39,6 +39,19 @@ omc_key_make_comment(omc_key* key)
 }
 
 void
+omc_key_make_exr_attr(omc_key* key, omc_u32 part_index, omc_byte_ref name)
+{
+    omc_key_init(key);
+    if (key == NULL) {
+        return;
+    }
+
+    key->kind = OMC_KEY_EXR_ATTR;
+    key->u.exr_attr.part_index = part_index;
+    key->u.exr_attr.name = name;
+}
+
+void
 omc_key_make_xmp_property(omc_key* key, omc_byte_ref schema_ns,
                           omc_byte_ref property_path)
 {
