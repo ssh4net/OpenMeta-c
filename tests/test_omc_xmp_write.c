@@ -794,6 +794,31 @@ make_test_bmff_with_old_xmp_and_exif(omc_u8* out, omc_u32 major_brand)
 }
 
 static omc_size
+make_test_bmff_minimal_with_mdat(omc_u8* out, omc_u32 major_brand)
+{
+    omc_u8 ftyp_payload[16];
+    omc_u8 mdat_payload[8];
+    omc_size ftyp_size;
+    omc_size mdat_size;
+    omc_size size;
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload, &ftyp_size, major_brand);
+    append_u32be(ftyp_payload, &ftyp_size, 0U);
+    append_u32be(ftyp_payload, &ftyp_size, fourcc('m', 'i', 'f', '1'));
+
+    mdat_size = 0U;
+    append_text(mdat_payload, &mdat_size, "pixels");
+
+    size = 0U;
+    append_bmff_box(out, &size, fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload, ftyp_size);
+    append_bmff_box(out, &size, fourcc('m', 'd', 'a', 't'),
+                    mdat_payload, mdat_size);
+    return size;
+}
+
+static omc_size
 make_test_jxl_with_old_xmp_and_exif(omc_u8* out)
 {
     static const char xmp[] =
@@ -1477,6 +1502,118 @@ test_write_embedded_avif_replaces_xmp_and_keeps_exif(void)
 }
 
 static void
+test_write_embedded_heif_inserts_xmp_into_minimal_file(void)
+{
+    omc_u8 file_bytes[256];
+    omc_size file_size;
+    omc_store edit_store;
+    omc_store read_store;
+    omc_arena out;
+    omc_xmp_write_opts opts;
+    omc_xmp_write_res res;
+    omc_read_res read_res;
+    omc_blk_ref blocks[16];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload_buf[1536];
+    omc_u32 payload_scratch[16];
+    omc_status status;
+
+    file_size = make_test_bmff_minimal_with_mdat(
+        file_bytes, fourcc('h', 'e', 'i', 'c'));
+    omc_store_init(&edit_store);
+    omc_store_init(&read_store);
+    omc_arena_init(&out);
+
+    build_store_with_creator_tool(&edit_store, "NewTool");
+    omc_xmp_write_opts_init(&opts);
+    opts.embed.packet.include_existing_xmp = 1;
+    opts.embed.packet.include_exif = 0;
+    opts.embed.packet.include_iptc = 0;
+
+    status = omc_xmp_write_embedded(file_bytes, file_size, &edit_store, &out,
+                                    &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_WRITE_OK);
+    assert(res.format == OMC_SCAN_FMT_HEIF);
+    assert(res.removed_xmp_blocks == 0U);
+    assert(res.inserted_xmp_blocks == 1U);
+
+    read_res = omc_read_simple(out.data, out.size, &read_store, blocks, 16U,
+                               ifds, 8U, payload_buf, sizeof(payload_buf),
+                               payload_scratch, 16U,
+                               (const omc_read_opts*)0);
+    assert(read_res.entries_added >= 1U);
+    assert_text_value(&read_store,
+                      find_xmp_entry(&read_store,
+                                     "http://ns.adobe.com/xap/1.0/",
+                                     "CreatorTool"),
+                      "NewTool");
+    assert(count_xmp_entries(&read_store, "http://ns.adobe.com/xap/1.0/",
+                             "CreatorTool")
+           == 1U);
+
+    omc_arena_fini(&out);
+    omc_store_fini(&read_store);
+    omc_store_fini(&edit_store);
+}
+
+static void
+test_write_embedded_avif_inserts_xmp_into_minimal_file(void)
+{
+    omc_u8 file_bytes[256];
+    omc_size file_size;
+    omc_store edit_store;
+    omc_store read_store;
+    omc_arena out;
+    omc_xmp_write_opts opts;
+    omc_xmp_write_res res;
+    omc_read_res read_res;
+    omc_blk_ref blocks[16];
+    omc_exif_ifd_ref ifds[8];
+    omc_u8 payload_buf[1536];
+    omc_u32 payload_scratch[16];
+    omc_status status;
+
+    file_size = make_test_bmff_minimal_with_mdat(
+        file_bytes, fourcc('a', 'v', 'i', 'f'));
+    omc_store_init(&edit_store);
+    omc_store_init(&read_store);
+    omc_arena_init(&out);
+
+    build_store_with_creator_tool(&edit_store, "NewTool");
+    omc_xmp_write_opts_init(&opts);
+    opts.embed.packet.include_existing_xmp = 1;
+    opts.embed.packet.include_exif = 0;
+    opts.embed.packet.include_iptc = 0;
+
+    status = omc_xmp_write_embedded(file_bytes, file_size, &edit_store, &out,
+                                    &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_WRITE_OK);
+    assert(res.format == OMC_SCAN_FMT_AVIF);
+    assert(res.removed_xmp_blocks == 0U);
+    assert(res.inserted_xmp_blocks == 1U);
+
+    read_res = omc_read_simple(out.data, out.size, &read_store, blocks, 16U,
+                               ifds, 8U, payload_buf, sizeof(payload_buf),
+                               payload_scratch, 16U,
+                               (const omc_read_opts*)0);
+    assert(read_res.entries_added >= 1U);
+    assert_text_value(&read_store,
+                      find_xmp_entry(&read_store,
+                                     "http://ns.adobe.com/xap/1.0/",
+                                     "CreatorTool"),
+                      "NewTool");
+    assert(count_xmp_entries(&read_store, "http://ns.adobe.com/xap/1.0/",
+                             "CreatorTool")
+           == 1U);
+
+    omc_arena_fini(&out);
+    omc_store_fini(&read_store);
+    omc_store_fini(&edit_store);
+}
+
+static void
 test_write_embedded_jxl_replaces_xml_box_and_keeps_exif(void)
 {
     omc_u8 file_bytes[2048];
@@ -1724,6 +1861,8 @@ main(void)
     test_write_embedded_jp2_replaces_xmp_and_keeps_exif();
     test_write_embedded_heif_replaces_xmp_and_keeps_exif();
     test_write_embedded_avif_replaces_xmp_and_keeps_exif();
+    test_write_embedded_heif_inserts_xmp_into_minimal_file();
+    test_write_embedded_avif_inserts_xmp_into_minimal_file();
     test_write_embedded_jxl_replaces_xml_box_and_keeps_exif();
     test_write_embedded_jxl_replaces_brob_xmp_and_keeps_exif();
     test_write_embedded_reports_unsupported_for_cr3_uuid_layout();

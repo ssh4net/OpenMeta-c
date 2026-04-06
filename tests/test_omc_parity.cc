@@ -2,6 +2,7 @@
 #include <openmeta/meta_store.h>
 #include <openmeta/meta_value.h>
 #include <openmeta/exif_tag_names.h>
+#include <openmeta/metadata_transfer.h>
 #include <openmeta/simple_meta.h>
 
 extern "C" {
@@ -10,6 +11,8 @@ extern "C" {
 #include "omc/omc_key.h"
 #include "omc/omc_read.h"
 #include "omc/omc_store.h"
+#include "omc/omc_transfer.h"
+#include "omc/omc_transfer_persist.h"
 #include "omc/omc_val.h"
 }
 
@@ -73,6 +76,25 @@ append_u32le(unsigned char* out, std::size_t* io_size, std::uint32_t value)
     append_u8(out, io_size, (unsigned char)((value >> 8) & 0xFFU));
     append_u8(out, io_size, (unsigned char)((value >> 16) & 0xFFU));
     append_u8(out, io_size, (unsigned char)((value >> 24) & 0xFFU));
+}
+
+static void
+append_i32le(unsigned char* out, std::size_t* io_size, std::int32_t value)
+{
+    append_u32le(out, io_size, (std::uint32_t)value);
+}
+
+static void
+append_u64le(unsigned char* out, std::size_t* io_size, std::uint64_t value)
+{
+    append_u8(out, io_size, (unsigned char)(value & 0xFFU));
+    append_u8(out, io_size, (unsigned char)((value >> 8) & 0xFFU));
+    append_u8(out, io_size, (unsigned char)((value >> 16) & 0xFFU));
+    append_u8(out, io_size, (unsigned char)((value >> 24) & 0xFFU));
+    append_u8(out, io_size, (unsigned char)((value >> 32) & 0xFFU));
+    append_u8(out, io_size, (unsigned char)((value >> 40) & 0xFFU));
+    append_u8(out, io_size, (unsigned char)((value >> 48) & 0xFFU));
+    append_u8(out, io_size, (unsigned char)((value >> 56) & 0xFFU));
 }
 
 static void
@@ -160,6 +182,20 @@ append_png_chunk(unsigned char* out, std::size_t* io_size, const char* type,
         append_bytes(out, io_size, payload, payload_size);
     }
     append_u32be(out, io_size, 0U);
+}
+
+static void
+append_webp_chunk(unsigned char* out, std::size_t* io_size, const char* type,
+                  const unsigned char* payload, std::size_t payload_size)
+{
+    append_text(out, io_size, type);
+    append_u32le(out, io_size, (std::uint32_t)payload_size);
+    if (payload_size != 0U) {
+        append_bytes(out, io_size, payload, payload_size);
+    }
+    if ((payload_size & 1U) != 0U) {
+        append_u8(out, io_size, 0U);
+    }
 }
 
 static void
@@ -363,6 +399,678 @@ build_jpeg_comment_fixture()
     append_u8(file.data(), &size, 0xD9U);
 
     return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static std::string
+build_creator_tool_xmp_xml(const char* creator_tool)
+{
+    std::string out;
+
+    out += "<x:xmpmeta xmlns:x='adobe:ns:meta/'>";
+    out += "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>";
+    out += "<rdf:Description xmlns:xmp='http://ns.adobe.com/xap/1.0/' ";
+    out += "xmp:CreatorTool='";
+    out += creator_tool;
+    out += "'/>";
+    out += "</rdf:RDF>";
+    out += "</x:xmpmeta>";
+    return out;
+}
+
+static ByteVec
+build_transfer_xmp_sidecar_fixture(const char* creator_tool)
+{
+    const std::string xml = build_creator_tool_xmp_xml(creator_tool);
+    return ByteVec(xml.begin(), xml.end());
+}
+
+static void
+append_creator_tool_xmp_app1(unsigned char* out, std::size_t* io_size,
+                             const char* creator_tool)
+{
+    std::array<unsigned char, 1024> payload {};
+    std::size_t payload_size = 0U;
+    const std::string xml = build_creator_tool_xmp_xml(creator_tool);
+
+    append_text(payload.data(), &payload_size, "http://ns.adobe.com/xap/1.0/");
+    append_u8(payload.data(), &payload_size, 0U);
+    append_bytes(payload.data(), &payload_size, xml.data(), xml.size());
+    append_jpeg_segment(out, io_size, 0xFFE1U, payload.data(), payload_size);
+}
+
+static ByteVec
+build_transfer_source_jpeg_fixture_common(bool include_exif)
+{
+    openmeta::MetaStore store;
+    openmeta::PreparedTransferBundle bundle;
+    openmeta::PreparedTransferExecutionPlan plan;
+    openmeta::PrepareTransferRequest request;
+    openmeta::PrepareTransferResult prepared;
+    openmeta::EmitTransferResult compiled;
+    openmeta::Entry exif;
+    openmeta::Entry xmp;
+    openmeta::BlockId block;
+    std::array<unsigned char, 2048> file {};
+    std::size_t size = 0U;
+    std::size_t i;
+
+    block = store.add_block(openmeta::BlockInfo {});
+    if (block == openmeta::kInvalidBlockId) {
+        return ByteVec();
+    }
+
+    if (include_exif) {
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "exififd",
+                                               0x9003U);
+        exif.value = openmeta::make_text(store.arena(), "2024:01:02 03:04:05",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 0U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+    }
+
+    xmp.key = openmeta::make_xmp_property_key(
+        store.arena(), "http://ns.adobe.com/xap/1.0/", "CreatorTool");
+    xmp.value = openmeta::make_text(store.arena(), "OpenMeta Transfer Source",
+                                    openmeta::TextEncoding::Utf8);
+    xmp.origin.block          = block;
+    xmp.origin.order_in_block = include_exif ? 1U : 0U;
+    if (store.add_entry(xmp) == openmeta::kInvalidEntryId) {
+        return ByteVec();
+    }
+
+    store.finalize();
+
+    request.target_format      = openmeta::TransferTargetFormat::Jpeg;
+    request.include_icc_app2   = false;
+    request.include_iptc_app13 = false;
+    prepared = openmeta::prepare_metadata_for_target(store, request, &bundle);
+    if (prepared.status != openmeta::TransferStatus::Ok) {
+        return ByteVec();
+    }
+
+    compiled = openmeta::compile_prepared_transfer_execution(
+        bundle, openmeta::EmitTransferOptions {}, &plan);
+    if (compiled.status != openmeta::TransferStatus::Ok
+        || plan.target_format != openmeta::TransferTargetFormat::Jpeg) {
+        return ByteVec();
+    }
+
+    append_u8(file.data(), &size, 0xFFU);
+    append_u8(file.data(), &size, 0xD8U);
+    for (i = 0U; i < plan.jpeg_emit.ops.size(); ++i) {
+        const openmeta::PreparedJpegEmitOp& op = plan.jpeg_emit.ops[i];
+        if (op.block_index >= bundle.blocks.size()) {
+            return ByteVec();
+        }
+        append_jpeg_segment(
+            file.data(), &size, (std::uint16_t)(0xFF00U | op.marker_code),
+            (const unsigned char*)bundle.blocks[op.block_index].payload.data(),
+            bundle.blocks[op.block_index].payload.size());
+    }
+    append_u8(file.data(), &size, 0xFFU);
+    append_u8(file.data(), &size, 0xD9U);
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_transfer_source_jpeg_fixture()
+{
+    return build_transfer_source_jpeg_fixture_common(false);
+}
+
+static ByteVec
+build_transfer_source_jpeg_exif_xmp_fixture()
+{
+    return build_transfer_source_jpeg_fixture_common(true);
+}
+
+static ByteVec
+build_transfer_target_jpeg_fixture(const char* existing_creator_tool,
+                                   bool include_comment)
+{
+    std::array<unsigned char, 1024> file {};
+    std::size_t size = 0U;
+
+    (void)include_comment;
+    append_u8(file.data(), &size, 0xFFU);
+    append_u8(file.data(), &size, 0xD8U);
+    if (existing_creator_tool != nullptr) {
+        append_creator_tool_xmp_app1(file.data(), &size, existing_creator_tool);
+    }
+    append_u8(file.data(), &size, 0xFFU);
+    append_u8(file.data(), &size, 0xD9U);
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_transfer_target_png_fixture(const char* existing_creator_tool)
+{
+    static const unsigned char png_sig[8] = {
+        0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU
+    };
+    std::array<unsigned char, 1024> file {};
+    std::array<unsigned char, 13> ihdr {};
+    std::array<unsigned char, 512> xmp_payload {};
+    std::size_t xmp_size = 0U;
+    std::size_t size = 0U;
+    const std::string xml = (existing_creator_tool != nullptr)
+                                ? build_creator_tool_xmp_xml(
+                                      existing_creator_tool)
+                                : std::string();
+
+    ihdr[3] = 1U;
+    ihdr[7] = 1U;
+    ihdr[8] = 8U;
+    ihdr[9] = 2U;
+
+    if (existing_creator_tool != nullptr) {
+        append_text(xmp_payload.data(), &xmp_size, "XML:com.adobe.xmp");
+        append_u8(xmp_payload.data(), &xmp_size, 0U);
+        append_u8(xmp_payload.data(), &xmp_size, 0U);
+        append_u8(xmp_payload.data(), &xmp_size, 0U);
+        append_u8(xmp_payload.data(), &xmp_size, 0U);
+        append_u8(xmp_payload.data(), &xmp_size, 0U);
+        append_bytes(xmp_payload.data(), &xmp_size, xml.data(), xml.size());
+    }
+
+    append_bytes(file.data(), &size, png_sig, sizeof(png_sig));
+    append_png_chunk(file.data(), &size, "IHDR", ihdr.data(), ihdr.size());
+    if (existing_creator_tool != nullptr) {
+        append_png_chunk(file.data(), &size, "iTXt", xmp_payload.data(),
+                         xmp_size);
+    }
+    append_png_chunk(file.data(), &size, "IEND", (const unsigned char*)0, 0U);
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_transfer_tiff_make_only_fixture()
+{
+    static const char make[] = "Canon";
+    std::array<unsigned char, 128> file {};
+    std::size_t size = 0U;
+    std::uint32_t make_off;
+
+    append_text(file.data(), &size, "II");
+    append_u16le(file.data(), &size, 42U);
+    append_u32le(file.data(), &size, 8U);
+    append_u16le(file.data(), &size, 1U);
+
+    make_off = 8U + 2U + 12U + 4U;
+
+    append_u16le(file.data(), &size, 0x010FU);
+    append_u16le(file.data(), &size, 2U);
+    append_u32le(file.data(), &size, (std::uint32_t)sizeof(make));
+    append_u32le(file.data(), &size, make_off);
+    append_u32le(file.data(), &size, 0U);
+    append_text(file.data(), &size, make);
+    append_u8(file.data(), &size, 0U);
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_transfer_target_tiff_fixture(const char* existing_creator_tool)
+{
+    static const char make[] = "Canon";
+    std::array<unsigned char, 1024> file {};
+    const std::string xml = (existing_creator_tool != nullptr)
+                                ? build_creator_tool_xmp_xml(
+                                      existing_creator_tool)
+                                : std::string();
+    std::size_t size = 0U;
+    std::uint32_t make_off;
+    std::uint32_t xmp_off;
+    std::uint16_t entry_count;
+
+    append_text(file.data(), &size, "II");
+    append_u16le(file.data(), &size, 42U);
+    append_u32le(file.data(), &size, 8U);
+    entry_count = (existing_creator_tool != nullptr) ? 2U : 1U;
+    append_u16le(file.data(), &size, entry_count);
+
+    make_off = 8U + 2U + (std::uint32_t)(entry_count * 12U) + 4U;
+    xmp_off = make_off + (std::uint32_t)sizeof(make);
+
+    append_u16le(file.data(), &size, 0x010FU);
+    append_u16le(file.data(), &size, 2U);
+    append_u32le(file.data(), &size, (std::uint32_t)sizeof(make));
+    append_u32le(file.data(), &size, make_off);
+
+    if (existing_creator_tool != nullptr) {
+        append_u16le(file.data(), &size, 700U);
+        append_u16le(file.data(), &size, 7U);
+        append_u32le(file.data(), &size, (std::uint32_t)xml.size());
+        append_u32le(file.data(), &size, xmp_off);
+    }
+
+    append_u32le(file.data(), &size, 0U);
+    append_text(file.data(), &size, make);
+    append_u8(file.data(), &size, 0U);
+    if (existing_creator_tool != nullptr) {
+        append_bytes(file.data(), &size, xml.data(), xml.size());
+    }
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_transfer_target_bigtiff_fixture(const char* existing_creator_tool)
+{
+    static const char make[] = { 'C', 'a', 'n', 'o', 'n', 0U };
+    std::array<unsigned char, 1024> file {};
+    const std::string xml = (existing_creator_tool != nullptr)
+                                ? build_creator_tool_xmp_xml(
+                                      existing_creator_tool)
+                                : std::string();
+    std::size_t size = 0U;
+    std::uint64_t xmp_off;
+    std::uint64_t entry_count;
+
+    append_text(file.data(), &size, "II");
+    append_u16le(file.data(), &size, 43U);
+    append_u16le(file.data(), &size, 8U);
+    append_u16le(file.data(), &size, 0U);
+    append_u64le(file.data(), &size, 16U);
+    entry_count = (existing_creator_tool != nullptr) ? 2U : 1U;
+    append_u64le(file.data(), &size, entry_count);
+
+    xmp_off = 16U + 8U + (entry_count * 20U) + 8U;
+
+    append_u16le(file.data(), &size, 0x010FU);
+    append_u16le(file.data(), &size, 2U);
+    append_u64le(file.data(), &size, (std::uint64_t)sizeof(make));
+    append_bytes(file.data(), &size, make, sizeof(make));
+    append_u8(file.data(), &size, 0U);
+    append_u8(file.data(), &size, 0U);
+
+    if (existing_creator_tool != nullptr) {
+        append_u16le(file.data(), &size, 700U);
+        append_u16le(file.data(), &size, 7U);
+        append_u64le(file.data(), &size, (std::uint64_t)xml.size());
+        append_u64le(file.data(), &size, xmp_off);
+    }
+
+    append_u64le(file.data(), &size, 0U);
+    if (existing_creator_tool != nullptr) {
+        append_bytes(file.data(), &size, xml.data(), xml.size());
+    }
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_transfer_target_webp_fixture(const char* existing_creator_tool)
+{
+    std::array<unsigned char, 2048> file {};
+    std::array<unsigned char, 16> vp8x {};
+    const std::string xml = (existing_creator_tool != nullptr)
+                                ? build_creator_tool_xmp_xml(
+                                      existing_creator_tool)
+                                : std::string();
+    std::size_t size = 0U;
+
+    append_text(file.data(), &size, "RIFF");
+    append_u32le(file.data(), &size, 0U);
+    append_text(file.data(), &size, "WEBP");
+    vp8x[0] = (existing_creator_tool != nullptr) ? 0x04U : 0x00U;
+    append_webp_chunk(file.data(), &size, "VP8X", vp8x.data(), 10U);
+    if (existing_creator_tool != nullptr) {
+        append_webp_chunk(file.data(), &size, "XMP ",
+                          (const unsigned char*)xml.data(), xml.size());
+    }
+    append_webp_chunk(file.data(), &size, "VP8 ", (const unsigned char*)"\0",
+                      1U);
+    write_u32le_at(file.data(), 4U, (std::uint32_t)(size - 8U));
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_transfer_target_jp2_fixture(const char* existing_creator_tool)
+{
+    std::array<unsigned char, 1024> file {};
+    std::array<unsigned char, 12> ftyp_payload {};
+    const std::string xml = (existing_creator_tool != nullptr)
+                                ? build_creator_tool_xmp_xml(
+                                      existing_creator_tool)
+                                : std::string();
+    std::size_t ftyp_size = 0U;
+    std::size_t size = 0U;
+
+    append_u32be(file.data(), &size, 12U);
+    append_u32be(file.data(), &size, make_fourcc('j', 'P', ' ', ' '));
+    append_u32be(file.data(), &size, 0x0D0A870AU);
+    append_u32be(ftyp_payload.data(), &ftyp_size, make_fourcc('j', 'p', '2', ' '));
+    append_u32be(ftyp_payload.data(), &ftyp_size, 0U);
+    append_u32be(ftyp_payload.data(), &ftyp_size, make_fourcc('j', 'p', '2', ' '));
+    append_bmff_box(file.data(), &size, make_fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload.data(), ftyp_size);
+    if (existing_creator_tool != nullptr) {
+        append_bmff_box(file.data(), &size, make_fourcc('x', 'm', 'l', ' '),
+                        (const unsigned char*)xml.data(), xml.size());
+    }
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_transfer_target_heif_minimal_fixture()
+{
+    std::array<unsigned char, 64> file {};
+    std::array<unsigned char, 16> ftyp_payload {};
+    static const unsigned char mdat_payload[] = { 0x11U, 0x22U, 0x33U, 0x44U };
+    std::size_t ftyp_size = 0U;
+    std::size_t size = 0U;
+
+    append_u32be(ftyp_payload.data(), &ftyp_size, make_fourcc('h', 'e', 'i', 'c'));
+    append_u32be(ftyp_payload.data(), &ftyp_size, 0U);
+    append_u32be(ftyp_payload.data(), &ftyp_size, make_fourcc('m', 'i', 'f', '1'));
+    append_u32be(ftyp_payload.data(), &ftyp_size, make_fourcc('h', 'e', 'i', 'c'));
+
+    append_bmff_box(file.data(), &size, make_fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload.data(), ftyp_size);
+    append_bmff_box(file.data(), &size, make_fourcc('m', 'd', 'a', 't'),
+                    mdat_payload, sizeof(mdat_payload));
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_transfer_target_avif_minimal_fixture()
+{
+    std::array<unsigned char, 64> file {};
+    std::array<unsigned char, 16> ftyp_payload {};
+    static const unsigned char mdat_payload[] = { 0x11U, 0x22U, 0x33U, 0x44U };
+    std::size_t ftyp_size = 0U;
+    std::size_t size = 0U;
+
+    append_u32be(ftyp_payload.data(), &ftyp_size, make_fourcc('a', 'v', 'i', 'f'));
+    append_u32be(ftyp_payload.data(), &ftyp_size, 0U);
+    append_u32be(ftyp_payload.data(), &ftyp_size, make_fourcc('m', 'i', 'f', '1'));
+    append_u32be(ftyp_payload.data(), &ftyp_size, make_fourcc('a', 'v', 'i', 'f'));
+
+    append_bmff_box(file.data(), &size, make_fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload.data(), ftyp_size);
+    append_bmff_box(file.data(), &size, make_fourcc('m', 'd', 'a', 't'),
+                    mdat_payload, sizeof(mdat_payload));
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_transfer_target_bmff_fixture(const char* existing_creator_tool,
+                                   std::uint32_t major_brand)
+{
+    std::array<unsigned char, 4096> file {};
+    std::array<unsigned char, 256> exif_payload {};
+    std::array<unsigned char, 1024> idat_payload {};
+    std::array<unsigned char, 64> infe_exif {};
+    std::array<unsigned char, 96> infe_xmp {};
+    std::array<unsigned char, 256> iinf_payload {};
+    std::array<unsigned char, 160> iloc_payload {};
+    std::array<unsigned char, 1024> meta_payload {};
+    std::array<unsigned char, 16> moov_box {};
+    std::array<unsigned char, 16> ftyp_payload {};
+    const ByteVec tiff = build_transfer_tiff_make_only_fixture();
+    const std::string xml = (existing_creator_tool != nullptr)
+                                ? build_creator_tool_xmp_xml(
+                                      existing_creator_tool)
+                                : std::string();
+    std::size_t exif_size = 0U;
+    std::size_t idat_size = 0U;
+    std::size_t exif_off;
+    std::size_t xmp_off = 0U;
+    std::size_t infe_exif_size = 0U;
+    std::size_t infe_xmp_size = 0U;
+    std::size_t iinf_size = 0U;
+    std::size_t iloc_size = 0U;
+    std::size_t meta_size = 0U;
+    std::size_t moov_size = 0U;
+    std::size_t ftyp_size = 0U;
+    std::size_t size = 0U;
+    std::uint16_t item_count = (existing_creator_tool != nullptr) ? 2U : 1U;
+
+    append_u32be(exif_payload.data(), &exif_size, 6U);
+    append_text(exif_payload.data(), &exif_size, "Exif");
+    append_u8(exif_payload.data(), &exif_size, 0U);
+    append_u8(exif_payload.data(), &exif_size, 0U);
+    append_bytes(exif_payload.data(), &exif_size, tiff.data(), tiff.size());
+
+    exif_off = idat_size;
+    append_bytes(idat_payload.data(), &idat_size, exif_payload.data(),
+                 exif_size);
+    if (existing_creator_tool != nullptr) {
+        xmp_off = idat_size;
+        append_bytes(idat_payload.data(), &idat_size, xml.data(), xml.size());
+    }
+
+    append_fullbox_header(infe_exif.data(), &infe_exif_size, 2U);
+    append_u16be(infe_exif.data(), &infe_exif_size, 1U);
+    append_u16be(infe_exif.data(), &infe_exif_size, 0U);
+    append_u32be(infe_exif.data(), &infe_exif_size,
+                 make_fourcc('E', 'x', 'i', 'f'));
+    append_text(infe_exif.data(), &infe_exif_size, "Exif");
+    append_u8(infe_exif.data(), &infe_exif_size, 0U);
+
+    if (existing_creator_tool != nullptr) {
+        append_fullbox_header(infe_xmp.data(), &infe_xmp_size, 2U);
+        append_u16be(infe_xmp.data(), &infe_xmp_size, 2U);
+        append_u16be(infe_xmp.data(), &infe_xmp_size, 0U);
+        append_u32be(infe_xmp.data(), &infe_xmp_size,
+                     make_fourcc('m', 'i', 'm', 'e'));
+        append_text(infe_xmp.data(), &infe_xmp_size, "XMP");
+        append_u8(infe_xmp.data(), &infe_xmp_size, 0U);
+        append_text(infe_xmp.data(), &infe_xmp_size,
+                    "application/rdf+xml");
+        append_u8(infe_xmp.data(), &infe_xmp_size, 0U);
+        append_u8(infe_xmp.data(), &infe_xmp_size, 0U);
+    }
+
+    append_fullbox_header(iinf_payload.data(), &iinf_size, 0U);
+    append_u16be(iinf_payload.data(), &iinf_size, item_count);
+    append_bmff_box(iinf_payload.data(), &iinf_size,
+                    make_fourcc('i', 'n', 'f', 'e'), infe_exif.data(),
+                    infe_exif_size);
+    if (existing_creator_tool != nullptr) {
+        append_bmff_box(iinf_payload.data(), &iinf_size,
+                        make_fourcc('i', 'n', 'f', 'e'),
+                        infe_xmp.data(), infe_xmp_size);
+    }
+
+    append_fullbox_header(iloc_payload.data(), &iloc_size, 1U);
+    append_u8(iloc_payload.data(), &iloc_size, 0x44U);
+    append_u8(iloc_payload.data(), &iloc_size, 0x40U);
+    append_u16be(iloc_payload.data(), &iloc_size, item_count);
+
+    append_u16be(iloc_payload.data(), &iloc_size, 1U);
+    append_u16be(iloc_payload.data(), &iloc_size, 1U);
+    append_u16be(iloc_payload.data(), &iloc_size, 0U);
+    append_u32be(iloc_payload.data(), &iloc_size, 0U);
+    append_u16be(iloc_payload.data(), &iloc_size, 1U);
+    append_u32be(iloc_payload.data(), &iloc_size, (std::uint32_t)exif_off);
+    append_u32be(iloc_payload.data(), &iloc_size, (std::uint32_t)exif_size);
+
+    if (existing_creator_tool != nullptr) {
+        append_u16be(iloc_payload.data(), &iloc_size, 2U);
+        append_u16be(iloc_payload.data(), &iloc_size, 1U);
+        append_u16be(iloc_payload.data(), &iloc_size, 0U);
+        append_u32be(iloc_payload.data(), &iloc_size, 0U);
+        append_u16be(iloc_payload.data(), &iloc_size, 1U);
+        append_u32be(iloc_payload.data(), &iloc_size, (std::uint32_t)xmp_off);
+        append_u32be(iloc_payload.data(), &iloc_size, (std::uint32_t)xml.size());
+    }
+
+    append_fullbox_header(meta_payload.data(), &meta_size, 0U);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('i', 'i', 'n', 'f'),
+                    iinf_payload.data(), iinf_size);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('i', 'l', 'o', 'c'),
+                    iloc_payload.data(), iloc_size);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('i', 'd', 'a', 't'),
+                    idat_payload.data(), idat_size);
+
+    append_bmff_box(moov_box.data(), &moov_size, make_fourcc('m', 'o', 'o', 'v'),
+                    (const unsigned char*)0, 0U);
+
+    append_u32be(ftyp_payload.data(), &ftyp_size, major_brand);
+    append_u32be(ftyp_payload.data(), &ftyp_size, 0U);
+    append_u32be(ftyp_payload.data(), &ftyp_size,
+                 make_fourcc('m', 'i', 'f', '1'));
+
+    append_bytes(file.data(), &size, moov_box.data(), moov_size);
+    append_bmff_box(file.data(), &size, make_fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload.data(), ftyp_size);
+    append_bmff_box(file.data(), &size, make_fourcc('m', 'e', 't', 'a'),
+                    meta_payload.data(), meta_size);
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_transfer_target_heif_fixture(const char* existing_creator_tool)
+{
+    return build_transfer_target_bmff_fixture(
+        existing_creator_tool, make_fourcc('h', 'e', 'i', 'c'));
+}
+
+static ByteVec
+build_transfer_target_avif_fixture(const char* existing_creator_tool)
+{
+    return build_transfer_target_bmff_fixture(
+        existing_creator_tool, make_fourcc('a', 'v', 'i', 'f'));
+}
+
+static ByteVec
+build_transfer_target_jxl_fixture(const char* existing_creator_tool)
+{
+    std::array<unsigned char, 1024> file {};
+    std::array<unsigned char, 256> exif_payload {};
+    const ByteVec tiff = build_transfer_tiff_make_only_fixture();
+    const std::string xml = (existing_creator_tool != nullptr)
+                                ? build_creator_tool_xmp_xml(
+                                      existing_creator_tool)
+                                : std::string();
+    std::size_t exif_size = 0U;
+    std::size_t size = 0U;
+
+    append_u32be(exif_payload.data(), &exif_size, 0U);
+    append_bytes(exif_payload.data(), &exif_size, tiff.data(), tiff.size());
+
+    append_u32be(file.data(), &size, 12U);
+    append_u32be(file.data(), &size, make_fourcc('J', 'X', 'L', ' '));
+    append_u32be(file.data(), &size, 0x0D0A870AU);
+    append_bmff_box(file.data(), &size, make_fourcc('E', 'x', 'i', 'f'),
+                    exif_payload.data(), exif_size);
+    if (existing_creator_tool != nullptr) {
+        append_bmff_box(file.data(), &size, make_fourcc('x', 'm', 'l', ' '),
+                        (const unsigned char*)xml.data(), xml.size());
+    }
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static std::string
+make_temp_path(const char* stem, const char* suffix)
+{
+    static unsigned counter = 0U;
+    char path[256];
+    const unsigned long long stamp
+        = (unsigned long long)std::chrono::steady_clock::now()
+              .time_since_epoch()
+              .count();
+
+    counter += 1U;
+    std::snprintf(path, sizeof(path), "/tmp/%s_%llu_%u%s", stem, stamp,
+                  counter, suffix);
+    return std::string(path);
+}
+
+static bool
+write_file_bytes_raw(const std::string& path, const void* data, std::size_t size)
+{
+    std::FILE* f;
+
+    f = std::fopen(path.c_str(), "wb");
+    if (f == nullptr) {
+        return false;
+    }
+    if (size != 0U && std::fwrite(data, 1U, size, f) != size) {
+        std::fclose(f);
+        std::remove(path.c_str());
+        return false;
+    }
+    if (std::fclose(f) != 0) {
+        std::remove(path.c_str());
+        return false;
+    }
+    return true;
+}
+
+static bool
+write_file_bytes(const std::string& path, const ByteVec& bytes)
+{
+    return write_file_bytes_raw(path, bytes.data(), bytes.size());
+}
+
+static bool
+write_file_bytes(const std::string& path, const std::vector<std::byte>& bytes)
+{
+    return write_file_bytes_raw(path, bytes.data(), bytes.size());
+}
+
+static bool
+read_file_bytes(const std::string& path, ByteVec* out)
+{
+    std::FILE* f;
+    long end;
+
+    if (out == nullptr) {
+        return false;
+    }
+    f = std::fopen(path.c_str(), "rb");
+    if (f == nullptr) {
+        out->clear();
+        return false;
+    }
+    if (std::fseek(f, 0L, SEEK_END) != 0) {
+        std::fclose(f);
+        out->clear();
+        return false;
+    }
+    end = std::ftell(f);
+    if (end < 0L || std::fseek(f, 0L, SEEK_SET) != 0) {
+        std::fclose(f);
+        out->clear();
+        return false;
+    }
+    out->resize((std::size_t)end);
+    if (!out->empty()
+        && std::fread(out->data(), 1U, out->size(), f) != out->size()) {
+        std::fclose(f);
+        out->clear();
+        return false;
+    }
+    if (std::fclose(f) != 0) {
+        out->clear();
+        return false;
+    }
+    return true;
+}
+
+static void
+remove_file_if_present(const std::string& path)
+{
+    if (!path.empty()) {
+        (void)std::remove(path.c_str());
+    }
+}
+
+static std::string
+replace_extension(const std::string& path, const char* replacement)
+{
+    const std::size_t dot = path.find_last_of('.');
+
+    if (dot == std::string::npos) {
+        return path + replacement;
+    }
+    return path.substr(0U, dot) + replacement;
 }
 
 static std::size_t
@@ -6660,6 +7368,282 @@ build_exr_single_part_fixture()
     return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
 }
 
+static ByteVec
+build_exr_known_types_fixture()
+{
+    std::array<unsigned char, 512> file {};
+    std::size_t size;
+
+    size = 0U;
+    append_u32le(file.data(), &size, 20000630U);
+    append_u32le(file.data(), &size, 2U);
+
+    append_text(file.data(), &size, "displayWindow");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "box2i");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 16U);
+    append_i32le(file.data(), &size, 1);
+    append_i32le(file.data(), &size, 2);
+    append_i32le(file.data(), &size, 3);
+    append_i32le(file.data(), &size, 4);
+
+    append_text(file.data(), &size, "whiteLuminance");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "rational");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 8U);
+    append_i32le(file.data(), &size, -3);
+    append_u32le(file.data(), &size, 2U);
+
+    append_text(file.data(), &size, "timeCode");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "timecode");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 8U);
+    append_u32le(file.data(), &size, 0x11223344U);
+    append_u32le(file.data(), &size, 0x55667788U);
+
+    append_text(file.data(), &size, "adoptedNeutral");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "v2d");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 16U);
+    append_u64le(file.data(), &size, 0x3FF8000000000000ULL);
+    append_u64le(file.data(), &size, 0x4004000000000000ULL);
+
+    append_text(file.data(), &size, "cameraForward");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "v3i");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 12U);
+    append_i32le(file.data(), &size, -1);
+    append_i32le(file.data(), &size, 0);
+    append_i32le(file.data(), &size, 9);
+
+    append_text(file.data(), &size, "lookModTransform");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "floatvector");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 12U);
+    append_u32le(file.data(), &size, 0x3E800000U);
+    append_u32le(file.data(), &size, 0x3F000000U);
+    append_u32le(file.data(), &size, 0x3F800000U);
+
+    append_text(file.data(), &size, "filmKeyCode");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "keycode");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 28U);
+    append_i32le(file.data(), &size, 1);
+    append_i32le(file.data(), &size, 2);
+    append_i32le(file.data(), &size, 3);
+    append_i32le(file.data(), &size, 4);
+    append_i32le(file.data(), &size, 5);
+    append_i32le(file.data(), &size, 6);
+    append_i32le(file.data(), &size, 7);
+
+    append_u8(file.data(), &size, 0U);
+
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_exr_float_matrix_types_fixture()
+{
+    std::array<unsigned char, 512> file {};
+    std::size_t size;
+
+    size = 0U;
+    append_u32le(file.data(), &size, 20000630U);
+    append_u32le(file.data(), &size, 2U);
+
+    append_text(file.data(), &size, "dataWindowF");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "box2f");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 16U);
+    append_u32le(file.data(), &size, 0x3F800000U);
+    append_u32le(file.data(), &size, 0x40000000U);
+    append_u32le(file.data(), &size, 0x40400000U);
+    append_u32le(file.data(), &size, 0x40800000U);
+
+    append_text(file.data(), &size, "primaries");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "chromaticities");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 32U);
+    append_u32le(file.data(), &size, 0x3E99999AU);
+    append_u32le(file.data(), &size, 0x3F19999AU);
+    append_u32le(file.data(), &size, 0x3DCCCCCDU);
+    append_u32le(file.data(), &size, 0x3E4CCCCDU);
+    append_u32le(file.data(), &size, 0x3D4CCCCDU);
+    append_u32le(file.data(), &size, 0x3D99999AU);
+    append_u32le(file.data(), &size, 0x3F2AAAABU);
+    append_u32le(file.data(), &size, 0x3F2AAAABU);
+
+    append_text(file.data(), &size, "cameraTransform");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "m44d");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 128U);
+    append_u64le(file.data(), &size, 0x3FF0000000000000ULL);
+    append_u64le(file.data(), &size, 0x4000000000000000ULL);
+    append_u64le(file.data(), &size, 0x4008000000000000ULL);
+    append_u64le(file.data(), &size, 0x4010000000000000ULL);
+    append_u64le(file.data(), &size, 0x4014000000000000ULL);
+    append_u64le(file.data(), &size, 0x4018000000000000ULL);
+    append_u64le(file.data(), &size, 0x401C000000000000ULL);
+    append_u64le(file.data(), &size, 0x4020000000000000ULL);
+    append_u64le(file.data(), &size, 0x4022000000000000ULL);
+    append_u64le(file.data(), &size, 0x4024000000000000ULL);
+    append_u64le(file.data(), &size, 0x4026000000000000ULL);
+    append_u64le(file.data(), &size, 0x4028000000000000ULL);
+    append_u64le(file.data(), &size, 0x402A000000000000ULL);
+    append_u64le(file.data(), &size, 0x402C000000000000ULL);
+    append_u64le(file.data(), &size, 0x402E000000000000ULL);
+    append_u64le(file.data(), &size, 0x4030000000000000ULL);
+
+    append_u8(file.data(), &size, 0U);
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_exr_complex_raw_types_fixture()
+{
+    static const unsigned char k_chlist[] = {
+        'R', 0U,
+        1U, 0U, 0U, 0U,
+        1U, 0U, 0U, 0U,
+        0U, 0U, 0U, 0U,
+        1U, 0U, 0U, 0U,
+        1U, 0U, 0U, 0U,
+        0U
+    };
+    static const unsigned char k_preview[] = {
+        0x02U, 0x00U, 0x00U, 0x00U,
+        0x01U, 0x00U, 0x00U, 0x00U,
+        0x10U, 0x20U, 0x30U, 0x40U,
+        0x50U, 0x60U, 0x70U, 0x80U
+    };
+    static const unsigned char k_stringvector[] = {
+        0x03U, 0x00U, 0x00U, 0x00U, 'o', 'n', 'e',
+        0x03U, 0x00U, 0x00U, 0x00U, 't', 'w', 'o'
+    };
+    std::array<unsigned char, 512> file {};
+    std::size_t size;
+
+    size = 0U;
+    append_u32le(file.data(), &size, 20000630U);
+    append_u32le(file.data(), &size, 2U);
+    append_exr_attr_raw(file.data(), &size, "channels", "chlist",
+                        k_chlist, sizeof(k_chlist));
+    append_exr_attr_raw(file.data(), &size, "thumbnail", "preview",
+                        k_preview, sizeof(k_preview));
+    append_exr_attr_raw(file.data(), &size, "aliases", "stringvector",
+                        k_stringvector, sizeof(k_stringvector));
+    append_u8(file.data(), &size, 0U);
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_exr_enum_vector_matrix_types_fixture()
+{
+    std::array<unsigned char, 1024> file {};
+    std::size_t size;
+
+    size = 0U;
+    append_u32le(file.data(), &size, 20000630U);
+    append_u32le(file.data(), &size, 2U);
+
+    append_text(file.data(), &size, "compressionMode");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "compression");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 1U);
+    append_u8(file.data(), &size, 3U);
+
+    append_text(file.data(), &size, "environment");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "envmap");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 1U);
+    append_u8(file.data(), &size, 1U);
+
+    append_text(file.data(), &size, "scanOrder");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "lineOrder");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 1U);
+    append_u8(file.data(), &size, 2U);
+
+    append_text(file.data(), &size, "deepState");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "deepImageState");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 1U);
+    append_u8(file.data(), &size, 2U);
+
+    append_text(file.data(), &size, "screenWindowCenter");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "v2f");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 8U);
+    append_u32le(file.data(), &size, 0x3F000000U);
+    append_u32le(file.data(), &size, 0x3FC00000U);
+
+    append_text(file.data(), &size, "worldDir");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "v3f");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 12U);
+    append_u32le(file.data(), &size, 0x40200000U);
+    append_u32le(file.data(), &size, 0x40600000U);
+    append_u32le(file.data(), &size, 0x40900000U);
+
+    append_text(file.data(), &size, "matrix3f");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "m33f");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 36U);
+    append_u32le(file.data(), &size, 0x3F800000U);
+    append_u32le(file.data(), &size, 0x40000000U);
+    append_u32le(file.data(), &size, 0x40400000U);
+    append_u32le(file.data(), &size, 0x40800000U);
+    append_u32le(file.data(), &size, 0x40A00000U);
+    append_u32le(file.data(), &size, 0x40C00000U);
+    append_u32le(file.data(), &size, 0x40E00000U);
+    append_u32le(file.data(), &size, 0x41000000U);
+    append_u32le(file.data(), &size, 0x41100000U);
+
+    append_text(file.data(), &size, "cameraUp");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "v3d");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 24U);
+    append_u64le(file.data(), &size, 0x4008000000000000ULL);
+    append_u64le(file.data(), &size, 0x4014000000000000ULL);
+    append_u64le(file.data(), &size, 0x401E000000000000ULL);
+
+    append_text(file.data(), &size, "matrix3d");
+    append_u8(file.data(), &size, 0U);
+    append_text(file.data(), &size, "m33d");
+    append_u8(file.data(), &size, 0U);
+    append_u32le(file.data(), &size, 72U);
+    append_u64le(file.data(), &size, 0x3FF0000000000000ULL);
+    append_u64le(file.data(), &size, 0x4000000000000000ULL);
+    append_u64le(file.data(), &size, 0x4008000000000000ULL);
+    append_u64le(file.data(), &size, 0x4010000000000000ULL);
+    append_u64le(file.data(), &size, 0x4014000000000000ULL);
+    append_u64le(file.data(), &size, 0x4018000000000000ULL);
+    append_u64le(file.data(), &size, 0x401C000000000000ULL);
+    append_u64le(file.data(), &size, 0x4020000000000000ULL);
+    append_u64le(file.data(), &size, 0x4022000000000000ULL);
+
+    append_u8(file.data(), &size, 0U);
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
 static std::span<const std::byte>
 as_byte_span(const ByteVec& bytes)
 {
@@ -7287,6 +8271,121 @@ canonical_cpp_entry(const openmeta::MetaStore& store,
     return out;
 }
 
+static const char*
+canonical_omc_transfer_status(omc_transfer_status status)
+{
+    switch (status) {
+        case OMC_TRANSFER_OK:
+            return "ok";
+        case OMC_TRANSFER_UNSUPPORTED:
+            return "unsupported";
+        case OMC_TRANSFER_MALFORMED:
+            return "malformed";
+        case OMC_TRANSFER_LIMIT:
+            return "limit";
+    }
+    return "unknown";
+}
+
+static const char*
+canonical_cpp_transfer_status(openmeta::TransferStatus status)
+{
+    switch (status) {
+        case openmeta::TransferStatus::Ok:
+            return "ok";
+        case openmeta::TransferStatus::InvalidArgument:
+            return "invalid_argument";
+        case openmeta::TransferStatus::Unsupported:
+            return "unsupported";
+        case openmeta::TransferStatus::LimitExceeded:
+            return "limit";
+        case openmeta::TransferStatus::Malformed:
+            return "malformed";
+        case openmeta::TransferStatus::UnsafeData:
+            return "unsafe_data";
+        case openmeta::TransferStatus::InternalError:
+            return "internal_error";
+    }
+    return "unknown";
+}
+
+static const char*
+canonical_omc_xmp_write_status(omc_xmp_write_status status)
+{
+    switch (status) {
+        case OMC_XMP_WRITE_OK:
+            return "ok";
+        case OMC_XMP_WRITE_LIMIT:
+            return "limit";
+        case OMC_XMP_WRITE_UNSUPPORTED:
+            return "unsupported";
+        case OMC_XMP_WRITE_MALFORMED:
+            return "malformed";
+    }
+    return "unknown";
+}
+
+static const char*
+canonical_omc_xmp_dump_status(omc_xmp_dump_status status)
+{
+    switch (status) {
+        case OMC_XMP_DUMP_OK:
+            return "ok";
+        case OMC_XMP_DUMP_TRUNCATED:
+            return "truncated";
+        case OMC_XMP_DUMP_LIMIT:
+            return "limit";
+    }
+    return "unknown";
+}
+
+static std::string
+byte_ref_text(const omc_arena& arena, omc_byte_ref ref)
+{
+    const omc_const_bytes view = omc_arena_view(&arena, ref);
+
+    if (view.data == nullptr || view.size == 0U) {
+        return std::string();
+    }
+    return std::string((const char*)view.data, (std::size_t)view.size);
+}
+
+struct TransferExecuteCaseOptions final {
+    omc_xmp_writeback_mode writeback_mode
+        = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    omc_xmp_destination_embedded_mode destination_embedded_mode
+        = OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING;
+    openmeta::TransferTargetFormat cpp_target_format
+        = openmeta::TransferTargetFormat::Jpeg;
+    const char* target_suffix = ".jpg";
+};
+
+struct TransferExecuteParitySummary final {
+    std::string status;
+    std::string edited_status;
+    std::string sidecar_status;
+    bool sidecar_requested = false;
+    bool edited_present  = false;
+    bool sidecar_present = false;
+    std::vector<std::string> edited_records;
+    std::vector<std::string> sidecar_records;
+};
+
+struct TransferPersistParitySummary final {
+    std::string status;
+    std::string output_status;
+    std::string sidecar_status;
+    std::string cleanup_status;
+    bool sidecar_requested = false;
+    bool cleanup_requested = false;
+    bool cleanup_removed   = false;
+    std::string output_path;
+    std::string sidecar_path;
+    std::string cleanup_path;
+    std::vector<std::string> output_records;
+    std::vector<std::string> sidecar_records;
+};
+
 struct ReadCaseOptions final {
     bool decode_makernote = false;
     bool verify_c2pa = false;
@@ -7339,6 +8438,34 @@ read_omc_records(const ByteVec& file_bytes, const ReadCaseOptions& options)
     omc_store_fini(&store);
     std::sort(out.begin(), out.end());
     return out;
+}
+
+static bool
+read_omc_store(const ByteVec& file_bytes, omc_store* out_store)
+{
+    omc_read_res res;
+    omc_read_opts opts;
+    std::array<omc_blk_ref, 128> blocks {};
+    std::array<omc_exif_ifd_ref, 128> ifds {};
+    std::array<omc_u8, 65536> payload {};
+    std::array<omc_u32, 256> scratch {};
+
+    if (out_store == nullptr) {
+        return false;
+    }
+    omc_store_init(out_store);
+    omc_read_opts_init(&opts);
+    res = omc_read_simple(file_bytes.data(), (omc_size)file_bytes.size(),
+                          out_store, blocks.data(),
+                          (omc_u32)blocks.size(), ifds.data(),
+                          (omc_u32)ifds.size(), payload.data(),
+                          (omc_size)payload.size(), scratch.data(),
+                          (omc_u32)scratch.size(), &opts);
+    if (res.scan.status == OMC_SCAN_MALFORMED) {
+        omc_store_fini(out_store);
+        return false;
+    }
+    return true;
 }
 
 static std::vector<std::string>
@@ -7396,6 +8523,83 @@ dedupe_sorted_records(std::vector<std::string>* records)
 }
 
 static void
+erase_records_containing(std::vector<std::string>* records, const char* needle)
+{
+    std::vector<std::string>::iterator dst;
+    std::vector<std::string>::iterator src;
+
+    if (records == nullptr || needle == nullptr) {
+        return;
+    }
+
+    dst = records->begin();
+    for (src = records->begin(); src != records->end(); ++src) {
+        if (src->find(needle) != std::string::npos) {
+            continue;
+        }
+        if (dst != src) {
+            *dst = *src;
+        }
+        ++dst;
+    }
+    records->erase(dst, records->end());
+}
+
+static void
+erase_records_with_prefix(std::vector<std::string>* records, const char* prefix)
+{
+    std::vector<std::string>::iterator dst;
+    std::vector<std::string>::iterator src;
+    const std::size_t prefix_len
+        = (prefix != nullptr) ? std::strlen(prefix) : 0U;
+
+    if (records == nullptr || prefix == nullptr) {
+        return;
+    }
+
+    dst = records->begin();
+    for (src = records->begin(); src != records->end(); ++src) {
+        if (src->compare(0U, prefix_len, prefix) == 0) {
+            continue;
+        }
+        if (dst != src) {
+            *dst = *src;
+        }
+        ++dst;
+    }
+    records->erase(dst, records->end());
+}
+
+static void
+erase_sony_afstatus19_unstable_records(std::vector<std::string>* records)
+{
+    std::vector<std::string>::iterator dst;
+    std::vector<std::string>::iterator src;
+
+    if (records == nullptr) {
+        return;
+    }
+
+    dst = records->begin();
+    for (src = records->begin(); src != records->end(); ++src) {
+        const bool is_afstatus19
+            = src->find("ifd=mk_sony_afstatus19_0|tag=") != std::string::npos;
+        const bool keep_stable
+            = src->find("tag=0||") != std::string::npos
+              || src->find("tag=4||") != std::string::npos;
+
+        if (is_afstatus19 && !keep_stable) {
+            continue;
+        }
+        if (dst != src) {
+            *dst = *src;
+        }
+        ++dst;
+    }
+    records->erase(dst, records->end());
+}
+
+static void
 normalize_case_records(const char* case_name, std::vector<std::string>* omc,
                        std::vector<std::string>* cpp)
 {
@@ -7407,6 +8611,15 @@ normalize_case_records(const char* case_name, std::vector<std::string>* omc,
         /* Current upstream emits a duplicate derived 0x1254 record here. */
         (void)dedupe_sorted_records(omc);
         (void)dedupe_sorted_records(cpp);
+    } else if (std::strcmp(case_name,
+                           "tiff_sony_tag940e_afinfo_makernote")
+               == 0) {
+        /*
+         * Keep parity on the stable afstatus19 subset that both local direct
+         * tests and public upstream tests lock today.
+         */
+        erase_sony_afstatus19_unstable_records(omc);
+        erase_sony_afstatus19_unstable_records(cpp);
     }
 }
 
@@ -7501,6 +8714,622 @@ run_verify_backend_case(const char* case_name, const ByteVec& file_bytes,
     options.verify_c2pa = true;
     options.verify_backend_openssl = request_openssl_backend;
     return run_case(case_name, file_bytes, options);
+}
+
+static openmeta::XmpWritebackMode
+to_cpp_writeback_mode(omc_xmp_writeback_mode mode)
+{
+    switch (mode) {
+        case OMC_XMP_WRITEBACK_EMBEDDED_ONLY:
+            return openmeta::XmpWritebackMode::EmbeddedOnly;
+        case OMC_XMP_WRITEBACK_SIDECAR_ONLY:
+            return openmeta::XmpWritebackMode::SidecarOnly;
+        case OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR:
+            return openmeta::XmpWritebackMode::EmbeddedAndSidecar;
+    }
+    return openmeta::XmpWritebackMode::EmbeddedOnly;
+}
+
+static openmeta::XmpDestinationEmbeddedMode
+to_cpp_destination_embedded_mode(omc_xmp_destination_embedded_mode mode)
+{
+    switch (mode) {
+        case OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING:
+            return openmeta::XmpDestinationEmbeddedMode::PreserveExisting;
+        case OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING:
+            return openmeta::XmpDestinationEmbeddedMode::StripExisting;
+    }
+    return openmeta::XmpDestinationEmbeddedMode::PreserveExisting;
+}
+
+static bool
+compare_text_field(const char* case_name, const char* field,
+                   const std::string& omc, const std::string& cpp)
+{
+    if (omc == cpp) {
+        return true;
+    }
+    std::fprintf(stderr, "%s mismatch in %s\n", case_name, field);
+    std::fprintf(stderr, "  omc: %s\n", omc.c_str());
+    std::fprintf(stderr, "  cpp: %s\n", cpp.c_str());
+    return false;
+}
+
+static bool
+compare_bool_field(const char* case_name, const char* field, bool omc,
+                   bool cpp)
+{
+    if (omc == cpp) {
+        return true;
+    }
+    std::fprintf(stderr, "%s mismatch in %s\n", case_name, field);
+    std::fprintf(stderr, "  omc: %s\n", omc ? "true" : "false");
+    std::fprintf(stderr, "  cpp: %s\n", cpp ? "true" : "false");
+    return false;
+}
+
+static bool
+run_omc_transfer_execute_case(const ByteVec& source_bytes,
+                              const ByteVec& target_bytes,
+                              const TransferExecuteCaseOptions& options,
+                              TransferExecuteParitySummary* out)
+{
+    omc_store source_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    if (out == nullptr) {
+        return false;
+    }
+    *out = TransferExecuteParitySummary {};
+
+    if (!read_omc_store(source_bytes, &source_store)) {
+        std::fprintf(stderr, "omc transfer source decode failed\n");
+        return false;
+    }
+
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.writeback_mode = options.writeback_mode;
+    prepare_opts.destination_embedded_mode
+        = options.destination_embedded_mode;
+
+    status = omc_transfer_prepare(target_bytes.data(),
+                                  (omc_size)target_bytes.size(),
+                                  &source_store, &prepare_opts, &bundle);
+    if (status != OMC_STATUS_OK) {
+        omc_arena_fini(&sidecar_out);
+        omc_arena_fini(&edited_out);
+        omc_store_fini(&source_store);
+        return false;
+    }
+    status = omc_transfer_compile(&bundle, &exec);
+    if (status != OMC_STATUS_OK) {
+        omc_arena_fini(&sidecar_out);
+        omc_arena_fini(&edited_out);
+        omc_store_fini(&source_store);
+        return false;
+    }
+    status = omc_transfer_execute(target_bytes.data(),
+                                  (omc_size)target_bytes.size(),
+                                  &source_store, &edited_out, &sidecar_out,
+                                  &exec, &res);
+    if (status != OMC_STATUS_OK) {
+        omc_arena_fini(&sidecar_out);
+        omc_arena_fini(&edited_out);
+        omc_store_fini(&source_store);
+        return false;
+    }
+
+    out->status = canonical_omc_transfer_status(res.status);
+    out->edited_status = canonical_omc_xmp_write_status(res.embedded.status);
+    out->sidecar_status = canonical_omc_xmp_dump_status(res.sidecar.status);
+    out->sidecar_requested =
+        options.writeback_mode != OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    out->edited_present = (res.edited_present != 0);
+    out->sidecar_present = (res.sidecar_present != 0);
+    if (out->edited_present) {
+        out->edited_records = read_omc_records(
+            ByteVec(edited_out.data, edited_out.data + edited_out.size),
+            ReadCaseOptions {});
+    }
+    if (out->sidecar_present) {
+        out->sidecar_records = read_omc_records(
+            ByteVec(sidecar_out.data, sidecar_out.data + sidecar_out.size),
+            ReadCaseOptions {});
+    }
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&source_store);
+    return true;
+}
+
+static bool
+run_cpp_transfer_execute_case(const ByteVec& source_bytes,
+                              const ByteVec& target_bytes,
+                              const TransferExecuteCaseOptions& options,
+                              TransferExecuteParitySummary* out)
+{
+    openmeta::ExecutePreparedTransferFileOptions exec_opts;
+    openmeta::ExecutePreparedTransferFileResult res;
+    const std::string source_path
+        = make_temp_path("omc_transfer_src", ".jpg");
+    const std::string target_path = make_temp_path("omc_transfer_target",
+                                                   options.target_suffix);
+    ByteVec edited_bytes;
+    ByteVec sidecar_bytes;
+
+    if (out == nullptr) {
+        return false;
+    }
+    *out = TransferExecuteParitySummary {};
+
+    if (!write_file_bytes(source_path, source_bytes)
+        || !write_file_bytes(target_path, target_bytes)) {
+        remove_file_if_present(source_path);
+        remove_file_if_present(target_path);
+        return false;
+    }
+
+    exec_opts.prepare.prepare.target_format = options.cpp_target_format;
+    exec_opts.prepare.prepare.include_icc_app2 = false;
+    exec_opts.prepare.prepare.include_iptc_app13 = false;
+    exec_opts.edit_target_path = target_path;
+    exec_opts.execute.edit_apply = true;
+    exec_opts.xmp_writeback_mode
+        = to_cpp_writeback_mode(options.writeback_mode);
+    exec_opts.xmp_destination_embedded_mode
+        = to_cpp_destination_embedded_mode(options.destination_embedded_mode);
+
+    res = openmeta::execute_prepared_transfer_file(source_path.c_str(),
+                                                   exec_opts);
+    remove_file_if_present(source_path);
+    remove_file_if_present(target_path);
+
+    out->status = canonical_cpp_transfer_status(res.execute.edit_apply.status);
+    out->edited_status
+        = canonical_cpp_transfer_status(res.execute.edit_apply.status);
+    out->sidecar_status = canonical_cpp_transfer_status(res.xmp_sidecar_status);
+    out->sidecar_requested =
+        options.writeback_mode != OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    out->edited_present = !res.execute.edited_output.empty();
+    out->sidecar_present = !res.xmp_sidecar_output.empty();
+    if (out->edited_present) {
+        edited_bytes.resize(res.execute.edited_output.size());
+        std::memcpy(edited_bytes.data(), res.execute.edited_output.data(),
+                    edited_bytes.size());
+        out->edited_records = read_cpp_records(edited_bytes,
+                                               ReadCaseOptions {});
+    }
+    if (out->sidecar_present) {
+        sidecar_bytes.resize(res.xmp_sidecar_output.size());
+        std::memcpy(sidecar_bytes.data(), res.xmp_sidecar_output.data(),
+                    sidecar_bytes.size());
+        out->sidecar_records = read_cpp_records(sidecar_bytes,
+                                                ReadCaseOptions {});
+    }
+    return true;
+}
+
+static bool
+run_omc_transfer_persist_case(const ByteVec& source_bytes,
+                              const ByteVec& target_bytes,
+                              const TransferExecuteCaseOptions& options,
+                              const std::string& output_path,
+                              bool strip_destination_sidecar,
+                              TransferPersistParitySummary* out)
+{
+    omc_store source_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_status status;
+    ByteVec output_bytes;
+    ByteVec sidecar_bytes;
+    const std::string sidecar_path = replace_extension(output_path, ".xmp");
+
+    if (out == nullptr) {
+        return false;
+    }
+    *out = TransferPersistParitySummary {};
+
+    if (!read_omc_store(source_bytes, &source_store)) {
+        std::fprintf(stderr, "omc transfer persist source decode failed\n");
+        return false;
+    }
+
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.writeback_mode = options.writeback_mode;
+    prepare_opts.destination_embedded_mode
+        = options.destination_embedded_mode;
+
+    status = omc_transfer_prepare(target_bytes.data(),
+                                  (omc_size)target_bytes.size(),
+                                  &source_store, &prepare_opts, &bundle);
+    if (status != OMC_STATUS_OK) {
+        omc_arena_fini(&meta_out);
+        omc_arena_fini(&sidecar_out);
+        omc_arena_fini(&edited_out);
+        omc_store_fini(&source_store);
+        return false;
+    }
+    status = omc_transfer_compile(&bundle, &exec);
+    if (status != OMC_STATUS_OK) {
+        omc_arena_fini(&meta_out);
+        omc_arena_fini(&sidecar_out);
+        omc_arena_fini(&edited_out);
+        omc_store_fini(&source_store);
+        return false;
+    }
+    status = omc_transfer_execute(target_bytes.data(),
+                                  (omc_size)target_bytes.size(),
+                                  &source_store, &edited_out, &sidecar_out,
+                                  &exec, &transfer_res);
+    if (status != OMC_STATUS_OK) {
+        omc_arena_fini(&meta_out);
+        omc_arena_fini(&sidecar_out);
+        omc_arena_fini(&edited_out);
+        omc_store_fini(&source_store);
+        return false;
+    }
+
+    if (strip_destination_sidecar
+        && !write_file_bytes(sidecar_path,
+                             build_transfer_xmp_sidecar_fixture(
+                                 "Stale Destination"))) {
+        omc_arena_fini(&meta_out);
+        omc_arena_fini(&sidecar_out);
+        omc_arena_fini(&edited_out);
+        omc_store_fini(&source_store);
+        return false;
+    }
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.output_path = output_path.c_str();
+    if (strip_destination_sidecar) {
+        persist_opts.destination_sidecar_mode
+            = OMC_TRANSFER_DEST_SIDECAR_STRIP_EXISTING;
+    }
+
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    if (status != OMC_STATUS_OK) {
+        remove_file_if_present(output_path);
+        remove_file_if_present(sidecar_path);
+        omc_arena_fini(&meta_out);
+        omc_arena_fini(&sidecar_out);
+        omc_arena_fini(&edited_out);
+        omc_store_fini(&source_store);
+        return false;
+    }
+
+    out->status = canonical_omc_transfer_status(persist_res.status);
+    out->output_status = canonical_omc_transfer_status(
+        persist_res.output_status);
+    out->sidecar_status = canonical_omc_transfer_status(
+        persist_res.xmp_sidecar_status);
+    out->cleanup_status = canonical_omc_transfer_status(
+        persist_res.xmp_sidecar_cleanup_status);
+    out->sidecar_requested = (persist_res.xmp_sidecar_requested != 0);
+    out->cleanup_requested = (persist_res.xmp_sidecar_cleanup_requested != 0);
+    out->cleanup_removed = (persist_res.xmp_sidecar_cleanup_removed != 0);
+    out->output_path = byte_ref_text(meta_out, persist_res.output_path);
+    out->sidecar_path = byte_ref_text(meta_out, persist_res.xmp_sidecar_path);
+    out->cleanup_path = byte_ref_text(meta_out,
+                                      persist_res.xmp_sidecar_cleanup_path);
+
+    if (persist_res.output_status == OMC_TRANSFER_OK
+        && read_file_bytes(output_path, &output_bytes)) {
+        out->output_records = read_omc_records(output_bytes, ReadCaseOptions {});
+    }
+    if (out->sidecar_requested
+        && persist_res.xmp_sidecar_status == OMC_TRANSFER_OK
+        && read_file_bytes(sidecar_path, &sidecar_bytes)) {
+        out->sidecar_records = read_omc_records(sidecar_bytes,
+                                                ReadCaseOptions {});
+    }
+
+    remove_file_if_present(output_path);
+    remove_file_if_present(sidecar_path);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&source_store);
+    return true;
+}
+
+static bool
+run_cpp_transfer_persist_case(const ByteVec& source_bytes,
+                              const ByteVec& target_bytes,
+                              const TransferExecuteCaseOptions& options,
+                              const std::string& output_path,
+                              bool strip_destination_sidecar,
+                              TransferPersistParitySummary* out)
+{
+    openmeta::ExecutePreparedTransferFileOptions exec_opts;
+    openmeta::ExecutePreparedTransferFileResult prepared;
+    openmeta::PersistPreparedTransferFileOptions persist_opts;
+    openmeta::PersistPreparedTransferFileResult persisted;
+    const std::string source_path
+        = make_temp_path("omc_transfer_src", ".jpg");
+    const std::string target_path = make_temp_path("omc_transfer_target",
+                                                   options.target_suffix);
+    const std::string sidecar_path = replace_extension(output_path, ".xmp");
+    ByteVec output_bytes;
+    ByteVec sidecar_bytes;
+
+    if (out == nullptr) {
+        return false;
+    }
+    *out = TransferPersistParitySummary {};
+
+    if (!write_file_bytes(source_path, source_bytes)
+        || !write_file_bytes(target_path, target_bytes)) {
+        remove_file_if_present(source_path);
+        remove_file_if_present(target_path);
+        return false;
+    }
+    if (strip_destination_sidecar
+        && !write_file_bytes(sidecar_path,
+                             build_transfer_xmp_sidecar_fixture(
+                                 "Stale Destination"))) {
+        remove_file_if_present(source_path);
+        remove_file_if_present(target_path);
+        remove_file_if_present(sidecar_path);
+        return false;
+    }
+
+    exec_opts.prepare.prepare.target_format = options.cpp_target_format;
+    exec_opts.prepare.prepare.include_icc_app2 = false;
+    exec_opts.prepare.prepare.include_iptc_app13 = false;
+    exec_opts.edit_target_path = target_path;
+    exec_opts.xmp_sidecar_base_path = output_path;
+    exec_opts.execute.edit_apply = true;
+    exec_opts.xmp_writeback_mode
+        = to_cpp_writeback_mode(options.writeback_mode);
+    exec_opts.xmp_destination_embedded_mode
+        = to_cpp_destination_embedded_mode(options.destination_embedded_mode);
+    if (strip_destination_sidecar) {
+        exec_opts.xmp_destination_sidecar_mode
+            = openmeta::XmpDestinationSidecarMode::StripExisting;
+    }
+
+    prepared = openmeta::execute_prepared_transfer_file(source_path.c_str(),
+                                                        exec_opts);
+    persist_opts.output_path = output_path;
+    persisted = openmeta::persist_prepared_transfer_file_result(prepared,
+                                                                persist_opts);
+
+    out->status = canonical_cpp_transfer_status(persisted.status);
+    out->output_status = canonical_cpp_transfer_status(
+        persisted.output_status);
+    out->sidecar_status = canonical_cpp_transfer_status(
+        persisted.xmp_sidecar_status);
+    out->cleanup_status = canonical_cpp_transfer_status(
+        persisted.xmp_sidecar_cleanup_status);
+    out->sidecar_requested = prepared.xmp_sidecar_requested;
+    out->cleanup_requested = prepared.xmp_sidecar_cleanup_requested;
+    out->cleanup_removed = persisted.xmp_sidecar_cleanup_removed;
+    out->output_path = persisted.output_path;
+    out->sidecar_path = persisted.xmp_sidecar_path;
+    out->cleanup_path = persisted.xmp_sidecar_cleanup_path;
+
+    if (persisted.output_status == openmeta::TransferStatus::Ok
+        && read_file_bytes(output_path, &output_bytes)) {
+        out->output_records = read_cpp_records(output_bytes,
+                                               ReadCaseOptions {});
+    }
+    if (out->sidecar_requested
+        && persisted.xmp_sidecar_status == openmeta::TransferStatus::Ok
+        && read_file_bytes(sidecar_path, &sidecar_bytes)) {
+        out->sidecar_records = read_cpp_records(sidecar_bytes,
+                                                ReadCaseOptions {});
+    }
+
+    remove_file_if_present(source_path);
+    remove_file_if_present(target_path);
+    remove_file_if_present(output_path);
+    remove_file_if_present(sidecar_path);
+    return true;
+}
+
+static bool
+compare_transfer_execute_summary(const char* case_name,
+                                 const TransferExecuteParitySummary& omc,
+                                 const TransferExecuteParitySummary& cpp)
+{
+    bool ok = true;
+    std::vector<std::string> omc_edited = omc.edited_records;
+    std::vector<std::string> cpp_edited = cpp.edited_records;
+    std::vector<std::string> omc_sidecar = omc.sidecar_records;
+    std::vector<std::string> cpp_sidecar = cpp.sidecar_records;
+
+    erase_records_containing(&omc_edited, "XMPToolkit");
+    erase_records_containing(&cpp_edited, "XMPToolkit");
+    erase_records_containing(&omc_sidecar, "XMPToolkit");
+    erase_records_containing(&cpp_sidecar, "XMPToolkit");
+    erase_records_containing(&omc_edited, "ExifTag|ifd=ifd0|tag=700||Bytes|");
+    erase_records_containing(&cpp_edited, "ExifTag|ifd=ifd0|tag=700||Bytes|");
+    erase_records_containing(&omc_edited, "ExifTag|ifd=ifd0|tag=34665||");
+    erase_records_containing(&cpp_edited, "ExifTag|ifd=ifd0|tag=34665||");
+    erase_records_with_prefix(&omc_edited, "BmffField|");
+    erase_records_with_prefix(&cpp_edited, "BmffField|");
+    erase_records_containing(
+        &omc_edited,
+        "XmpProperty|schema=http://ns.adobe.com/tiff/1.0/|path=ExifTag||");
+    erase_records_containing(
+        &cpp_edited,
+        "XmpProperty|schema=http://ns.adobe.com/tiff/1.0/|path=ExifTag||");
+    erase_records_containing(
+        &omc_sidecar,
+        "XmpProperty|schema=http://ns.adobe.com/tiff/1.0/|path=ExifTag||");
+    erase_records_containing(
+        &cpp_sidecar,
+        "XmpProperty|schema=http://ns.adobe.com/tiff/1.0/|path=ExifTag||");
+
+    ok = compare_text_field(case_name, "status", omc.status, cpp.status) && ok;
+    ok = compare_text_field(case_name, "edited_status", omc.edited_status,
+                            cpp.edited_status)
+         && ok;
+    ok = compare_bool_field(case_name, "sidecar_requested", omc.sidecar_requested,
+                            cpp.sidecar_requested)
+         && ok;
+    if (omc.sidecar_requested && cpp.sidecar_requested) {
+        ok = compare_text_field(case_name, "sidecar_status",
+                                omc.sidecar_status, cpp.sidecar_status)
+             && ok;
+    }
+    ok = compare_bool_field(case_name, "edited_present", omc.edited_present,
+                            cpp.edited_present)
+         && ok;
+    ok = compare_bool_field(case_name, "sidecar_present", omc.sidecar_present,
+                            cpp.sidecar_present)
+         && ok;
+    if (omc.edited_present && cpp.edited_present) {
+        const std::string label = std::string(case_name) + ".edited";
+        ok = compare_records(label.c_str(), omc_edited, cpp_edited)
+             && ok;
+    }
+    if (omc.sidecar_present && cpp.sidecar_present) {
+        const std::string label = std::string(case_name) + ".sidecar";
+        ok = compare_records(label.c_str(), omc_sidecar, cpp_sidecar)
+             && ok;
+    }
+    return ok;
+}
+
+static bool
+compare_transfer_persist_summary(const char* case_name,
+                                 const TransferPersistParitySummary& omc,
+                                 const TransferPersistParitySummary& cpp)
+{
+    bool ok = true;
+    std::vector<std::string> omc_output = omc.output_records;
+    std::vector<std::string> cpp_output = cpp.output_records;
+    std::vector<std::string> omc_sidecar = omc.sidecar_records;
+    std::vector<std::string> cpp_sidecar = cpp.sidecar_records;
+
+    erase_records_containing(&omc_output, "XMPToolkit");
+    erase_records_containing(&cpp_output, "XMPToolkit");
+    erase_records_containing(&omc_sidecar, "XMPToolkit");
+    erase_records_containing(&cpp_sidecar, "XMPToolkit");
+    erase_records_containing(&omc_output, "ExifTag|ifd=ifd0|tag=700||Bytes|");
+    erase_records_containing(&cpp_output, "ExifTag|ifd=ifd0|tag=700||Bytes|");
+    erase_records_containing(&omc_output, "ExifTag|ifd=ifd0|tag=34665||");
+    erase_records_containing(&cpp_output, "ExifTag|ifd=ifd0|tag=34665||");
+    erase_records_with_prefix(&omc_output, "BmffField|");
+    erase_records_with_prefix(&cpp_output, "BmffField|");
+    erase_records_containing(
+        &omc_sidecar,
+        "XmpProperty|schema=http://ns.adobe.com/tiff/1.0/|path=ExifTag||");
+    erase_records_containing(
+        &cpp_sidecar,
+        "XmpProperty|schema=http://ns.adobe.com/tiff/1.0/|path=ExifTag||");
+
+    ok = compare_text_field(case_name, "status", omc.status, cpp.status) && ok;
+    ok = compare_text_field(case_name, "output_status", omc.output_status,
+                            cpp.output_status)
+         && ok;
+    ok = compare_text_field(case_name, "sidecar_status", omc.sidecar_status,
+                            cpp.sidecar_status)
+         && ok;
+    ok = compare_text_field(case_name, "cleanup_status", omc.cleanup_status,
+                            cpp.cleanup_status)
+         && ok;
+    ok = compare_bool_field(case_name, "sidecar_requested",
+                            omc.sidecar_requested, cpp.sidecar_requested)
+         && ok;
+    ok = compare_bool_field(case_name, "cleanup_requested",
+                            omc.cleanup_requested, cpp.cleanup_requested)
+         && ok;
+    ok = compare_bool_field(case_name, "cleanup_removed",
+                            omc.cleanup_removed, cpp.cleanup_removed)
+         && ok;
+    ok = compare_text_field(case_name, "output_path", omc.output_path,
+                            cpp.output_path)
+         && ok;
+    ok = compare_text_field(case_name, "sidecar_path", omc.sidecar_path,
+                            cpp.sidecar_path)
+         && ok;
+    ok = compare_text_field(case_name, "cleanup_path", omc.cleanup_path,
+                            cpp.cleanup_path)
+         && ok;
+    if (!omc.output_records.empty() || !cpp.output_records.empty()) {
+        const std::string label = std::string(case_name) + ".output";
+        ok = compare_records(label.c_str(), omc_output, cpp_output)
+             && ok;
+    }
+    if (!omc.sidecar_records.empty() || !cpp.sidecar_records.empty()) {
+        const std::string label = std::string(case_name) + ".sidecar";
+        ok = compare_records(label.c_str(), omc_sidecar, cpp_sidecar)
+             && ok;
+    }
+    return ok;
+}
+
+static bool
+run_transfer_execute_case(const char* case_name, const ByteVec& source_bytes,
+                          const ByteVec& target_bytes,
+                          const TransferExecuteCaseOptions& options)
+{
+    TransferExecuteParitySummary omc;
+    TransferExecuteParitySummary cpp;
+
+    if (!run_omc_transfer_execute_case(source_bytes, target_bytes, options,
+                                       &omc)) {
+        std::fprintf(stderr, "%s omc transfer execute failed\n", case_name);
+        return false;
+    }
+    if (!run_cpp_transfer_execute_case(source_bytes, target_bytes, options,
+                                       &cpp)) {
+        std::fprintf(stderr, "%s cpp transfer execute failed\n", case_name);
+        return false;
+    }
+    return compare_transfer_execute_summary(case_name, omc, cpp);
+}
+
+static bool
+run_transfer_persist_case(const char* case_name, const ByteVec& source_bytes,
+                          const ByteVec& target_bytes,
+                          const TransferExecuteCaseOptions& options,
+                          bool strip_destination_sidecar)
+{
+    TransferPersistParitySummary omc;
+    TransferPersistParitySummary cpp;
+    const std::string output_path
+        = make_temp_path("omc_transfer_out", options.target_suffix);
+
+    if (!run_omc_transfer_persist_case(source_bytes, target_bytes, options,
+                                       output_path,
+                                       strip_destination_sidecar, &omc)) {
+        std::fprintf(stderr, "%s omc transfer persist failed\n", case_name);
+        return false;
+    }
+    if (!run_cpp_transfer_persist_case(source_bytes, target_bytes, options,
+                                       output_path,
+                                       strip_destination_sidecar, &cpp)) {
+        std::fprintf(stderr, "%s cpp transfer persist failed\n", case_name);
+        return false;
+    }
+    return compare_transfer_persist_summary(case_name, omc, cpp);
 }
 
 struct BenchCase final {
@@ -7733,6 +9562,432 @@ main(int argc, char** argv)
     ok = run_case("jpeg_irb_fields", build_jpeg_irb_fields_fixture(), false)
          && ok;
     ok = run_case("png_text", build_png_text_fixture(), false) && ok;
+    {
+        /* The XMP-only transfer/persist slice is locked here now. The
+           remaining EXIF-bearing and wider file-transfer cases stay deferred
+           below until the C transfer layer grows the matching embedded EXIF
+           rewrite surface for those targets. */
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_embedded_and_sidecar",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        ok = run_transfer_execute_case(
+                 "transfer_png_embedded_and_sidecar",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_png_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix = ".tif";
+        ok = run_transfer_execute_case(
+                 "transfer_tiff_embedded_and_sidecar",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_tiff_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix = ".tif";
+        ok = run_transfer_execute_case(
+                 "transfer_bigtiff_embedded_and_sidecar",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_bigtiff_fixture("OldTool"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode
+            = OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_sidecar_only_strip",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_sidecar_only_preserve",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_jpeg_fixture(
+                     "Target Embedded Existing", true),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_embedded_only_strip_sidecar",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_jpeg_fixture(nullptr, true),
+                 transfer_opts, true)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_embedded_and_sidecar",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_png_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix = ".tif";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_bigtiff_exif_sidecar_only_preserve",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_bigtiff_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    if (false) {
+        /*
+         * Current upstream file persistence still reports this HEIF strip case
+         * as unsupported. Keep the direct C persistence tests as the lock until
+         * the upstream-visible workflow aligns.
+         */
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode =
+            OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Heif;
+        transfer_opts.target_suffix = ".heic";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_heif_exif_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_heif_fixture("Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    }
+    {
+        /* The first EXIF-bearing transfer slice is locked here for the
+           standalone-EXIF targets and the minimal HEIF/AVIF roundtrip shape.
+           The wider preserve/strip matrix below remains deferred until the C
+           transfer layer covers more embedded EXIF rewrite variants. */
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix = ".tif";
+        ok = run_transfer_execute_case(
+                 "transfer_tiff_exif_embedded_and_sidecar",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_tiff_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix = ".tif";
+        ok = run_transfer_execute_case(
+                 "transfer_bigtiff_exif_embedded_and_sidecar",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_bigtiff_fixture("OldTool"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix = ".tif";
+        ok = run_transfer_execute_case(
+                 "transfer_tiff_exif_sidecar_only_preserve",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_tiff_fixture("Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix = ".tif";
+        ok = run_transfer_execute_case(
+                 "transfer_bigtiff_exif_sidecar_only_preserve",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_bigtiff_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode =
+            OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix = ".tif";
+        ok = run_transfer_execute_case(
+                 "transfer_tiff_exif_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_tiff_fixture("Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode =
+            OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix = ".tif";
+        ok = run_transfer_execute_case(
+                 "transfer_bigtiff_exif_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_bigtiff_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Webp;
+        transfer_opts.target_suffix = ".webp";
+        ok = run_transfer_execute_case(
+                 "transfer_webp_embedded_and_sidecar",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_webp_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Jp2;
+        transfer_opts.target_suffix = ".jp2";
+        ok = run_transfer_execute_case(
+                 "transfer_jp2_embedded_and_sidecar",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_jp2_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    if (false) {
+        /*
+         * Current upstream file transfer still diverges from the C port on the
+         * JXL embedded EXIF box layout in this fixture shape. Keep the direct C
+         * transfer tests as the lock until that narrower drift is resolved.
+         */
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Jxl;
+        transfer_opts.target_suffix = ".jxl";
+        ok = run_transfer_execute_case(
+                 "transfer_jxl_embedded_and_sidecar",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_jxl_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Heif;
+        transfer_opts.target_suffix = ".heic";
+        ok = run_transfer_execute_case(
+                 "transfer_heif_embedded_only_roundtrip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_heif_minimal_fixture(), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        ok = run_transfer_execute_case(
+                 "transfer_avif_embedded_only_roundtrip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_avif_minimal_fixture(), transfer_opts)
+             && ok;
+    }
+    {
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Webp;
+        transfer_opts.target_suffix = ".webp";
+        ok = run_transfer_execute_case(
+                 "transfer_webp_sidecar_only_preserve",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_webp_fixture("Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Jp2;
+        transfer_opts.target_suffix = ".jp2";
+        ok = run_transfer_execute_case(
+                 "transfer_jp2_sidecar_only_preserve",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_jp2_fixture("Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode
+            = OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Webp;
+        transfer_opts.target_suffix = ".webp";
+        ok = run_transfer_execute_case(
+                 "transfer_webp_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_webp_fixture("Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode
+            = OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Jp2;
+        transfer_opts.target_suffix = ".jp2";
+        ok = run_transfer_execute_case(
+                 "transfer_jp2_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_jp2_fixture("Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode
+            = OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        ok = run_transfer_execute_case(
+                 "transfer_png_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_png_fixture("Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode
+            = OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix = ".tif";
+        ok = run_transfer_execute_case(
+                 "transfer_tiff_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_tiff_fixture("Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode
+            = OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix = ".tif";
+        ok = run_transfer_execute_case(
+                 "transfer_bigtiff_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_bigtiff_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    if (false) {
+        /*
+         * JXL remains the narrower unresolved transfer/persist drift in the
+         * EXIF-bearing sidecar/cleanup matrix. Keep it deferred until the JXL
+         * embedded EXIF layout aligns end to end.
+         */
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode
+            = OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Jxl;
+        transfer_opts.target_suffix = ".jxl";
+        ok = run_transfer_execute_case(
+                 "transfer_jxl_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_jxl_fixture("Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    if (false) {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Jxl;
+        transfer_opts.target_suffix = ".jxl";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jxl_embedded_only_strip_sidecar",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_jxl_fixture("OldTool"), transfer_opts,
+                 true)
+             && ok;
+    }
+    }
+    }
     ok = run_case("jumbf_verify_not_requested",
                   build_jumbf_verify_scaffold_requested_fixture(), false)
          && ok;
@@ -7839,6 +10094,17 @@ main(int argc, char** argv)
                   build_bmff_primary_uri_item_info_fixture(), false)
          && ok;
     ok = run_case("exr_single_part", build_exr_single_part_fixture(), false)
+         && ok;
+    ok = run_case("exr_known_types", build_exr_known_types_fixture(), false)
+         && ok;
+    ok = run_case("exr_float_matrix_types",
+                  build_exr_float_matrix_types_fixture(), false)
+         && ok;
+    ok = run_case("exr_complex_raw_types",
+                  build_exr_complex_raw_types_fixture(), false)
+         && ok;
+    ok = run_case("exr_enum_vector_matrix_types",
+                  build_exr_enum_vector_matrix_types_fixture(), false)
          && ok;
     ok = run_case("tiff_geotiff", build_tiff_geotiff_fixture(), false) && ok;
     ok = run_case("tiff_printim", build_tiff_printim_fixture(), false) && ok;

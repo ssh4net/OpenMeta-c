@@ -337,27 +337,175 @@ omc_exr_make_i32(omc_val* value, omc_s32 scalar)
 }
 
 static omc_status
-omc_exr_make_u32_array(omc_store* store, const omc_u32* values,
-                       omc_u32 count, omc_val* out_value)
+omc_exr_make_array(omc_store* store, const void* values, omc_u32 byte_size,
+                   omc_elem_type elem_type, omc_u32 count,
+                   omc_val* out_value)
 {
     omc_byte_ref ref;
     omc_status status;
 
-    if (store == (omc_store*)0 || values == (const omc_u32*)0
+    if (store == (omc_store*)0 || values == (const void*)0
         || out_value == (omc_val*)0) {
         return OMC_STATUS_INVALID_ARGUMENT;
     }
-    status = omc_arena_append(&store->arena, values,
-                              (omc_size)count * sizeof(omc_u32), &ref);
+    status = omc_arena_append(&store->arena, values, byte_size, &ref);
     if (status != OMC_STATUS_OK) {
         return status;
     }
     omc_val_init(out_value);
     out_value->kind = OMC_VAL_ARRAY;
-    out_value->elem_type = OMC_ELEM_U32;
+    out_value->elem_type = elem_type;
     out_value->count = count;
     out_value->u.ref = ref;
     return OMC_STATUS_OK;
+}
+
+static omc_status
+omc_exr_make_u32_array(omc_store* store, const omc_u32* values,
+                       omc_u32 count, omc_val* out_value)
+{
+    return omc_exr_make_array(store, values,
+                              (omc_u32)((omc_size)count * sizeof(omc_u32)),
+                              OMC_ELEM_U32, count, out_value);
+}
+
+static omc_status
+omc_exr_make_i32_array(omc_store* store, const omc_s32* values,
+                       omc_u32 count, omc_val* out_value)
+{
+    return omc_exr_make_array(store, values,
+                              (omc_u32)((omc_size)count * sizeof(omc_s32)),
+                              OMC_ELEM_I32, count, out_value);
+}
+
+static void
+omc_exr_make_srational(omc_val* value, omc_s32 numer, omc_s32 denom)
+{
+    omc_val_init(value);
+    if (value == (omc_val*)0) {
+        return;
+    }
+    value->kind = OMC_VAL_SCALAR;
+    value->elem_type = OMC_ELEM_SRATIONAL;
+    value->count = 1U;
+    value->u.sr.numer = numer;
+    value->u.sr.denom = denom;
+}
+
+static int
+omc_exr_decode_i32_fixed(const omc_u8* bytes, omc_size size, omc_u32 count,
+                         omc_s32* out_values)
+{
+    omc_u32 i;
+
+    if (bytes == (const omc_u8*)0 || out_values == (omc_s32*)0
+        || size != (omc_size)count * 4U) {
+        return 0;
+    }
+    for (i = 0U; i < count; ++i) {
+        if (!omc_exr_read_i32le(bytes, size, (omc_u64)i * 4U,
+                                &out_values[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+omc_exr_decode_u32_fixed(const omc_u8* bytes, omc_size size, omc_u32 count,
+                         omc_u32* out_values)
+{
+    omc_u32 i;
+
+    if (bytes == (const omc_u8*)0 || out_values == (omc_u32*)0
+        || size != (omc_size)count * 4U) {
+        return 0;
+    }
+    for (i = 0U; i < count; ++i) {
+        if (!omc_exr_read_u32le(bytes, size, (omc_u64)i * 4U,
+                                &out_values[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static omc_exr_status
+omc_exr_decode_u32_array(omc_exr_state* st, const omc_u8* value_bytes,
+                         omc_u32 value_size, omc_elem_type elem_type,
+                         omc_val* out_value)
+{
+    omc_u32 count;
+    omc_byte_ref ref;
+    omc_mut_bytes view;
+    omc_u32 i;
+
+    if (st == (omc_exr_state*)0 || out_value == (omc_val*)0
+        || value_bytes == (const omc_u8*)0 || (value_size % 4U) != 0U) {
+        return OMC_EXR_MALFORMED;
+    }
+    if (st->store == (omc_store*)0) {
+        return OMC_EXR_OK;
+    }
+
+    count = value_size / 4U;
+    if (omc_arena_append(&st->store->arena, value_bytes, value_size, &ref)
+        != OMC_STATUS_OK) {
+        return OMC_EXR_NOMEM;
+    }
+    view = omc_arena_view_mut(&st->store->arena, ref);
+    for (i = 0U; i < count; ++i) {
+        omc_u32 v;
+        if (!omc_exr_read_u32le(value_bytes, value_size, (omc_u64)i * 4U, &v)) {
+            return OMC_EXR_MALFORMED;
+        }
+        memcpy(view.data + ((omc_size)i * sizeof(v)), &v, sizeof(v));
+    }
+    omc_val_init(out_value);
+    out_value->kind = OMC_VAL_ARRAY;
+    out_value->elem_type = elem_type;
+    out_value->count = count;
+    out_value->u.ref = ref;
+    return OMC_EXR_OK;
+}
+
+static omc_exr_status
+omc_exr_decode_u64_array(omc_exr_state* st, const omc_u8* value_bytes,
+                         omc_u32 value_size, omc_elem_type elem_type,
+                         omc_val* out_value)
+{
+    omc_u32 count;
+    omc_byte_ref ref;
+    omc_mut_bytes view;
+    omc_u32 i;
+
+    if (st == (omc_exr_state*)0 || out_value == (omc_val*)0
+        || value_bytes == (const omc_u8*)0 || (value_size % 8U) != 0U) {
+        return OMC_EXR_MALFORMED;
+    }
+    if (st->store == (omc_store*)0) {
+        return OMC_EXR_OK;
+    }
+
+    count = value_size / 8U;
+    if (omc_arena_append(&st->store->arena, value_bytes, value_size, &ref)
+        != OMC_STATUS_OK) {
+        return OMC_EXR_NOMEM;
+    }
+    view = omc_arena_view_mut(&st->store->arena, ref);
+    for (i = 0U; i < count; ++i) {
+        omc_u64 v;
+        if (!omc_exr_read_u64le(value_bytes, value_size, (omc_u64)i * 8U, &v)) {
+            return OMC_EXR_MALFORMED;
+        }
+        memcpy(view.data + ((omc_size)i * sizeof(v)), &v, sizeof(v));
+    }
+    omc_val_init(out_value);
+    out_value->kind = OMC_VAL_ARRAY;
+    out_value->elem_type = elem_type;
+    out_value->count = count;
+    out_value->u.ref = ref;
+    return OMC_EXR_OK;
 }
 
 static omc_status
@@ -441,6 +589,110 @@ omc_exr_decode_value(omc_exr_state* st, omc_exr_span type_name,
         omc_val_make_text(out_value, ref,
                           omc_exr_classify_text(value_bytes, value_size));
         return OMC_EXR_OK;
+    }
+    if (omc_exr_span_equals(st->bytes, type_name, "rational")
+        && value_size == 8U) {
+        omc_s32 numer;
+        omc_u32 denom;
+        if (omc_exr_read_i32le(value_bytes, value_size, 0U, &numer)
+            && omc_exr_read_u32le(value_bytes, value_size, 4U, &denom)
+            && denom <= 0x7FFFFFFFU) {
+            omc_exr_make_srational(out_value, numer, (omc_s32)denom);
+            return OMC_EXR_OK;
+        }
+    }
+    if (omc_exr_span_equals(st->bytes, type_name, "floatvector")
+        && (value_size % 4U) == 0U) {
+        return omc_exr_decode_u32_array(st, value_bytes, value_size,
+                                        OMC_ELEM_F32_BITS, out_value);
+    }
+    if (omc_exr_span_equals(st->bytes, type_name, "box2i")
+        && value_size == 16U) {
+        omc_s32 values[4];
+        if (omc_exr_decode_i32_fixed(value_bytes, value_size, 4U, values)) {
+            if (st->store == (omc_store*)0) {
+                return OMC_EXR_OK;
+            }
+            if (omc_exr_make_i32_array(st->store, values, 4U, out_value)
+                != OMC_STATUS_OK) {
+                return OMC_EXR_NOMEM;
+            }
+            return OMC_EXR_OK;
+        }
+    }
+    if ((omc_exr_span_equals(st->bytes, type_name, "box2f")
+         || omc_exr_span_equals(st->bytes, type_name, "v2f")
+         || omc_exr_span_equals(st->bytes, type_name, "v3f")
+         || omc_exr_span_equals(st->bytes, type_name, "m33f")
+         || omc_exr_span_equals(st->bytes, type_name, "m44f")
+         || omc_exr_span_equals(st->bytes, type_name, "chromaticities"))
+        && (value_size % 4U) == 0U) {
+        return omc_exr_decode_u32_array(st, value_bytes, value_size,
+                                        OMC_ELEM_F32_BITS, out_value);
+    }
+    if (omc_exr_span_equals(st->bytes, type_name, "v2i")
+        && value_size == 8U) {
+        omc_s32 values[2];
+        if (omc_exr_decode_i32_fixed(value_bytes, value_size, 2U, values)) {
+            if (st->store == (omc_store*)0) {
+                return OMC_EXR_OK;
+            }
+            if (omc_exr_make_i32_array(st->store, values, 2U, out_value)
+                != OMC_STATUS_OK) {
+                return OMC_EXR_NOMEM;
+            }
+            return OMC_EXR_OK;
+        }
+    }
+    if (omc_exr_span_equals(st->bytes, type_name, "v3i")
+        && value_size == 12U) {
+        omc_s32 values[3];
+        if (omc_exr_decode_i32_fixed(value_bytes, value_size, 3U, values)) {
+            if (st->store == (omc_store*)0) {
+                return OMC_EXR_OK;
+            }
+            if (omc_exr_make_i32_array(st->store, values, 3U, out_value)
+                != OMC_STATUS_OK) {
+                return OMC_EXR_NOMEM;
+            }
+            return OMC_EXR_OK;
+        }
+    }
+    if (omc_exr_span_equals(st->bytes, type_name, "timecode")
+        && value_size == 8U) {
+        omc_u32 values[2];
+        if (omc_exr_decode_u32_fixed(value_bytes, value_size, 2U, values)) {
+            if (st->store == (omc_store*)0) {
+                return OMC_EXR_OK;
+            }
+            if (omc_exr_make_u32_array(st->store, values, 2U, out_value)
+                != OMC_STATUS_OK) {
+                return OMC_EXR_NOMEM;
+            }
+            return OMC_EXR_OK;
+        }
+    }
+    if ((omc_exr_span_equals(st->bytes, type_name, "v2d")
+         || omc_exr_span_equals(st->bytes, type_name, "v3d")
+         || omc_exr_span_equals(st->bytes, type_name, "m33d")
+         || omc_exr_span_equals(st->bytes, type_name, "m44d"))
+        && (value_size % 8U) == 0U) {
+        return omc_exr_decode_u64_array(st, value_bytes, value_size,
+                                        OMC_ELEM_F64_BITS, out_value);
+    }
+    if (omc_exr_span_equals(st->bytes, type_name, "keycode")
+        && value_size == 28U) {
+        omc_s32 values[7];
+        if (omc_exr_decode_i32_fixed(value_bytes, value_size, 7U, values)) {
+            if (st->store == (omc_store*)0) {
+                return OMC_EXR_OK;
+            }
+            if (omc_exr_make_i32_array(st->store, values, 7U, out_value)
+                != OMC_STATUS_OK) {
+                return OMC_EXR_NOMEM;
+            }
+            return OMC_EXR_OK;
+        }
     }
     if (omc_exr_span_equals(st->bytes, type_name, "tiledesc")
         && value_size == 9U) {

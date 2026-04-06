@@ -43,6 +43,10 @@ typedef struct omc_xmp_write_bmff_item {
     omc_u64 new_len;
 } omc_xmp_write_bmff_item;
 
+static omc_status
+omc_xmp_write_copy_original(const omc_u8* file_bytes, omc_size file_size,
+                            omc_arena* out, omc_xmp_write_res* out_res);
+
 static void
 omc_xmp_write_res_init(omc_xmp_write_res* res)
 {
@@ -1742,6 +1746,116 @@ omc_xmp_write_bmff_append_xmp_infe(omc_arena* out, omc_u32 item_id)
 }
 
 static omc_status
+omc_xmp_write_bmff_build_minimal_meta(const omc_u8* payload,
+                                      omc_size payload_size,
+                                      omc_arena* meta_payload)
+{
+    omc_arena iinf_payload;
+    omc_arena iloc_payload;
+    omc_arena idat_payload;
+    omc_status status;
+    omc_u8 fullbox[4];
+    omc_u8 size_bytes[2];
+
+    omc_arena_init(&iinf_payload);
+    omc_arena_init(&iloc_payload);
+    omc_arena_init(&idat_payload);
+
+    memset(fullbox, 0, sizeof(fullbox));
+    status = omc_xmp_write_append(&iinf_payload, fullbox, sizeof(fullbox));
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_append_be_n(&iinf_payload, 1U, 2U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_bmff_append_xmp_infe(&iinf_payload, 1U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+
+    fullbox[0] = 1U;
+    status = omc_xmp_write_append(&iloc_payload, fullbox, sizeof(fullbox));
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    size_bytes[0] = 0x44U;
+    size_bytes[1] = 0x40U;
+    status = omc_xmp_write_append(&iloc_payload, size_bytes,
+                                  sizeof(size_bytes));
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_append_be_n(&iloc_payload, 1U, 2U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_append_be_n(&iloc_payload, 1U, 2U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_append_be_n(&iloc_payload, 1U, 2U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_append_be_n(&iloc_payload, 0U, 2U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_append_be_n(&iloc_payload, 0U, 4U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_append_be_n(&iloc_payload, 1U, 2U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_append_be_n(&iloc_payload, 0U, 4U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_append_be_n(&iloc_payload, (omc_u64)payload_size,
+                                       4U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+
+    status = omc_xmp_write_append(&idat_payload, payload, payload_size);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+
+    omc_arena_reset(meta_payload);
+    memset(fullbox, 0, sizeof(fullbox));
+    status = omc_xmp_write_append(meta_payload, fullbox, sizeof(fullbox));
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_append_jp2_box(
+        meta_payload, omc_xmp_write_fourcc('i', 'i', 'n', 'f'),
+        iinf_payload.data, iinf_payload.size);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_append_jp2_box(
+        meta_payload, omc_xmp_write_fourcc('i', 'l', 'o', 'c'),
+        iloc_payload.data, iloc_payload.size);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_xmp_write_append_jp2_box(
+        meta_payload, omc_xmp_write_fourcc('i', 'd', 'a', 't'),
+        idat_payload.data, idat_payload.size);
+
+cleanup:
+    omc_arena_fini(&idat_payload);
+    omc_arena_fini(&iloc_payload);
+    omc_arena_fini(&iinf_payload);
+    return status;
+}
+
+static omc_status
 omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
                            const omc_u8* payload, omc_size payload_size,
                            int strip_existing_xmp, int insert_xmp,
@@ -1810,19 +1924,23 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
     top_count = 0U;
     have_ftyp = 0;
     have_meta = 0;
+    omc_arena_init(&meta_payload);
     while (top_off + 8U <= top_limit) {
         if (top_count >= 32U) {
+            omc_arena_fini(&meta_payload);
             out_res->status = OMC_XMP_WRITE_LIMIT;
             return OMC_STATUS_OK;
         }
         if (!omc_xmp_write_bmff_parse_box(file_bytes, file_size, top_off,
                                           top_limit, &top_boxes[top_count])) {
+            omc_arena_fini(&meta_payload);
             out_res->status = OMC_XMP_WRITE_MALFORMED;
             return OMC_STATUS_OK;
         }
         if (top_boxes[top_count].type
             == omc_xmp_write_fourcc('f', 't', 'y', 'p')) {
             if (have_ftyp) {
+                omc_arena_fini(&meta_payload);
                 out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
                 return OMC_STATUS_OK;
             }
@@ -1831,6 +1949,7 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
         } else if (top_boxes[top_count].type
                    == omc_xmp_write_fourcc('m', 'e', 't', 'a')) {
             if (have_meta) {
+                omc_arena_fini(&meta_payload);
                 out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
                 return OMC_STATUS_OK;
             }
@@ -1840,7 +1959,8 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
         top_off += top_boxes[top_count].size;
         top_count += 1U;
     }
-    if (top_off != top_limit || !have_ftyp || !have_meta) {
+    if (top_off != top_limit || !have_ftyp) {
+        omc_arena_fini(&meta_payload);
         out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
         return OMC_STATUS_OK;
     }
@@ -1848,13 +1968,57 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
     format = omc_xmp_write_bmff_format_from_ftyp(file_bytes, file_size,
                                                  &ftyp_box);
     if (format != OMC_SCAN_FMT_HEIF && format != OMC_SCAN_FMT_AVIF) {
+        omc_arena_fini(&meta_payload);
         out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
+        return OMC_STATUS_OK;
+    }
+    if (!have_meta) {
+        if (!insert_xmp) {
+            omc_arena_fini(&meta_payload);
+            return omc_xmp_write_copy_original(file_bytes, file_size, out,
+                                               out_res);
+        }
+        status = omc_xmp_write_bmff_build_minimal_meta(payload, payload_size,
+                                                       &meta_payload);
+        if (status != OMC_STATUS_OK) {
+            omc_arena_fini(&meta_payload);
+            return status;
+        }
+        omc_arena_reset(out);
+        status = omc_arena_reserve(out, file_size + payload_size + 512U);
+        if (status != OMC_STATUS_OK) {
+            omc_arena_fini(&meta_payload);
+            return status;
+        }
+        for (i = 0U; i < top_count; ++i) {
+            status = omc_xmp_write_append(out,
+                                          file_bytes
+                                              + (omc_size)top_boxes[i].offset,
+                                          (omc_size)top_boxes[i].size);
+            if (status != OMC_STATUS_OK) {
+                omc_arena_fini(&meta_payload);
+                return status;
+            }
+        }
+        status = omc_xmp_write_append_jp2_box(
+            out, omc_xmp_write_fourcc('m', 'e', 't', 'a'),
+            meta_payload.data, meta_payload.size);
+        omc_arena_fini(&meta_payload);
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+        out_res->status = OMC_XMP_WRITE_OK;
+        out_res->needed = out->size;
+        out_res->written = out->size;
+        out_res->removed_xmp_blocks = 0U;
+        out_res->inserted_xmp_blocks = 1U;
         return OMC_STATUS_OK;
     }
 
     child_off = meta_box.offset + meta_box.header_size;
     child_end = meta_box.offset + meta_box.size;
     if (child_off + 4U > child_end || child_end > (omc_u64)file_size) {
+        omc_arena_fini(&meta_payload);
         out_res->status = OMC_XMP_WRITE_MALFORMED;
         return OMC_STATUS_OK;
     }
@@ -1866,18 +2030,21 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
     have_idat = 0;
     while (child_off + 8U <= child_end) {
         if (meta_child_count >= 32U) {
+            omc_arena_fini(&meta_payload);
             out_res->status = OMC_XMP_WRITE_LIMIT;
             return OMC_STATUS_OK;
         }
         if (!omc_xmp_write_bmff_parse_box(file_bytes, file_size, child_off,
                                           child_end,
                                           &meta_children[meta_child_count])) {
+            omc_arena_fini(&meta_payload);
             out_res->status = OMC_XMP_WRITE_MALFORMED;
             return OMC_STATUS_OK;
         }
         if (meta_children[meta_child_count].type
             == omc_xmp_write_fourcc('i', 'i', 'n', 'f')) {
             if (have_iinf) {
+                omc_arena_fini(&meta_payload);
                 out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
                 return OMC_STATUS_OK;
             }
@@ -1886,6 +2053,7 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
         } else if (meta_children[meta_child_count].type
                    == omc_xmp_write_fourcc('i', 'l', 'o', 'c')) {
             if (have_iloc) {
+                omc_arena_fini(&meta_payload);
                 out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
                 return OMC_STATUS_OK;
             }
@@ -1894,6 +2062,7 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
         } else if (meta_children[meta_child_count].type
                    == omc_xmp_write_fourcc('i', 'd', 'a', 't')) {
             if (have_idat) {
+                omc_arena_fini(&meta_payload);
                 out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
                 return OMC_STATUS_OK;
             }
@@ -1904,6 +2073,7 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
         meta_child_count += 1U;
     }
     if (child_off != child_end || !have_iinf || !have_iloc || !have_idat) {
+        omc_arena_fini(&meta_payload);
         out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
         return OMC_STATUS_OK;
     }
@@ -1912,11 +2082,13 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
                                                  &iinf_box, items, 64U,
                                                  &item_count);
     if (parse_status != OMC_XMP_WRITE_OK) {
+        omc_arena_fini(&meta_payload);
         out_res->status = parse_status;
         return OMC_STATUS_OK;
     }
 
     if (iinf_box.offset + iinf_box.header_size + 4U > iinf_box.offset + iinf_box.size) {
+        omc_arena_fini(&meta_payload);
         out_res->status = OMC_XMP_WRITE_MALFORMED;
         return OMC_STATUS_OK;
     }
@@ -1929,6 +2101,7 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
         &iloc_version, &offset_size, &length_size, &base_offset_size,
         &index_size);
     if (parse_status != OMC_XMP_WRITE_OK) {
+        omc_arena_fini(&meta_payload);
         out_res->status = parse_status;
         return OMC_STATUS_OK;
     }
@@ -1944,6 +2117,7 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
     order_count = 0U;
     for (i = 0U; i < item_count; ++i) {
         if (!items[i].has_source) {
+            omc_arena_fini(&meta_payload);
             out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
             return OMC_STATUS_OK;
         }
@@ -1983,7 +2157,6 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
     omc_arena_init(&iinf_payload);
     omc_arena_init(&iloc_payload);
     omc_arena_init(&idat_payload);
-    omc_arena_init(&meta_payload);
     status = OMC_STATUS_OK;
 
     for (i = 0U; i < order_count; ++i) {

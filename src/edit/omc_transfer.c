@@ -1,4 +1,5 @@
 #include "omc/omc_transfer.h"
+#include "omc_exif_write.h"
 
 #include <string.h>
 
@@ -323,6 +324,61 @@ omc_transfer_status_from_dump(omc_xmp_dump_status status)
     return OMC_TRANSFER_LIMIT;
 }
 
+static omc_transfer_status
+omc_transfer_status_from_exif(omc_exif_write_status status)
+{
+    if (status == OMC_EXIF_WRITE_OK) {
+        return OMC_TRANSFER_OK;
+    }
+    if (status == OMC_EXIF_WRITE_LIMIT) {
+        return OMC_TRANSFER_LIMIT;
+    }
+    if (status == OMC_EXIF_WRITE_MALFORMED) {
+        return OMC_TRANSFER_MALFORMED;
+    }
+    return OMC_TRANSFER_UNSUPPORTED;
+}
+
+static omc_status
+omc_transfer_apply_exif_overlay(const omc_u8* current_bytes,
+                                omc_size current_size,
+                                const omc_store* store, omc_scan_fmt format,
+                                omc_arena* edited_out,
+                                omc_transfer_res* out_res)
+{
+    omc_exif_write_res exif_res;
+    omc_arena exif_out;
+    omc_arena tmp;
+    omc_status status;
+
+    if (current_bytes == (const omc_u8*)0 || store == (const omc_store*)0
+        || edited_out == (omc_arena*)0
+        || out_res == (omc_transfer_res*)0) {
+        return OMC_STATUS_INVALID_ARGUMENT;
+    }
+
+    omc_arena_init(&exif_out);
+    omc_exif_write_res_init(&exif_res);
+    status = omc_exif_write_embedded(current_bytes, current_size, store,
+                                     &exif_out, format, &exif_res);
+    if (status != OMC_STATUS_OK) {
+        omc_arena_fini(&exif_out);
+        return status;
+    }
+    if (exif_res.status != OMC_EXIF_WRITE_OK) {
+        out_res->status = omc_transfer_status_from_exif(exif_res.status);
+        omc_arena_fini(&exif_out);
+        return OMC_STATUS_OK;
+    }
+
+    tmp = *edited_out;
+    *edited_out = exif_out;
+    exif_out = tmp;
+    omc_arena_fini(&exif_out);
+    out_res->edited_present = 1;
+    return OMC_STATUS_OK;
+}
+
 void
 omc_transfer_prepare_opts_init(omc_transfer_prepare_opts* opts)
 {
@@ -480,6 +536,7 @@ omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
     omc_status status;
     int has_embedded_route;
     int has_sidecar_route;
+    int source_has_exif;
     omc_transfer_embedded_action embedded_action;
 
     if (store == (const omc_store*)0 || edited_out == (omc_arena*)0
@@ -506,6 +563,7 @@ omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
 
     has_embedded_route = 0;
     has_sidecar_route = 0;
+    source_has_exif = omc_exif_write_store_has_supported_tags(store);
     embedded_action = OMC_TRANSFER_EMBEDDED_NONE;
     for (i = 0U; i < exec->route_count; ++i) {
         if (exec->routes[i].kind == OMC_TRANSFER_ROUTE_EMBEDDED_XMP) {
@@ -567,10 +625,69 @@ omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
         }
 
         out_res->status = OMC_TRANSFER_OK;
+        if (source_has_exif) {
+            status = omc_transfer_apply_exif_overlay(
+                edited_out->data, edited_out->size, store, exec->format,
+                edited_out, out_res);
+            if (status != OMC_STATUS_OK || out_res->status != OMC_TRANSFER_OK) {
+                return status;
+            }
+        }
+        return OMC_STATUS_OK;
+    }
+
+    if (has_sidecar_route && omc_transfer_embedded_supported(exec->format)) {
+        omc_xmp_apply_opts apply_opts;
+        omc_xmp_apply_res apply_res;
+
+        if (file_bytes == (const omc_u8*)0) {
+            return OMC_STATUS_INVALID_ARGUMENT;
+        }
+
+        omc_xmp_apply_opts_init(&apply_opts);
+        apply_opts.format = exec->format;
+        apply_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        apply_opts.destination_embedded_mode =
+            OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING;
+        apply_opts.sidecar = exec->sidecar;
+
+        status = omc_xmp_apply(file_bytes, file_size, store, edited_out,
+                               sidecar_out, &apply_opts, &apply_res);
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+
+        out_res->embedded = apply_res.embedded;
+        out_res->sidecar = apply_res.sidecar;
+        out_res->edited_present =
+            apply_res.embedded.status == OMC_XMP_WRITE_OK;
+        out_res->sidecar_present =
+            apply_res.sidecar_requested
+            && apply_res.sidecar.status == OMC_XMP_DUMP_OK;
+
+        if (apply_res.embedded.status != OMC_XMP_WRITE_OK) {
+            out_res->status =
+                omc_transfer_status_from_write(apply_res.embedded.status);
+            return OMC_STATUS_OK;
+        }
+        out_res->status = omc_transfer_status_from_dump(out_res->sidecar.status);
+        if (out_res->status == OMC_TRANSFER_OK && source_has_exif) {
+            status = omc_transfer_apply_exif_overlay(
+                edited_out->data, edited_out->size, store, exec->format,
+                edited_out, out_res);
+            if (status != OMC_STATUS_OK || out_res->status != OMC_TRANSFER_OK) {
+                return status;
+            }
+        }
         return OMC_STATUS_OK;
     }
 
     if (!has_sidecar_route) {
+        out_res->status = OMC_TRANSFER_UNSUPPORTED;
+        return OMC_STATUS_OK;
+    }
+
+    if (source_has_exif) {
         out_res->status = OMC_TRANSFER_UNSUPPORTED;
         return OMC_STATUS_OK;
     }
