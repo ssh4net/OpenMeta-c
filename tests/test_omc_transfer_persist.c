@@ -122,6 +122,20 @@ append_png_chunk(omc_u8* out, omc_size* io_size, const char* type,
     append_u32be(out, io_size, 0U);
 }
 
+static void
+append_webp_chunk(omc_u8* out, omc_size* io_size, const char* type,
+                  const omc_u8* payload, omc_size payload_size)
+{
+    append_text(out, io_size, type);
+    append_u32le(out, io_size, (omc_u32)payload_size);
+    if (payload_size != 0U) {
+        append_raw(out, io_size, payload, payload_size);
+    }
+    if ((payload_size & 1U) != 0U) {
+        append_u8(out, io_size, 0U);
+    }
+}
+
 static omc_u32
 fourcc(char a, char b, char c, char d)
 {
@@ -271,6 +285,26 @@ build_store_with_creator_tool(omc_store* store, const char* tool)
         append_store_bytes(&store->arena, "CreatorTool"));
     omc_val_make_text(&entry.value, append_store_bytes(&store->arena, tool),
                       OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+build_store_with_creator_tool_and_datetime_original(omc_store* store,
+                                                    const char* tool,
+                                                    const char* dto)
+{
+    omc_entry entry;
+    omc_status status;
+
+    build_store_with_creator_tool(store, tool);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_exif_tag(&entry.key,
+                          append_store_bytes(&store->arena, "exififd"),
+                          0x9003U);
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, dto),
+                      OMC_TEXT_ASCII);
     status = omc_store_add_entry(store, &entry, NULL);
     assert(status == OMC_STATUS_OK);
 }
@@ -425,6 +459,87 @@ make_test_tiff_le_with_make_only(omc_u8* out)
 }
 
 static omc_size
+make_test_webp_with_old_xmp_and_exif(omc_u8* out)
+{
+    static const char xmp[] =
+        "<x:xmpmeta xmlns:x='adobe:ns:meta/'>"
+        "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>"
+        "<rdf:Description xmlns:xmp='http://ns.adobe.com/xap/1.0/' "
+        "xmp:CreatorTool='OldTool'/>"
+        "</rdf:RDF>"
+        "</x:xmpmeta>";
+    omc_u8 tiff[256];
+    omc_u8 exif[320];
+    omc_size tiff_size;
+    omc_size exif_size;
+    omc_size size;
+
+    tiff_size = make_test_tiff_le_with_make_only(tiff);
+    exif_size = 0U;
+    append_text(exif, &exif_size, "Exif");
+    append_u8(exif, &exif_size, 0U);
+    append_u8(exif, &exif_size, 0U);
+    append_raw(exif, &exif_size, tiff, tiff_size);
+
+    size = 0U;
+    append_text(out, &size, "RIFF");
+    append_u32le(out, &size, 0U);
+    append_text(out, &size, "WEBP");
+    append_webp_chunk(out, &size, "EXIF", exif, exif_size);
+    append_webp_chunk(out, &size, "XMP ", (const omc_u8*)xmp,
+                      sizeof(xmp) - 1U);
+    write_u32le_at(out, 4U, (omc_u32)(size - 8U));
+    return size;
+}
+
+static omc_size
+make_test_jp2_with_old_xmp_and_exif(omc_u8* out)
+{
+    static const char xmp[] =
+        "<x:xmpmeta xmlns:x='adobe:ns:meta/'>"
+        "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>"
+        "<rdf:Description xmlns:xmp='http://ns.adobe.com/xap/1.0/' "
+        "xmp:CreatorTool='OldTool'/>"
+        "</rdf:RDF>"
+        "</x:xmpmeta>";
+    omc_u8 tiff[256];
+    omc_u8 exif_payload[320];
+    omc_u8 colr_payload[8];
+    omc_u8 colr_box[16];
+    omc_size tiff_size;
+    omc_size exif_size;
+    omc_size colr_size;
+    omc_size colr_box_size;
+    omc_size size;
+
+    tiff_size = make_test_tiff_le_with_make_only(tiff);
+    exif_size = 0U;
+    append_u32be(exif_payload, &exif_size, 0U);
+    append_raw(exif_payload, &exif_size, tiff, tiff_size);
+
+    colr_size = 0U;
+    append_u8(colr_payload, &colr_size, 1U);
+    append_u8(colr_payload, &colr_size, 0U);
+    append_u8(colr_payload, &colr_size, 0U);
+    append_u8(colr_payload, &colr_size, 0U);
+    colr_box_size = 0U;
+    append_bmff_box(colr_box, &colr_box_size, fourcc('c', 'o', 'l', 'r'),
+                    colr_payload, colr_size);
+
+    size = 0U;
+    append_u32be(out, &size, 12U);
+    append_u32be(out, &size, fourcc('j', 'P', ' ', ' '));
+    append_u32be(out, &size, 0x0D0A870AU);
+    append_bmff_box(out, &size, fourcc('j', 'p', '2', 'h'),
+                    colr_box, colr_box_size);
+    append_bmff_box(out, &size, fourcc('x', 'm', 'l', ' '),
+                    (const omc_u8*)xmp, sizeof(xmp) - 1U);
+    append_bmff_box(out, &size, fourcc('E', 'x', 'i', 'f'),
+                    exif_payload, exif_size);
+    return size;
+}
+
+static omc_size
 make_test_bmff_with_old_xmp_and_exif(omc_u8* out, omc_u32 major_brand)
 {
     static const char xmp[] =
@@ -557,6 +672,47 @@ make_test_heif_with_old_xmp_and_exif(omc_u8* out)
 }
 
 static omc_size
+make_test_avif_with_old_xmp_and_exif(omc_u8* out)
+{
+    return make_test_bmff_with_old_xmp_and_exif(out,
+                                                fourcc('a', 'v', 'i', 'f'));
+}
+
+static omc_size
+make_test_bmff_minimal(omc_u8* out, omc_u32 major_brand)
+{
+    omc_u8 ftyp_payload[16];
+    static const omc_u8 mdat_payload[] = { 0x11U, 0x22U, 0x33U, 0x44U };
+    omc_size ftyp_size;
+    omc_size size;
+
+    ftyp_size = 0U;
+    append_u32be(ftyp_payload, &ftyp_size, major_brand);
+    append_u32be(ftyp_payload, &ftyp_size, 0U);
+    append_u32be(ftyp_payload, &ftyp_size, fourcc('m', 'i', 'f', '1'));
+    append_u32be(ftyp_payload, &ftyp_size, major_brand);
+
+    size = 0U;
+    append_bmff_box(out, &size, fourcc('f', 't', 'y', 'p'),
+                    ftyp_payload, ftyp_size);
+    append_bmff_box(out, &size, fourcc('m', 'd', 'a', 't'),
+                    mdat_payload, sizeof(mdat_payload));
+    return size;
+}
+
+static omc_size
+make_test_heif_minimal(omc_u8* out)
+{
+    return make_test_bmff_minimal(out, fourcc('h', 'e', 'i', 'c'));
+}
+
+static omc_size
+make_test_avif_minimal(omc_u8* out)
+{
+    return make_test_bmff_minimal(out, fourcc('a', 'v', 'i', 'f'));
+}
+
+static omc_size
 make_test_jxl_with_old_xmp_and_exif(omc_u8* out)
 {
     static const char xmp[] =
@@ -605,9 +761,10 @@ read_store_from_bytes(const omc_u8* bytes, omc_size size, omc_store* out)
 }
 
 typedef enum omc_transfer_persist_preserve_kind {
-    OMC_TRANSFER_PERSIST_PRESERVE_COMMENT = 0,
-    OMC_TRANSFER_PERSIST_PRESERVE_PNG_TEXT = 1,
-    OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE = 2
+    OMC_TRANSFER_PERSIST_PRESERVE_NONE = 0,
+    OMC_TRANSFER_PERSIST_PRESERVE_COMMENT = 1,
+    OMC_TRANSFER_PERSIST_PRESERVE_PNG_TEXT = 2,
+    OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE = 3
 } omc_transfer_persist_preserve_kind;
 
 typedef enum omc_transfer_persist_xmp_expect {
@@ -622,6 +779,9 @@ static void
 assert_persist_preserved_metadata(const omc_store* store,
                                   omc_transfer_persist_preserve_kind kind)
 {
+    if (kind == OMC_TRANSFER_PERSIST_PRESERVE_NONE) {
+        return;
+    }
     if (kind == OMC_TRANSFER_PERSIST_PRESERVE_COMMENT) {
         assert_text_value(store, find_comment_entry(store), "Preserve me");
     } else if (kind == OMC_TRANSFER_PERSIST_PRESERVE_PNG_TEXT) {
@@ -651,6 +811,13 @@ assert_persist_xmp_state(const omc_store* store,
     } else {
         assert_text_value(store, entry, "OldTool");
     }
+}
+
+static void
+assert_persist_datetime_original(const omc_store* store, const char* expect)
+{
+    assert_text_value(store, find_exif_entry(store, "exififd", 0x9003U),
+                      expect);
 }
 
 static int
@@ -853,6 +1020,115 @@ exercise_transfer_persist_case(
 }
 
 static void
+exercise_transfer_persist_source_exif_case(
+    omc_transfer_persist_fixture_builder builder, const char* output_ext,
+    omc_xmp_writeback_mode writeback_mode,
+    omc_xmp_destination_embedded_mode destination_mode,
+    omc_transfer_persist_preserve_kind preserve_kind,
+    omc_transfer_persist_xmp_expect output_xmp_expect,
+    int strip_destination_sidecar)
+{
+    static const char k_dto[] = "2024:01:02 03:04:05";
+    omc_u8 file_bytes[4096];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store output_store;
+    omc_store sidecar_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_arena file_read;
+    char output_path[L_tmpnam + 16];
+    char sidecar_path[L_tmpnam + 16];
+    FILE* fp;
+    omc_status status;
+
+    file_size = builder(file_bytes);
+    build_temp_path(output_path, output_ext);
+    derive_sidecar_path(output_path, sidecar_path);
+
+    if (strip_destination_sidecar) {
+        fp = fopen(sidecar_path, "wb");
+        assert(fp != (FILE*)0);
+        fputs("stale sidecar", fp);
+        fclose(fp);
+    }
+
+    omc_store_init(&source_store);
+    omc_store_init(&output_store);
+    omc_store_init(&sidecar_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_arena_init(&file_read);
+    build_store_with_creator_tool_and_datetime_original(
+        &source_store, "NewTool", k_dto);
+
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.writeback_mode = writeback_mode;
+    prepare_opts.destination_embedded_mode = destination_mode;
+    execute_transfer(file_bytes, file_size, &source_store, &prepare_opts,
+                     &edited_out, &sidecar_out, &exec, &transfer_res);
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.output_path = output_path;
+    if (strip_destination_sidecar) {
+        persist_opts.destination_sidecar_mode =
+            OMC_TRANSFER_DEST_SIDECAR_STRIP_EXISTING;
+    }
+
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    assert(status == OMC_STATUS_OK);
+    assert(persist_res.status == OMC_TRANSFER_OK);
+    assert(persist_res.output_status == OMC_TRANSFER_OK);
+    if (writeback_mode != OMC_XMP_WRITEBACK_EMBEDDED_ONLY) {
+        assert(persist_res.xmp_sidecar_status == OMC_TRANSFER_OK);
+    }
+    if (strip_destination_sidecar) {
+        assert(persist_res.xmp_sidecar_cleanup_requested);
+        assert(persist_res.xmp_sidecar_cleanup_removed);
+    }
+
+    assert(read_file_bytes(output_path, &file_read));
+    read_store_from_bytes(file_read.data, file_read.size, &output_store);
+    assert_persist_xmp_state(&output_store, output_xmp_expect);
+    assert_persist_datetime_original(&output_store, k_dto);
+    assert_persist_preserved_metadata(&output_store, preserve_kind);
+
+    if (writeback_mode != OMC_XMP_WRITEBACK_EMBEDDED_ONLY) {
+        omc_arena_reset(&file_read);
+        assert(read_file_bytes(sidecar_path, &file_read));
+        read_store_from_bytes(file_read.data, file_read.size, &sidecar_store);
+        assert_text_value(&sidecar_store,
+                          find_xmp_entry(&sidecar_store,
+                                         "http://ns.adobe.com/xap/1.0/",
+                                         "CreatorTool"),
+                          "NewTool");
+    } else {
+        omc_arena_reset(&file_read);
+        assert(!read_file_bytes(sidecar_path, &file_read));
+    }
+
+    remove(output_path);
+    remove(sidecar_path);
+    omc_arena_fini(&file_read);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&sidecar_store);
+    omc_store_fini(&output_store);
+    omc_store_fini(&source_store);
+}
+
+static void
 test_transfer_persist_writes_png_output_and_sidecar(void)
 {
     exercise_transfer_persist_case(
@@ -883,6 +1159,345 @@ test_transfer_persist_writes_heif_output_and_sidecar_with_strip(void)
         OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
         OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
         OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+}
+
+static void
+test_transfer_persist_writes_embedded_and_sidecar_supported_formats(void)
+{
+    exercise_transfer_persist_case(
+        make_test_webp_with_old_xmp_and_exif, ".webp",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_case(
+        make_test_jp2_with_old_xmp_and_exif, ".jp2",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_case(
+        make_test_heif_with_old_xmp_and_exif, ".heic",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_case(
+        make_test_avif_with_old_xmp_and_exif, ".avif",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_case(
+        make_test_jxl_with_old_xmp_and_exif, ".jxl",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+}
+
+static void
+test_transfer_persist_writes_sidecar_only_preserve_supported_formats(void)
+{
+    exercise_transfer_persist_case(
+        make_test_webp_with_old_xmp_and_exif, ".webp",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+    exercise_transfer_persist_case(
+        make_test_jp2_with_old_xmp_and_exif, ".jp2",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+    exercise_transfer_persist_case(
+        make_test_heif_with_old_xmp_and_exif, ".heic",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+    exercise_transfer_persist_case(
+        make_test_avif_with_old_xmp_and_exif, ".avif",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+    exercise_transfer_persist_case(
+        make_test_jxl_with_old_xmp_and_exif, ".jxl",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+}
+
+static void
+test_transfer_persist_writes_sidecar_only_strip_supported_formats(void)
+{
+    exercise_transfer_persist_case(
+        make_test_webp_with_old_xmp_and_exif, ".webp",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+    exercise_transfer_persist_case(
+        make_test_jp2_with_old_xmp_and_exif, ".jp2",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+    exercise_transfer_persist_case(
+        make_test_avif_with_old_xmp_and_exif, ".avif",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+    exercise_transfer_persist_case(
+        make_test_jxl_with_old_xmp_and_exif, ".jxl",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+}
+
+static void
+test_transfer_persist_embedded_and_sidecar_source_exif_supported_formats(void)
+{
+    exercise_transfer_persist_source_exif_case(
+        make_test_tiff_le_with_make_only, ".tif",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_bigtiff_le_with_make_and_old_xmp, ".tif",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_jpeg_with_old_xmp_and_comment, ".jpg",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_COMMENT,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_png_with_old_xmp_and_text, ".png",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_PNG_TEXT,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_webp_with_old_xmp_and_exif, ".webp",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_jp2_with_old_xmp_and_exif, ".jp2",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_heif_with_old_xmp_and_exif, ".heic",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_avif_with_old_xmp_and_exif, ".avif",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_jxl_with_old_xmp_and_exif, ".jxl",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+}
+
+static void
+test_transfer_persist_sidecar_only_preserve_source_exif_supported_formats(void)
+{
+    exercise_transfer_persist_source_exif_case(
+        make_test_tiff_le_with_make_only, ".tif",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_bigtiff_le_with_make_and_old_xmp, ".tif",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_webp_with_old_xmp_and_exif, ".webp",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_jp2_with_old_xmp_and_exif, ".jp2",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_heif_with_old_xmp_and_exif, ".heic",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_avif_with_old_xmp_and_exif, ".avif",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+}
+
+static void
+test_transfer_persist_jpeg_sidecar_only_preserve_source_exif(void)
+{
+    exercise_transfer_persist_source_exif_case(
+        make_test_jpeg_with_old_xmp_and_comment, ".jpg",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_COMMENT,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+}
+
+static void
+test_transfer_persist_jpeg_sidecar_only_strip_source_exif(void)
+{
+    exercise_transfer_persist_source_exif_case(
+        make_test_jpeg_with_old_xmp_and_comment, ".jpg",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_COMMENT,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+}
+
+static void
+test_transfer_persist_jpeg_embedded_only_source_exif(void)
+{
+    exercise_transfer_persist_source_exif_case(
+        make_test_jpeg_with_old_xmp_and_comment, ".jpg",
+        OMC_XMP_WRITEBACK_EMBEDDED_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_COMMENT,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 1);
+}
+
+static void
+test_transfer_persist_sidecar_only_strip_source_exif_supported_formats(void)
+{
+    exercise_transfer_persist_source_exif_case(
+        make_test_tiff_le_with_make_only, ".tif",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_bigtiff_le_with_make_and_old_xmp, ".tif",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_webp_with_old_xmp_and_exif, ".webp",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_jp2_with_old_xmp_and_exif, ".jp2",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_heif_with_old_xmp_and_exif, ".heic",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_avif_with_old_xmp_and_exif, ".avif",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+}
+
+static void
+test_transfer_persist_webp_embedded_only_source_exif(void)
+{
+    exercise_transfer_persist_source_exif_case(
+        make_test_webp_with_old_xmp_and_exif, ".webp",
+        OMC_XMP_WRITEBACK_EMBEDDED_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 1);
+}
+
+static void
+test_transfer_persist_jp2_embedded_only_source_exif(void)
+{
+    exercise_transfer_persist_source_exif_case(
+        make_test_jp2_with_old_xmp_and_exif, ".jp2",
+        OMC_XMP_WRITEBACK_EMBEDDED_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 1);
+}
+
+static void
+test_transfer_persist_heif_embedded_only_source_exif(void)
+{
+    exercise_transfer_persist_source_exif_case(
+        make_test_heif_with_old_xmp_and_exif, ".heic",
+        OMC_XMP_WRITEBACK_EMBEDDED_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 1);
+}
+
+static void
+test_transfer_persist_avif_embedded_only_source_exif(void)
+{
+    exercise_transfer_persist_source_exif_case(
+        make_test_avif_with_old_xmp_and_exif, ".avif",
+        OMC_XMP_WRITEBACK_EMBEDDED_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 1);
+}
+
+static void
+test_transfer_persist_writes_heif_minimal_embedded_only_output(void)
+{
+    exercise_transfer_persist_case(
+        make_test_heif_minimal, ".heic",
+        OMC_XMP_WRITEBACK_EMBEDDED_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+}
+
+static void
+test_transfer_persist_writes_avif_minimal_embedded_only_output(void)
+{
+    exercise_transfer_persist_case(
+        make_test_avif_minimal, ".avif",
+        OMC_XMP_WRITEBACK_EMBEDDED_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
 }
 
 static void
@@ -1186,6 +1801,21 @@ main(void)
     test_transfer_persist_writes_png_output_and_sidecar();
     test_transfer_persist_writes_bigtiff_output_and_sidecar_with_preserve();
     test_transfer_persist_writes_heif_output_and_sidecar_with_strip();
+    test_transfer_persist_writes_embedded_and_sidecar_supported_formats();
+    test_transfer_persist_writes_sidecar_only_preserve_supported_formats();
+    test_transfer_persist_writes_sidecar_only_strip_supported_formats();
+    test_transfer_persist_embedded_and_sidecar_source_exif_supported_formats();
+    test_transfer_persist_sidecar_only_preserve_source_exif_supported_formats();
+    test_transfer_persist_webp_embedded_only_source_exif();
+    test_transfer_persist_jp2_embedded_only_source_exif();
+    test_transfer_persist_heif_embedded_only_source_exif();
+    test_transfer_persist_avif_embedded_only_source_exif();
+    test_transfer_persist_jpeg_sidecar_only_preserve_source_exif();
+    test_transfer_persist_jpeg_sidecar_only_strip_source_exif();
+    test_transfer_persist_jpeg_embedded_only_source_exif();
+    test_transfer_persist_sidecar_only_strip_source_exif_supported_formats();
+    test_transfer_persist_writes_heif_minimal_embedded_only_output();
+    test_transfer_persist_writes_avif_minimal_embedded_only_output();
     test_transfer_persist_can_remove_stale_destination_sidecar_for_jxl();
     test_transfer_persist_writes_output_and_sidecar();
     test_transfer_persist_rejects_existing_sidecar_without_overwrite();

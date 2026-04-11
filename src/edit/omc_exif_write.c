@@ -40,6 +40,20 @@ typedef struct omc_exif_write_bmff_box {
     omc_u32 type;
 } omc_exif_write_bmff_box;
 
+typedef struct omc_exif_write_bmff_item {
+    omc_u32 item_id;
+    omc_u32 item_type;
+    omc_u16 protection_index;
+    int is_exif;
+    int has_source;
+    omc_size infe_off;
+    omc_size infe_size;
+    omc_u64 source_off;
+    omc_u64 source_len;
+    omc_u64 new_off;
+    omc_u64 new_len;
+} omc_exif_write_bmff_item;
+
 static omc_status
 omc_exif_write_append(omc_arena* out, const void* src, omc_size size)
 {
@@ -483,6 +497,1176 @@ omc_exif_write_parse_bmff_box(const omc_u8* bytes, omc_size size,
     out_box->size = box_size;
     out_box->header_size = header_size;
     return 1;
+}
+
+static omc_scan_fmt
+omc_exif_write_bmff_format_from_ftyp(const omc_u8* bytes, omc_size size,
+                                     const omc_exif_write_bmff_box* ftyp)
+{
+    omc_u64 payload_off;
+    omc_u64 payload_end;
+    omc_u32 brand;
+    int is_heif;
+    int is_avif;
+    omc_u64 off;
+
+    if (ftyp == (const omc_exif_write_bmff_box*)0 || ftyp->size < 16U) {
+        return OMC_SCAN_FMT_UNKNOWN;
+    }
+
+    payload_off = ftyp->offset + ftyp->header_size;
+    payload_end = ftyp->offset + ftyp->size;
+    if (payload_off + 8U > payload_end || payload_end > (omc_u64)size) {
+        return OMC_SCAN_FMT_UNKNOWN;
+    }
+
+    is_heif = 0;
+    is_avif = 0;
+
+#define OMC_EXIF_WRITE_NOTE_BMFF_BRAND(v) \
+    do { \
+        if ((v) == omc_exif_write_fourcc('a', 'v', 'i', 'f') \
+            || (v) == omc_exif_write_fourcc('a', 'v', 'i', 's')) { \
+            is_avif = 1; \
+        } \
+        if ((v) == omc_exif_write_fourcc('m', 'i', 'f', '1') \
+            || (v) == omc_exif_write_fourcc('m', 's', 'f', '1') \
+            || (v) == omc_exif_write_fourcc('h', 'e', 'i', 'c') \
+            || (v) == omc_exif_write_fourcc('h', 'e', 'i', 'x') \
+            || (v) == omc_exif_write_fourcc('h', 'e', 'v', 'c') \
+            || (v) == omc_exif_write_fourcc('h', 'e', 'v', 'x')) { \
+            is_heif = 1; \
+        } \
+    } while (0)
+
+    brand = omc_exif_write_read_u32be(bytes + (omc_size)payload_off);
+    OMC_EXIF_WRITE_NOTE_BMFF_BRAND(brand);
+    off = payload_off + 8U;
+    while (off + 4U <= payload_end) {
+        brand = omc_exif_write_read_u32be(bytes + (omc_size)off);
+        OMC_EXIF_WRITE_NOTE_BMFF_BRAND(brand);
+        off += 4U;
+    }
+
+#undef OMC_EXIF_WRITE_NOTE_BMFF_BRAND
+
+    if (is_avif) {
+        return OMC_SCAN_FMT_AVIF;
+    }
+    if (is_heif) {
+        return OMC_SCAN_FMT_HEIF;
+    }
+    return OMC_SCAN_FMT_UNKNOWN;
+}
+
+static int
+omc_exif_write_bmff_find_cstring_end(const omc_u8* bytes, omc_u64 start,
+                                     omc_u64 end, omc_u64* out_end)
+{
+    omc_u64 off;
+
+    if (out_end == (omc_u64*)0 || start > end) {
+        return 0;
+    }
+    off = start;
+    while (off < end) {
+        if (bytes[(omc_size)off] == 0U) {
+            *out_end = off;
+            return 1;
+        }
+        off += 1U;
+    }
+    return 0;
+}
+
+static int
+omc_exif_write_bmff_find_item(omc_exif_write_bmff_item* items,
+                              omc_u32 item_count, omc_u32 item_id)
+{
+    omc_u32 i;
+
+    for (i = 0U; i < item_count; ++i) {
+        if (items[i].item_id == item_id) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int
+omc_exif_write_bmff_value_fits(omc_u64 value, omc_u8 width)
+{
+    if (width == 0U) {
+        return value == 0U;
+    }
+    if (width >= 8U) {
+        return 1;
+    }
+    return (value >> (width * 8U)) == 0U;
+}
+
+static omc_status
+omc_exif_write_append_be_n(omc_arena* out, omc_u64 value, omc_u8 width)
+{
+    omc_u8 buf[8];
+    omc_u8 i;
+
+    if (width > 8U) {
+        return OMC_STATUS_INVALID_ARGUMENT;
+    }
+    for (i = 0U; i < width; ++i) {
+        buf[width - 1U - i] = (omc_u8)((value >> (i * 8U)) & 0xFFU);
+    }
+    return omc_exif_write_append(out, buf, width);
+}
+
+static omc_exif_write_status
+omc_exif_write_bmff_parse_iinf(const omc_u8* file_bytes, omc_size file_size,
+                               const omc_exif_write_bmff_box* iinf,
+                               omc_exif_write_bmff_item* items,
+                               omc_u32 item_cap, omc_u32* out_count)
+{
+    omc_u64 payload_off;
+    omc_u64 payload_end;
+    omc_u8 version;
+    omc_u64 child_off;
+    omc_u64 declared_count;
+    omc_u32 count;
+
+    if (iinf == (const omc_exif_write_bmff_box*)0
+        || items == (omc_exif_write_bmff_item*)0
+        || out_count == (omc_u32*)0) {
+        return OMC_EXIF_WRITE_MALFORMED;
+    }
+
+    payload_off = iinf->offset + iinf->header_size;
+    payload_end = iinf->offset + iinf->size;
+    if (payload_off + 4U > payload_end || payload_end > (omc_u64)file_size) {
+        return OMC_EXIF_WRITE_MALFORMED;
+    }
+
+    version = file_bytes[(omc_size)payload_off];
+    child_off = payload_off + 4U;
+    if (version == 0U) {
+        if (child_off + 2U > payload_end) {
+            return OMC_EXIF_WRITE_MALFORMED;
+        }
+        declared_count = (omc_u64)omc_exif_write_read_u16be(
+            file_bytes + (omc_size)child_off);
+        child_off += 2U;
+    } else {
+        if (child_off + 4U > payload_end) {
+            return OMC_EXIF_WRITE_MALFORMED;
+        }
+        declared_count = (omc_u64)omc_exif_write_read_u32be(
+            file_bytes + (omc_size)child_off);
+        child_off += 4U;
+    }
+
+    count = 0U;
+    while (child_off + 8U <= payload_end) {
+        omc_exif_write_bmff_box infe;
+        omc_u64 infe_payload_off;
+        omc_u64 infe_payload_end;
+        omc_u8 infe_version;
+        omc_u64 q;
+        omc_u64 name_end;
+        omc_u32 item_id;
+        omc_u16 protection_index;
+        omc_u32 item_type;
+
+        if (count >= item_cap) {
+            return OMC_EXIF_WRITE_LIMIT;
+        }
+        if (!omc_exif_write_parse_bmff_box(file_bytes, file_size, child_off,
+                                           payload_end, &infe)) {
+            return OMC_EXIF_WRITE_MALFORMED;
+        }
+        if (infe.type != omc_exif_write_fourcc('i', 'n', 'f', 'e')) {
+            return OMC_EXIF_WRITE_UNSUPPORTED;
+        }
+
+        infe_payload_off = infe.offset + infe.header_size;
+        infe_payload_end = infe.offset + infe.size;
+        if (infe_payload_off + 4U > infe_payload_end) {
+            return OMC_EXIF_WRITE_MALFORMED;
+        }
+        infe_version = file_bytes[(omc_size)infe_payload_off];
+        if (infe_version < 2U) {
+            return OMC_EXIF_WRITE_UNSUPPORTED;
+        }
+
+        q = infe_payload_off + 4U;
+        if (infe_version == 2U) {
+            if (q + 2U > infe_payload_end) {
+                return OMC_EXIF_WRITE_MALFORMED;
+            }
+            item_id = (omc_u32)omc_exif_write_read_u16be(
+                file_bytes + (omc_size)q);
+            q += 2U;
+        } else {
+            if (q + 4U > infe_payload_end) {
+                return OMC_EXIF_WRITE_MALFORMED;
+            }
+            item_id = omc_exif_write_read_u32be(file_bytes + (omc_size)q);
+            q += 4U;
+        }
+        if (q + 2U + 4U > infe_payload_end) {
+            return OMC_EXIF_WRITE_MALFORMED;
+        }
+        protection_index = omc_exif_write_read_u16be(file_bytes + (omc_size)q);
+        q += 2U;
+        item_type = omc_exif_write_read_u32be(file_bytes + (omc_size)q);
+        q += 4U;
+
+        if (!omc_exif_write_bmff_find_cstring_end(file_bytes, q, infe_payload_end,
+                                                  &name_end)) {
+            return OMC_EXIF_WRITE_MALFORMED;
+        }
+
+        memset(&items[count], 0, sizeof(items[count]));
+        items[count].item_id = item_id;
+        items[count].item_type = item_type;
+        items[count].protection_index = protection_index;
+        items[count].is_exif
+            = item_type == omc_exif_write_fourcc('E', 'x', 'i', 'f');
+        items[count].infe_off = (omc_size)infe.offset;
+        items[count].infe_size = (omc_size)infe.size;
+        count += 1U;
+        child_off += infe.size;
+        if (infe.size == 0U) {
+            break;
+        }
+    }
+
+    if (child_off != payload_end || declared_count != (omc_u64)count) {
+        return OMC_EXIF_WRITE_MALFORMED;
+    }
+    *out_count = count;
+    return OMC_EXIF_WRITE_OK;
+}
+
+static omc_exif_write_status
+omc_exif_write_bmff_parse_iloc(const omc_u8* file_bytes, omc_size file_size,
+                               const omc_exif_write_bmff_box* iloc,
+                               const omc_exif_write_bmff_box* idat,
+                               omc_exif_write_bmff_item* items,
+                               omc_u32 item_count, omc_u8* out_version,
+                               omc_u8* out_offset_size,
+                               omc_u8* out_length_size,
+                               omc_u8* out_base_offset_size,
+                               omc_u8* out_index_size)
+{
+    omc_u64 payload_off;
+    omc_u64 payload_end;
+    omc_u8 version;
+    omc_u8 offset_size;
+    omc_u8 length_size;
+    omc_u8 base_offset_size;
+    omc_u8 index_size;
+    omc_u64 q;
+    omc_u64 declared_count;
+    omc_u64 idat_payload_off;
+    omc_u64 idat_payload_end;
+    omc_u64 seen;
+
+    if (iloc == (const omc_exif_write_bmff_box*)0
+        || idat == (const omc_exif_write_bmff_box*)0
+        || items == (omc_exif_write_bmff_item*)0
+        || out_version == (omc_u8*)0 || out_offset_size == (omc_u8*)0
+        || out_length_size == (omc_u8*)0
+        || out_base_offset_size == (omc_u8*)0
+        || out_index_size == (omc_u8*)0) {
+        return OMC_EXIF_WRITE_MALFORMED;
+    }
+
+    payload_off = iloc->offset + iloc->header_size;
+    payload_end = iloc->offset + iloc->size;
+    if (payload_off + 6U > payload_end || payload_end > (omc_u64)file_size) {
+        return OMC_EXIF_WRITE_MALFORMED;
+    }
+    if (idat->offset + idat->header_size > idat->offset + idat->size
+        || idat->offset + idat->size > (omc_u64)file_size) {
+        return OMC_EXIF_WRITE_MALFORMED;
+    }
+
+    version = file_bytes[(omc_size)payload_off];
+    if (version != 1U && version != 2U) {
+        return OMC_EXIF_WRITE_UNSUPPORTED;
+    }
+
+    offset_size = (omc_u8)(file_bytes[(omc_size)payload_off + 4U] >> 4);
+    length_size = (omc_u8)(file_bytes[(omc_size)payload_off + 4U] & 0x0FU);
+    base_offset_size
+        = (omc_u8)(file_bytes[(omc_size)payload_off + 5U] >> 4);
+    index_size = (omc_u8)(file_bytes[(omc_size)payload_off + 5U] & 0x0FU);
+    q = payload_off + 6U;
+
+    if (version < 2U) {
+        if (q + 2U > payload_end) {
+            return OMC_EXIF_WRITE_MALFORMED;
+        }
+        declared_count = (omc_u64)omc_exif_write_read_u16be(
+            file_bytes + (omc_size)q);
+        q += 2U;
+    } else {
+        if (q + 4U > payload_end) {
+            return OMC_EXIF_WRITE_MALFORMED;
+        }
+        declared_count = (omc_u64)omc_exif_write_read_u32be(
+            file_bytes + (omc_size)q);
+        q += 4U;
+    }
+
+    idat_payload_off = idat->offset + idat->header_size;
+    idat_payload_end = idat->offset + idat->size;
+    seen = 0U;
+    while (seen < declared_count) {
+        omc_u32 item_id;
+        omc_u32 construction_method;
+        omc_u16 data_ref_index;
+        omc_u64 base_offset;
+        omc_u16 extent_count;
+        omc_u64 extent_index;
+        omc_u64 extent_offset;
+        omc_u64 extent_length;
+        omc_u64 source_off;
+        int item_idx;
+        omc_u8 i;
+
+        if (version < 2U) {
+            if (q + 2U > payload_end) {
+                return OMC_EXIF_WRITE_MALFORMED;
+            }
+            item_id = (omc_u32)omc_exif_write_read_u16be(
+                file_bytes + (omc_size)q);
+            q += 2U;
+        } else {
+            if (q + 4U > payload_end) {
+                return OMC_EXIF_WRITE_MALFORMED;
+            }
+            item_id = omc_exif_write_read_u32be(file_bytes + (omc_size)q);
+            q += 4U;
+        }
+
+        if (q + 2U > payload_end) {
+            return OMC_EXIF_WRITE_MALFORMED;
+        }
+        construction_method = (omc_u32)(omc_exif_write_read_u16be(
+                                 file_bytes + (omc_size)q)
+                             & 0x000FU);
+        q += 2U;
+        if (q + 2U > payload_end) {
+            return OMC_EXIF_WRITE_MALFORMED;
+        }
+        data_ref_index = omc_exif_write_read_u16be(file_bytes + (omc_size)q);
+        q += 2U;
+
+        if (base_offset_size > 8U || index_size > 8U || offset_size > 8U
+            || length_size > 8U) {
+            return OMC_EXIF_WRITE_UNSUPPORTED;
+        }
+        if (q + (omc_u64)base_offset_size > payload_end) {
+            return OMC_EXIF_WRITE_MALFORMED;
+        }
+        base_offset = 0U;
+        if (base_offset_size != 0U) {
+            for (i = 0U; i < base_offset_size; ++i) {
+                base_offset = (base_offset << 8)
+                              | file_bytes[(omc_size)q + i];
+            }
+        }
+        q += base_offset_size;
+
+        if (q + 2U > payload_end) {
+            return OMC_EXIF_WRITE_MALFORMED;
+        }
+        extent_count = omc_exif_write_read_u16be(file_bytes + (omc_size)q);
+        q += 2U;
+        if (extent_count != 1U || data_ref_index != 0U) {
+            return OMC_EXIF_WRITE_UNSUPPORTED;
+        }
+
+        extent_index = 0U;
+        if (index_size != 0U) {
+            if (q + (omc_u64)index_size > payload_end) {
+                return OMC_EXIF_WRITE_MALFORMED;
+            }
+            for (i = 0U; i < index_size; ++i) {
+                extent_index = (extent_index << 8)
+                               | file_bytes[(omc_size)q + i];
+            }
+            q += index_size;
+        }
+        if (extent_index != 0U) {
+            return OMC_EXIF_WRITE_UNSUPPORTED;
+        }
+
+        extent_offset = 0U;
+        if (offset_size != 0U) {
+            if (q + (omc_u64)offset_size > payload_end) {
+                return OMC_EXIF_WRITE_MALFORMED;
+            }
+            for (i = 0U; i < offset_size; ++i) {
+                extent_offset = (extent_offset << 8)
+                                | file_bytes[(omc_size)q + i];
+            }
+            q += offset_size;
+        }
+
+        extent_length = 0U;
+        if (length_size != 0U) {
+            if (q + (omc_u64)length_size > payload_end) {
+                return OMC_EXIF_WRITE_MALFORMED;
+            }
+            for (i = 0U; i < length_size; ++i) {
+                extent_length = (extent_length << 8)
+                                | file_bytes[(omc_size)q + i];
+            }
+            q += length_size;
+        }
+
+        if (construction_method == 1U) {
+            if (idat_payload_off > ((omc_u64)(~(omc_u64)0) - base_offset)
+                || idat_payload_off + base_offset
+                       > ((omc_u64)(~(omc_u64)0) - extent_offset)) {
+                return OMC_EXIF_WRITE_MALFORMED;
+            }
+            source_off = idat_payload_off + base_offset + extent_offset;
+            if (source_off > idat_payload_end
+                || extent_length > idat_payload_end - source_off) {
+                return OMC_EXIF_WRITE_MALFORMED;
+            }
+        } else if (construction_method == 0U) {
+            if (base_offset > ((omc_u64)(~(omc_u64)0) - extent_offset)) {
+                return OMC_EXIF_WRITE_MALFORMED;
+            }
+            source_off = base_offset + extent_offset;
+            if (source_off > (omc_u64)file_size
+                || extent_length > (omc_u64)file_size - source_off) {
+                return OMC_EXIF_WRITE_MALFORMED;
+            }
+        } else {
+            return OMC_EXIF_WRITE_UNSUPPORTED;
+        }
+
+        item_idx = omc_exif_write_bmff_find_item(items, item_count, item_id);
+        if (item_idx < 0 || items[item_idx].has_source) {
+            return OMC_EXIF_WRITE_UNSUPPORTED;
+        }
+        items[item_idx].has_source = 1;
+        items[item_idx].source_off = source_off;
+        items[item_idx].source_len = extent_length;
+        seen += 1U;
+    }
+
+    if (q != payload_end) {
+        return OMC_EXIF_WRITE_MALFORMED;
+    }
+
+    *out_version = version;
+    *out_offset_size = offset_size;
+    *out_length_size = length_size;
+    *out_base_offset_size = base_offset_size;
+    *out_index_size = index_size;
+    return OMC_EXIF_WRITE_OK;
+}
+
+static omc_status
+omc_exif_write_bmff_append_exif_infe(omc_arena* out, omc_u32 item_id)
+{
+    static const char k_exif_name[] = "Exif";
+    omc_u8 payload[32];
+    omc_size payload_size;
+    omc_u8 version;
+
+    payload_size = 0U;
+    version = item_id <= 0xFFFFU ? 2U : 3U;
+    payload[payload_size++] = version;
+    payload[payload_size++] = 0U;
+    payload[payload_size++] = 0U;
+    payload[payload_size++] = 0U;
+    if (version == 2U) {
+        omc_exif_write_store_u16be(payload + payload_size, (omc_u16)item_id);
+        payload_size += 2U;
+    } else {
+        omc_exif_write_store_u32be(payload + payload_size, item_id);
+        payload_size += 4U;
+    }
+    omc_exif_write_store_u16be(payload + payload_size, 0U);
+    payload_size += 2U;
+    omc_exif_write_store_u32be(payload + payload_size,
+                               omc_exif_write_fourcc('E', 'x', 'i', 'f'));
+    payload_size += 4U;
+    memcpy(payload + payload_size, k_exif_name, sizeof(k_exif_name));
+    payload_size += sizeof(k_exif_name);
+    return omc_exif_write_append_bmff_box(
+        out, omc_exif_write_fourcc('i', 'n', 'f', 'e'), payload, payload_size);
+}
+
+static omc_status
+omc_exif_write_build_item_bmff_payload(const omc_arena* tiff_payload,
+                                       omc_arena* out)
+{
+    omc_u8 header[10];
+    omc_status status;
+
+    omc_exif_write_store_u32be(header, 6U);
+    memcpy(header + 4U, k_omc_exif_write_jpeg_prefix,
+           sizeof(k_omc_exif_write_jpeg_prefix));
+
+    omc_arena_reset(out);
+    status = omc_arena_reserve(out, sizeof(header) + tiff_payload->size);
+    if (status != OMC_STATUS_OK) {
+        return status;
+    }
+    status = omc_exif_write_append(out, header, sizeof(header));
+    if (status != OMC_STATUS_OK) {
+        return status;
+    }
+    return omc_exif_write_append(out, tiff_payload->data, tiff_payload->size);
+}
+
+static omc_status
+omc_exif_write_bmff_build_minimal_meta(const omc_u8* payload,
+                                       omc_size payload_size,
+                                       omc_arena* meta_payload)
+{
+    omc_arena iinf_payload;
+    omc_arena iloc_payload;
+    omc_arena idat_payload;
+    omc_status status;
+    omc_u8 fullbox[4];
+    omc_u8 size_bytes[2];
+
+    omc_arena_init(&iinf_payload);
+    omc_arena_init(&iloc_payload);
+    omc_arena_init(&idat_payload);
+
+    memset(fullbox, 0, sizeof(fullbox));
+    status = omc_exif_write_append(&iinf_payload, fullbox, sizeof(fullbox));
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_exif_write_append_be_n(&iinf_payload, 1U, 2U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_exif_write_bmff_append_exif_infe(&iinf_payload, 1U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+
+    fullbox[0] = 1U;
+    status = omc_exif_write_append(&iloc_payload, fullbox, sizeof(fullbox));
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    size_bytes[0] = 0x44U;
+    size_bytes[1] = 0x40U;
+    status = omc_exif_write_append(&iloc_payload, size_bytes,
+                                   sizeof(size_bytes));
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_exif_write_append_be_n(&iloc_payload, 1U, 2U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_exif_write_append_be_n(&iloc_payload, 1U, 2U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_exif_write_append_be_n(&iloc_payload, 0U, 2U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_exif_write_append_be_n(&iloc_payload, 0U, 4U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_exif_write_append_be_n(&iloc_payload, 1U, 2U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_exif_write_append_be_n(&iloc_payload, 0U, 4U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_exif_write_append_be_n(&iloc_payload, (omc_u64)payload_size,
+                                        4U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+
+    status = omc_exif_write_append(&idat_payload, payload, payload_size);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+
+    omc_arena_reset(meta_payload);
+    memset(fullbox, 0, sizeof(fullbox));
+    status = omc_exif_write_append(meta_payload, fullbox, sizeof(fullbox));
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_exif_write_append_bmff_box(
+        meta_payload, omc_exif_write_fourcc('i', 'i', 'n', 'f'),
+        iinf_payload.data, iinf_payload.size);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_exif_write_append_bmff_box(
+        meta_payload, omc_exif_write_fourcc('i', 'l', 'o', 'c'),
+        iloc_payload.data, iloc_payload.size);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup;
+    }
+    status = omc_exif_write_append_bmff_box(
+        meta_payload, omc_exif_write_fourcc('i', 'd', 'a', 't'),
+        idat_payload.data, idat_payload.size);
+
+cleanup:
+    omc_arena_fini(&idat_payload);
+    omc_arena_fini(&iloc_payload);
+    omc_arena_fini(&iinf_payload);
+    return status;
+}
+
+static omc_status
+omc_exif_write_rewrite_bmff_item_exif(const omc_u8* file_bytes,
+                                      omc_size file_size,
+                                      const omc_u8* payload,
+                                      omc_size payload_size,
+                                      omc_arena* out,
+                                      omc_exif_write_res* out_res)
+{
+    omc_exif_write_bmff_box top_boxes[32];
+    omc_exif_write_bmff_box meta_children[32];
+    omc_exif_write_bmff_box ftyp_box;
+    omc_exif_write_bmff_box meta_box;
+    omc_exif_write_bmff_box iinf_box;
+    omc_exif_write_bmff_box iloc_box;
+    omc_exif_write_bmff_box idat_box;
+    omc_exif_write_bmff_item items[64];
+    omc_u32 order[64];
+    omc_u8 meta_fullbox[4];
+    omc_u8 iinf_fullbox[4];
+    omc_u8 iloc_fullbox[4];
+    omc_u64 top_off;
+    omc_u64 top_limit;
+    omc_u64 child_off;
+    omc_u64 child_end;
+    omc_u32 top_count;
+    omc_u32 meta_child_count;
+    omc_u32 item_count;
+    omc_u32 order_count;
+    omc_u32 removed_count;
+    omc_u32 max_item_id;
+    omc_u32 exif_item_id;
+    omc_u64 exif_new_off;
+    omc_u64 exif_new_len;
+    omc_u8 iloc_version;
+    omc_u8 offset_size;
+    omc_u8 length_size;
+    omc_u8 base_offset_size;
+    omc_u8 index_size;
+    omc_scan_fmt format;
+    omc_exif_write_status parse_status;
+    omc_arena iinf_payload;
+    omc_arena iloc_payload;
+    omc_arena idat_payload;
+    omc_arena meta_payload;
+    omc_status status;
+    int have_ftyp;
+    int have_meta;
+    int have_iinf;
+    int have_iloc;
+    int have_idat;
+    int emitted_iinf;
+    int emitted_iloc;
+    int emitted_idat;
+    omc_u32 i;
+
+    memset(&ftyp_box, 0, sizeof(ftyp_box));
+    memset(&meta_box, 0, sizeof(meta_box));
+    memset(&iinf_box, 0, sizeof(iinf_box));
+    memset(&iloc_box, 0, sizeof(iloc_box));
+    memset(&idat_box, 0, sizeof(idat_box));
+    memset(items, 0, sizeof(items));
+    top_off = 0U;
+    top_limit = (omc_u64)file_size;
+    top_count = 0U;
+    have_ftyp = 0;
+    have_meta = 0;
+    omc_arena_init(&meta_payload);
+    while (top_off + 8U <= top_limit) {
+        if (top_count >= 32U) {
+            omc_arena_fini(&meta_payload);
+            out_res->status = OMC_EXIF_WRITE_LIMIT;
+            return OMC_STATUS_OK;
+        }
+        if (!omc_exif_write_parse_bmff_box(file_bytes, file_size, top_off,
+                                           top_limit, &top_boxes[top_count])) {
+            omc_arena_fini(&meta_payload);
+            out_res->status = OMC_EXIF_WRITE_MALFORMED;
+            return OMC_STATUS_OK;
+        }
+        if (top_boxes[top_count].type
+            == omc_exif_write_fourcc('f', 't', 'y', 'p')) {
+            if (have_ftyp) {
+                omc_arena_fini(&meta_payload);
+                out_res->status = OMC_EXIF_WRITE_UNSUPPORTED;
+                return OMC_STATUS_OK;
+            }
+            ftyp_box = top_boxes[top_count];
+            have_ftyp = 1;
+        } else if (top_boxes[top_count].type
+                   == omc_exif_write_fourcc('m', 'e', 't', 'a')) {
+            if (have_meta) {
+                omc_arena_fini(&meta_payload);
+                out_res->status = OMC_EXIF_WRITE_UNSUPPORTED;
+                return OMC_STATUS_OK;
+            }
+            meta_box = top_boxes[top_count];
+            have_meta = 1;
+        }
+        top_off += top_boxes[top_count].size;
+        top_count += 1U;
+    }
+    if (top_off != top_limit || !have_ftyp) {
+        omc_arena_fini(&meta_payload);
+        out_res->status = OMC_EXIF_WRITE_UNSUPPORTED;
+        return OMC_STATUS_OK;
+    }
+
+    format = omc_exif_write_bmff_format_from_ftyp(file_bytes, file_size,
+                                                  &ftyp_box);
+    if (format != OMC_SCAN_FMT_HEIF && format != OMC_SCAN_FMT_AVIF) {
+        omc_arena_fini(&meta_payload);
+        out_res->status = OMC_EXIF_WRITE_UNSUPPORTED;
+        return OMC_STATUS_OK;
+    }
+    if (!have_meta) {
+        status = omc_exif_write_bmff_build_minimal_meta(payload, payload_size,
+                                                        &meta_payload);
+        if (status != OMC_STATUS_OK) {
+            omc_arena_fini(&meta_payload);
+            return status;
+        }
+        omc_arena_reset(out);
+        status = omc_arena_reserve(out, file_size + payload_size + 512U);
+        if (status != OMC_STATUS_OK) {
+            omc_arena_fini(&meta_payload);
+            return status;
+        }
+        for (i = 0U; i < top_count; ++i) {
+            status = omc_exif_write_append(
+                out, file_bytes + (omc_size)top_boxes[i].offset,
+                (omc_size)top_boxes[i].size);
+            if (status != OMC_STATUS_OK) {
+                omc_arena_fini(&meta_payload);
+                return status;
+            }
+        }
+        status = omc_exif_write_append_bmff_box(
+            out, omc_exif_write_fourcc('m', 'e', 't', 'a'),
+            meta_payload.data, meta_payload.size);
+        omc_arena_fini(&meta_payload);
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+        out_res->status = OMC_EXIF_WRITE_OK;
+        out_res->needed = out->size;
+        out_res->written = out->size;
+        out_res->removed_exif_blocks = 0U;
+        out_res->inserted_exif_blocks = 1U;
+        return OMC_STATUS_OK;
+    }
+
+    child_off = meta_box.offset + meta_box.header_size;
+    child_end = meta_box.offset + meta_box.size;
+    if (child_off + 4U > child_end || child_end > (omc_u64)file_size) {
+        omc_arena_fini(&meta_payload);
+        out_res->status = OMC_EXIF_WRITE_MALFORMED;
+        return OMC_STATUS_OK;
+    }
+    memcpy(meta_fullbox, file_bytes + (omc_size)child_off, sizeof(meta_fullbox));
+    child_off += 4U;
+    meta_child_count = 0U;
+    have_iinf = 0;
+    have_iloc = 0;
+    have_idat = 0;
+    while (child_off + 8U <= child_end) {
+        if (meta_child_count >= 32U) {
+            omc_arena_fini(&meta_payload);
+            out_res->status = OMC_EXIF_WRITE_LIMIT;
+            return OMC_STATUS_OK;
+        }
+        if (!omc_exif_write_parse_bmff_box(file_bytes, file_size, child_off,
+                                           child_end,
+                                           &meta_children[meta_child_count])) {
+            omc_arena_fini(&meta_payload);
+            out_res->status = OMC_EXIF_WRITE_MALFORMED;
+            return OMC_STATUS_OK;
+        }
+        if (meta_children[meta_child_count].type
+            == omc_exif_write_fourcc('i', 'i', 'n', 'f')) {
+            if (have_iinf) {
+                omc_arena_fini(&meta_payload);
+                out_res->status = OMC_EXIF_WRITE_UNSUPPORTED;
+                return OMC_STATUS_OK;
+            }
+            iinf_box = meta_children[meta_child_count];
+            have_iinf = 1;
+        } else if (meta_children[meta_child_count].type
+                   == omc_exif_write_fourcc('i', 'l', 'o', 'c')) {
+            if (have_iloc) {
+                omc_arena_fini(&meta_payload);
+                out_res->status = OMC_EXIF_WRITE_UNSUPPORTED;
+                return OMC_STATUS_OK;
+            }
+            iloc_box = meta_children[meta_child_count];
+            have_iloc = 1;
+        } else if (meta_children[meta_child_count].type
+                   == omc_exif_write_fourcc('i', 'd', 'a', 't')) {
+            if (have_idat) {
+                omc_arena_fini(&meta_payload);
+                out_res->status = OMC_EXIF_WRITE_UNSUPPORTED;
+                return OMC_STATUS_OK;
+            }
+            idat_box = meta_children[meta_child_count];
+            have_idat = 1;
+        }
+        child_off += meta_children[meta_child_count].size;
+        meta_child_count += 1U;
+    }
+    if (child_off != child_end || !have_iinf || !have_iloc || !have_idat) {
+        omc_arena_fini(&meta_payload);
+        out_res->status = OMC_EXIF_WRITE_UNSUPPORTED;
+        return OMC_STATUS_OK;
+    }
+
+    parse_status = omc_exif_write_bmff_parse_iinf(file_bytes, file_size,
+                                                  &iinf_box, items, 64U,
+                                                  &item_count);
+    if (parse_status != OMC_EXIF_WRITE_OK) {
+        omc_arena_fini(&meta_payload);
+        out_res->status = parse_status;
+        return OMC_STATUS_OK;
+    }
+
+    if (iinf_box.offset + iinf_box.header_size + 4U
+        > iinf_box.offset + iinf_box.size) {
+        omc_arena_fini(&meta_payload);
+        out_res->status = OMC_EXIF_WRITE_MALFORMED;
+        return OMC_STATUS_OK;
+    }
+    memcpy(iinf_fullbox,
+           file_bytes + (omc_size)(iinf_box.offset + iinf_box.header_size),
+           sizeof(iinf_fullbox));
+
+    parse_status = omc_exif_write_bmff_parse_iloc(
+        file_bytes, file_size, &iloc_box, &idat_box, items, item_count,
+        &iloc_version, &offset_size, &length_size, &base_offset_size,
+        &index_size);
+    if (parse_status != OMC_EXIF_WRITE_OK) {
+        omc_arena_fini(&meta_payload);
+        out_res->status = parse_status;
+        return OMC_STATUS_OK;
+    }
+    memcpy(iloc_fullbox,
+           file_bytes + (omc_size)(iloc_box.offset + iloc_box.header_size),
+           sizeof(iloc_fullbox));
+
+    removed_count = 0U;
+    max_item_id = 0U;
+    exif_item_id = 0U;
+    exif_new_off = 0U;
+    exif_new_len = (omc_u64)payload_size;
+    order_count = 0U;
+    for (i = 0U; i < item_count; ++i) {
+        if (!items[i].has_source) {
+            omc_arena_fini(&meta_payload);
+            out_res->status = OMC_EXIF_WRITE_UNSUPPORTED;
+            return OMC_STATUS_OK;
+        }
+        if (items[i].item_id > max_item_id) {
+            max_item_id = items[i].item_id;
+        }
+        if (items[i].is_exif) {
+            removed_count += 1U;
+            if (exif_item_id == 0U) {
+                exif_item_id = items[i].item_id;
+                order[order_count] = 0xFFFFFFFFU;
+                order_count += 1U;
+            }
+        } else {
+            order[order_count] = i;
+            order_count += 1U;
+        }
+    }
+    if (exif_item_id == 0U) {
+        if (max_item_id == 0xFFFFFFFFU || order_count >= 64U) {
+            omc_arena_fini(&meta_payload);
+            out_res->status = OMC_EXIF_WRITE_LIMIT;
+            return OMC_STATUS_OK;
+        }
+        exif_item_id = max_item_id + 1U;
+        order[order_count] = 0xFFFFFFFFU;
+        order_count += 1U;
+    }
+    if (iloc_version < 2U && exif_item_id > 0xFFFFU) {
+        omc_arena_fini(&meta_payload);
+        out_res->status = OMC_EXIF_WRITE_LIMIT;
+        return OMC_STATUS_OK;
+    }
+
+    omc_arena_init(&iinf_payload);
+    omc_arena_init(&iloc_payload);
+    omc_arena_init(&idat_payload);
+    status = OMC_STATUS_OK;
+
+    for (i = 0U; i < order_count; ++i) {
+        if (order[i] == 0xFFFFFFFFU) {
+            if (!omc_exif_write_bmff_value_fits((omc_u64)idat_payload.size,
+                                                offset_size)
+                || !omc_exif_write_bmff_value_fits((omc_u64)payload_size,
+                                                   length_size)) {
+                out_res->status = OMC_EXIF_WRITE_LIMIT;
+                status = OMC_STATUS_OK;
+                goto cleanup_bmff;
+            }
+            exif_new_off = (omc_u64)idat_payload.size;
+            status = omc_exif_write_append(&idat_payload, payload, payload_size);
+            if (status != OMC_STATUS_OK) {
+                goto cleanup_bmff;
+            }
+        } else {
+            omc_exif_write_bmff_item* item;
+
+            item = &items[order[i]];
+            if (!omc_exif_write_bmff_value_fits((omc_u64)idat_payload.size,
+                                                offset_size)
+                || !omc_exif_write_bmff_value_fits(item->source_len,
+                                                   length_size)) {
+                out_res->status = OMC_EXIF_WRITE_LIMIT;
+                status = OMC_STATUS_OK;
+                goto cleanup_bmff;
+            }
+            item->new_off = (omc_u64)idat_payload.size;
+            item->new_len = item->source_len;
+            status = omc_exif_write_append(
+                &idat_payload, file_bytes + (omc_size)item->source_off,
+                (omc_size)item->source_len);
+            if (status != OMC_STATUS_OK) {
+                goto cleanup_bmff;
+            }
+        }
+    }
+
+    status = omc_exif_write_append(&iinf_payload, iinf_fullbox,
+                                   sizeof(iinf_fullbox));
+    if (status != OMC_STATUS_OK) {
+        goto cleanup_bmff;
+    }
+    if (iinf_fullbox[0] == 0U) {
+        status = omc_exif_write_append_be_n(&iinf_payload, (omc_u64)order_count,
+                                            2U);
+    } else {
+        status = omc_exif_write_append_be_n(&iinf_payload, (omc_u64)order_count,
+                                            4U);
+    }
+    if (status != OMC_STATUS_OK) {
+        goto cleanup_bmff;
+    }
+    for (i = 0U; i < order_count; ++i) {
+        if (order[i] == 0xFFFFFFFFU) {
+            status = omc_exif_write_bmff_append_exif_infe(&iinf_payload,
+                                                          exif_item_id);
+        } else {
+            status = omc_exif_write_append(&iinf_payload,
+                                           file_bytes + items[order[i]].infe_off,
+                                           items[order[i]].infe_size);
+        }
+        if (status != OMC_STATUS_OK) {
+            goto cleanup_bmff;
+        }
+    }
+
+    status = omc_exif_write_append(&iloc_payload, iloc_fullbox,
+                                   sizeof(iloc_fullbox));
+    if (status != OMC_STATUS_OK) {
+        goto cleanup_bmff;
+    }
+    {
+        omc_u8 size_bytes[2];
+
+        size_bytes[0] = (omc_u8)((offset_size << 4) | length_size);
+        size_bytes[1] = (omc_u8)((base_offset_size << 4) | index_size);
+        status = omc_exif_write_append(&iloc_payload, size_bytes,
+                                       sizeof(size_bytes));
+        if (status != OMC_STATUS_OK) {
+            goto cleanup_bmff;
+        }
+    }
+    if (iloc_version < 2U) {
+        status = omc_exif_write_append_be_n(&iloc_payload, (omc_u64)order_count,
+                                            2U);
+    } else {
+        status = omc_exif_write_append_be_n(&iloc_payload, (omc_u64)order_count,
+                                            4U);
+    }
+    if (status != OMC_STATUS_OK) {
+        goto cleanup_bmff;
+    }
+
+    for (i = 0U; i < order_count; ++i) {
+        omc_u32 item_id;
+        omc_u64 item_off;
+        omc_u64 item_len;
+
+        if (order[i] == 0xFFFFFFFFU) {
+            item_id = exif_item_id;
+            item_off = exif_new_off;
+            item_len = exif_new_len;
+        } else {
+            item_id = items[order[i]].item_id;
+            item_off = items[order[i]].new_off;
+            item_len = items[order[i]].new_len;
+        }
+        if (!omc_exif_write_bmff_value_fits(item_off, offset_size)
+            || !omc_exif_write_bmff_value_fits(item_len, length_size)
+            || !omc_exif_write_bmff_value_fits(0U, base_offset_size)
+            || !omc_exif_write_bmff_value_fits(0U, index_size)) {
+            out_res->status = OMC_EXIF_WRITE_LIMIT;
+            status = OMC_STATUS_OK;
+            goto cleanup_bmff;
+        }
+
+        if (iloc_version < 2U) {
+            status = omc_exif_write_append_be_n(&iloc_payload, (omc_u64)item_id,
+                                                2U);
+        } else {
+            status = omc_exif_write_append_be_n(&iloc_payload, (omc_u64)item_id,
+                                                4U);
+        }
+        if (status != OMC_STATUS_OK) {
+            goto cleanup_bmff;
+        }
+        status = omc_exif_write_append_be_n(&iloc_payload, 1U, 2U);
+        if (status != OMC_STATUS_OK) {
+            goto cleanup_bmff;
+        }
+        status = omc_exif_write_append_be_n(&iloc_payload, 0U, 2U);
+        if (status != OMC_STATUS_OK) {
+            goto cleanup_bmff;
+        }
+        status = omc_exif_write_append_be_n(&iloc_payload, 0U,
+                                            base_offset_size);
+        if (status != OMC_STATUS_OK) {
+            goto cleanup_bmff;
+        }
+        status = omc_exif_write_append_be_n(&iloc_payload, 1U, 2U);
+        if (status != OMC_STATUS_OK) {
+            goto cleanup_bmff;
+        }
+        if (index_size != 0U) {
+            status = omc_exif_write_append_be_n(&iloc_payload, 0U, index_size);
+            if (status != OMC_STATUS_OK) {
+                goto cleanup_bmff;
+            }
+        }
+        status = omc_exif_write_append_be_n(&iloc_payload, item_off,
+                                            offset_size);
+        if (status != OMC_STATUS_OK) {
+            goto cleanup_bmff;
+        }
+        status = omc_exif_write_append_be_n(&iloc_payload, item_len,
+                                            length_size);
+        if (status != OMC_STATUS_OK) {
+            goto cleanup_bmff;
+        }
+    }
+
+    status = omc_exif_write_append(&meta_payload, meta_fullbox,
+                                   sizeof(meta_fullbox));
+    if (status != OMC_STATUS_OK) {
+        goto cleanup_bmff;
+    }
+    emitted_iinf = 0;
+    emitted_iloc = 0;
+    emitted_idat = 0;
+    for (i = 0U; i < meta_child_count; ++i) {
+        if (meta_children[i].type == omc_exif_write_fourcc('i', 'i', 'n', 'f')) {
+            status = omc_exif_write_append_bmff_box(
+                &meta_payload, omc_exif_write_fourcc('i', 'i', 'n', 'f'),
+                iinf_payload.data, iinf_payload.size);
+            emitted_iinf = 1;
+        } else if (meta_children[i].type
+                   == omc_exif_write_fourcc('i', 'l', 'o', 'c')) {
+            status = omc_exif_write_append_bmff_box(
+                &meta_payload, omc_exif_write_fourcc('i', 'l', 'o', 'c'),
+                iloc_payload.data, iloc_payload.size);
+            emitted_iloc = 1;
+        } else if (meta_children[i].type
+                   == omc_exif_write_fourcc('i', 'd', 'a', 't')) {
+            status = omc_exif_write_append_bmff_box(
+                &meta_payload, omc_exif_write_fourcc('i', 'd', 'a', 't'),
+                idat_payload.data, idat_payload.size);
+            emitted_idat = 1;
+        } else {
+            status = omc_exif_write_append(
+                &meta_payload, file_bytes + (omc_size)meta_children[i].offset,
+                (omc_size)meta_children[i].size);
+        }
+        if (status != OMC_STATUS_OK) {
+            goto cleanup_bmff;
+        }
+    }
+    if (!emitted_iinf || !emitted_iloc || !emitted_idat) {
+        out_res->status = OMC_EXIF_WRITE_UNSUPPORTED;
+        status = OMC_STATUS_OK;
+        goto cleanup_bmff;
+    }
+
+    omc_arena_reset(out);
+    status = omc_arena_reserve(out, file_size + payload_size + 512U);
+    if (status != OMC_STATUS_OK) {
+        goto cleanup_bmff;
+    }
+    for (i = 0U; i < top_count; ++i) {
+        if (top_boxes[i].type == omc_exif_write_fourcc('m', 'e', 't', 'a')) {
+            status = omc_exif_write_append_bmff_box(
+                out, omc_exif_write_fourcc('m', 'e', 't', 'a'),
+                meta_payload.data, meta_payload.size);
+        } else {
+            status = omc_exif_write_append(
+                out, file_bytes + (omc_size)top_boxes[i].offset,
+                (omc_size)top_boxes[i].size);
+        }
+        if (status != OMC_STATUS_OK) {
+            goto cleanup_bmff;
+        }
+    }
+
+    out_res->status = OMC_EXIF_WRITE_OK;
+    out_res->needed = out->size;
+    out_res->written = out->size;
+    out_res->removed_exif_blocks = removed_count;
+    out_res->inserted_exif_blocks = 1U;
+
+cleanup_bmff:
+    omc_arena_fini(&meta_payload);
+    omc_arena_fini(&idat_payload);
+    omc_arena_fini(&iloc_payload);
+    omc_arena_fini(&iinf_payload);
+    if (status == OMC_STATUS_OK && out_res->status != OMC_EXIF_WRITE_OK) {
+        omc_arena_reset(out);
+        out_res->written = 0U;
+        out_res->needed = 0U;
+    }
+    return status;
 }
 
 static omc_u32
@@ -1674,6 +2858,12 @@ omc_exif_write_embedded(const omc_u8* file_bytes, omc_size file_size,
         if (status != OMC_STATUS_OK) {
             goto cleanup;
         }
+    } else if (format == OMC_SCAN_FMT_HEIF || format == OMC_SCAN_FMT_AVIF) {
+        status = omc_exif_write_build_item_bmff_payload(&tiff_payload,
+                                                        &container_payload);
+        if (status != OMC_STATUS_OK) {
+            goto cleanup;
+        }
     } else {
         status = omc_exif_write_build_direct_bmff_payload(&tiff_payload,
                                                           &container_payload);
@@ -1697,6 +2887,10 @@ omc_exif_write_embedded(const omc_u8* file_bytes, omc_size file_size,
                                              container_payload.data,
                                              container_payload.size, out,
                                              out_res);
+    } else if (format == OMC_SCAN_FMT_HEIF || format == OMC_SCAN_FMT_AVIF) {
+        status = omc_exif_write_rewrite_bmff_item_exif(
+            file_bytes, file_size, container_payload.data,
+            container_payload.size, out, out_res);
     } else {
         status = omc_exif_write_rewrite_bmff_direct(file_bytes, file_size,
                                                     container_payload.data,
