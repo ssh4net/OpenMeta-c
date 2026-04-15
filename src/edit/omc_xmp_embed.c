@@ -42,6 +42,7 @@ omc_xmp_embed_get_prefix(omc_scan_fmt format, const omc_u8** out_prefix,
         *out_prefix_size = sizeof(k_omc_xmp_embed_png_prefix);
         return 1;
     case OMC_SCAN_FMT_TIFF:
+    case OMC_SCAN_FMT_DNG:
     case OMC_SCAN_FMT_WEBP:
     case OMC_SCAN_FMT_JP2:
     case OMC_SCAN_FMT_JXL:

@@ -451,6 +451,103 @@ omc_xmp_write_tiff_store_u64(omc_u8* dst, int little_endian, omc_u64 value)
     }
 }
 
+static int
+omc_xmp_write_tiff_has_dng_version(const omc_u8* bytes, omc_size size)
+{
+    int little_endian;
+    int big_tiff;
+    omc_u64 ifd_off;
+    omc_u64 count_off;
+    omc_u64 count;
+    omc_u64 max_count;
+    omc_u64 entry_size;
+    omc_u64 i;
+
+    if (bytes == (const omc_u8*)0 || size < 8U) {
+        return 0;
+    }
+    if (bytes[0] == 'I' && bytes[1] == 'I') {
+        little_endian = 1;
+    } else if (bytes[0] == 'M' && bytes[1] == 'M') {
+        little_endian = 0;
+    } else {
+        return 0;
+    }
+
+    if ((little_endian ? omc_xmp_write_read_u16le(bytes + 2U)
+                       : omc_xmp_write_read_u16be(bytes + 2U))
+        == 42U) {
+        big_tiff = 0;
+        ifd_off = (omc_u64)(little_endian
+                                ? omc_xmp_write_read_u32le(bytes + 4U)
+                                : omc_xmp_write_read_u32be(bytes + 4U));
+    } else if ((little_endian ? omc_xmp_write_read_u16le(bytes + 2U)
+                              : omc_xmp_write_read_u16be(bytes + 2U))
+               == 43U) {
+        if (size < 16U) {
+            return 0;
+        }
+        if ((little_endian ? omc_xmp_write_read_u16le(bytes + 4U)
+                           : omc_xmp_write_read_u16be(bytes + 4U))
+                != 8U
+            || (little_endian ? omc_xmp_write_read_u16le(bytes + 6U)
+                              : omc_xmp_write_read_u16be(bytes + 6U))
+                   != 0U) {
+            return 0;
+        }
+        big_tiff = 1;
+        ifd_off = little_endian ? omc_xmp_write_read_u64le(bytes + 8U)
+                                : omc_xmp_write_read_u64be(bytes + 8U);
+    } else {
+        return 0;
+    }
+
+    if (ifd_off >= (omc_u64)size) {
+        return 0;
+    }
+
+    if (!big_tiff) {
+        if (ifd_off + 2U > (omc_u64)size) {
+            return 0;
+        }
+        count = (omc_u64)(little_endian
+                               ? omc_xmp_write_read_u16le(bytes + (omc_size)ifd_off)
+                               : omc_xmp_write_read_u16be(bytes + (omc_size)ifd_off));
+        count_off = ifd_off + 2U;
+        entry_size = 12U;
+    } else {
+        if (ifd_off + 8U > (omc_u64)size) {
+            return 0;
+        }
+        count = little_endian ? omc_xmp_write_read_u64le(bytes + (omc_size)ifd_off)
+                              : omc_xmp_write_read_u64be(bytes + (omc_size)ifd_off);
+        count_off = ifd_off + 8U;
+        entry_size = 20U;
+    }
+
+    if (count_off > (omc_u64)size) {
+        return 0;
+    }
+    max_count = ((omc_u64)size - count_off) / entry_size;
+    if (count > max_count) {
+        count = max_count;
+    }
+
+    for (i = 0U; i < count; ++i) {
+        omc_u64 entry_off;
+        omc_u16 tag;
+
+        entry_off = count_off + i * entry_size;
+        tag = little_endian
+                  ? omc_xmp_write_read_u16le(bytes + (omc_size)entry_off)
+                  : omc_xmp_write_read_u16be(bytes + (omc_size)entry_off);
+        if (tag == 0xC612U) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static omc_scan_fmt
 omc_xmp_write_detect_format(const omc_u8* file_bytes, omc_size file_size)
 {
@@ -469,6 +566,9 @@ omc_xmp_write_detect_format(const omc_u8* file_bytes, omc_size file_size)
     if (file_size >= 8U
         && ((file_bytes[0] == 'I' && file_bytes[1] == 'I')
             || (file_bytes[0] == 'M' && file_bytes[1] == 'M'))) {
+        if (omc_xmp_write_tiff_has_dng_version(file_bytes, file_size)) {
+            return OMC_SCAN_FMT_DNG;
+        }
         return OMC_SCAN_FMT_TIFF;
     }
     if (file_size >= 12U && memcmp(file_bytes, "RIFF", 4U) == 0
@@ -2756,7 +2856,8 @@ omc_xmp_write_embedded(const omc_u8* file_bytes, omc_size file_size,
     }
     out_res->format = format;
     if (format != OMC_SCAN_FMT_JPEG && format != OMC_SCAN_FMT_PNG
-        && format != OMC_SCAN_FMT_TIFF && format != OMC_SCAN_FMT_WEBP
+        && format != OMC_SCAN_FMT_TIFF && format != OMC_SCAN_FMT_DNG
+        && format != OMC_SCAN_FMT_WEBP
         && format != OMC_SCAN_FMT_JP2 && format != OMC_SCAN_FMT_JXL
         && format != OMC_SCAN_FMT_HEIF
         && format != OMC_SCAN_FMT_AVIF) {
@@ -2799,7 +2900,7 @@ omc_xmp_write_embedded(const omc_u8* file_bytes, omc_size file_size,
         status = omc_xmp_write_rewrite_png(file_bytes, file_size, payload.data,
                                            payload.size, strip_existing_xmp,
                                            insert_xmp, out, out_res);
-    } else if (format == OMC_SCAN_FMT_TIFF) {
+    } else if (format == OMC_SCAN_FMT_TIFF || format == OMC_SCAN_FMT_DNG) {
         status = omc_xmp_write_rewrite_tiff(file_bytes, file_size, payload.data,
                                             payload.size, strip_existing_xmp,
                                             insert_xmp, out, out_res);

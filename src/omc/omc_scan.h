@@ -28,7 +28,8 @@ typedef enum omc_scan_fmt {
     OMC_SCAN_FMT_CRW = 11,
     OMC_SCAN_FMT_RAF = 12,
     OMC_SCAN_FMT_X3F = 13,
-    OMC_SCAN_FMT_EXR = 14
+    OMC_SCAN_FMT_EXR = 14,
+    OMC_SCAN_FMT_DNG = 15
 } omc_scan_fmt;
 
 typedef enum omc_blk_kind {

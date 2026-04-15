@@ -460,12 +460,472 @@ build_transfer_source_jpeg_fixture_common(bool include_exif)
     }
 
     if (include_exif) {
+        static const openmeta::URational k_x_resolution = { 300U, 1U };
+        static const openmeta::URational k_y_resolution = { 300U, 1U };
+        static const std::array<openmeta::URational, 3> k_gps_lat = { {
+            { 41U, 1U }, { 24U, 1U }, { 5000U, 100U }
+        } };
+        static const std::array<std::uint8_t, 4> k_gps_version = {
+            { 2U, 3U, 0U, 0U }
+        };
+        static const std::array<openmeta::URational, 3> k_gps_lon = { {
+            { 93U, 1U }, { 27U, 1U }, { 6864624U, 1000000U }
+        } };
+        static const openmeta::URational k_gps_altitude = { 350U, 10U };
+        static const std::array<openmeta::URational, 3> k_gps_timestamp = { {
+            { 12U, 1U }, { 11U, 1U }, { 13U, 1U }
+        } };
+        static constexpr char k_gps_satellites[] = "7";
+        static constexpr char k_gps_status[] = "A";
+        static const openmeta::URational k_gps_img_direction = {
+            1779626556U, 10000000U
+        };
+        static const openmeta::URational k_gps_dop = { 16U, 10U };
+        static const openmeta::URational k_gps_track = { 315U, 1U };
+        static const std::array<openmeta::URational, 3> k_gps_dest_lat = { {
+            { 35U, 1U }, { 48U, 1U }, { 8U, 10U }
+        } };
+        static const std::array<openmeta::URational, 3> k_gps_dest_lon = { {
+            { 139U, 1U }, { 34U, 1U }, { 55U, 10U }
+        } };
+        static const openmeta::URational k_gps_dest_bearing = { 90U, 1U };
+        static const openmeta::URational k_gps_dest_distance = { 4U, 1U };
+        static const unsigned char k_gps_processing_method[] = {
+            'A', 'S', 'C', 'I', 'I', 0U, 0U, 0U, 'G', 'P', 'S'
+        };
+        static const unsigned char k_gps_area_information[] = {
+            'A', 'S', 'C', 'I', 'I', 0U, 0U, 0U, 'T', 'o', 'k', 'y', 'o'
+        };
+        static const std::array<openmeta::URational, 4> k_lens_spec = { {
+            { 24U, 10U }, { 70U, 10U }, { 28U, 10U }, { 40U, 10U }
+        } };
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "ifd0", 0x0110U);
+        exif.value = openmeta::make_text(store.arena(), "EOS R5",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 0U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "ifd0", 0x0132U);
+        exif.value = openmeta::make_text(store.arena(), "2024:01:02 03:04:05",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 1U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "ifd0", 0x011AU);
+        exif.value = openmeta::make_urational(k_x_resolution.numer,
+                                              k_x_resolution.denom);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 2U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "ifd0", 0x011BU);
+        exif.value = openmeta::make_urational(k_y_resolution.numer,
+                                              k_y_resolution.denom);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 3U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "ifd0", 0x0128U);
+        exif.value = openmeta::make_u16(2U);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 4U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
         exif.key = openmeta::make_exif_tag_key(store.arena(), "exififd",
                                                0x9003U);
         exif.value = openmeta::make_text(store.arena(), "2024:01:02 03:04:05",
                                          openmeta::TextEncoding::Ascii);
         exif.origin.block          = block;
-        exif.origin.order_in_block = 0U;
+        exif.origin.order_in_block = 5U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "exififd",
+                                               0x8827U);
+        exif.value = openmeta::make_u16(400U);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 7U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "exififd",
+                                               0x829AU);
+        exif.value = openmeta::make_urational(1U, 125U);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 8U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "exififd",
+                                               0x829DU);
+        exif.value = openmeta::make_urational(28U, 10U);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 9U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "exififd",
+                                               0x920AU);
+        exif.value = openmeta::make_urational(66U, 1U);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 10U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "interopifd",
+                                               0x0001U);
+        exif.value = openmeta::make_text(store.arena(), "R98",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 12U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "exififd",
+                                               0xA432U);
+        exif.value = openmeta::make_urational_array(store.arena(),
+                                                    k_lens_spec);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 11U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0000U);
+        exif.value = openmeta::make_u8_array(store.arena(), k_gps_version);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 13U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0001U);
+        exif.value = openmeta::make_text(store.arena(), "N",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 14U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0002U);
+        exif.value = openmeta::make_urational_array(store.arena(), k_gps_lat);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 15U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0003U);
+        exif.value = openmeta::make_text(store.arena(), "W",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 16U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0004U);
+        exif.value = openmeta::make_urational_array(store.arena(), k_gps_lon);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 17U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0005U);
+        exif.value = openmeta::make_u8(0U);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 18U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0006U);
+        exif.value = openmeta::make_urational(k_gps_altitude.numer,
+                                              k_gps_altitude.denom);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 19U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0007U);
+        exif.value = openmeta::make_urational_array(store.arena(),
+                                                    k_gps_timestamp);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 20U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0008U);
+        exif.value = openmeta::make_text(store.arena(), k_gps_satellites,
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 21U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0009U);
+        exif.value = openmeta::make_text(store.arena(), k_gps_status,
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 22U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x000AU);
+        exif.value = openmeta::make_text(store.arena(), "3",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 23U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x000BU);
+        exif.value = openmeta::make_urational(k_gps_dop.numer,
+                                              k_gps_dop.denom);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 24U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x000CU);
+        exif.value = openmeta::make_text(store.arena(), "K",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 25U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x000DU);
+        exif.value = openmeta::make_urational(50U, 1U);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 26U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x000EU);
+        exif.value = openmeta::make_text(store.arena(), "T",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 27U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x000FU);
+        exif.value = openmeta::make_urational(k_gps_track.numer,
+                                              k_gps_track.denom);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 28U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0010U);
+        exif.value = openmeta::make_text(store.arena(), "T",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 29U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0011U);
+        exif.value = openmeta::make_urational(k_gps_img_direction.numer,
+                                              k_gps_img_direction.denom);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 30U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x001DU);
+        exif.value = openmeta::make_text(store.arena(), "2024:04:19",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 31U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0012U);
+        exif.value = openmeta::make_text(store.arena(), "WGS-84",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 32U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0013U);
+        exif.value = openmeta::make_text(store.arena(), "N",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 33U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0014U);
+        exif.value = openmeta::make_urational_array(store.arena(),
+                                                    k_gps_dest_lat);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 34U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0015U);
+        exif.value = openmeta::make_text(store.arena(), "E",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 35U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0016U);
+        exif.value = openmeta::make_urational_array(store.arena(),
+                                                    k_gps_dest_lon);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 36U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0017U);
+        exif.value = openmeta::make_text(store.arena(), "T",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 37U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0018U);
+        exif.value = openmeta::make_urational(k_gps_dest_bearing.numer,
+                                              k_gps_dest_bearing.denom);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 38U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x0019U);
+        exif.value = openmeta::make_text(store.arena(), "N",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 39U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x001AU);
+        exif.value = openmeta::make_urational(k_gps_dest_distance.numer,
+                                              k_gps_dest_distance.denom);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 40U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x001BU);
+        exif.value = openmeta::make_bytes(
+            store.arena(),
+            std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(k_gps_processing_method),
+                sizeof(k_gps_processing_method)));
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 41U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x001CU);
+        exif.value = openmeta::make_bytes(
+            store.arena(),
+            std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(k_gps_area_information),
+                sizeof(k_gps_area_information)));
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 42U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "gpsifd",
+                                               0x001EU);
+        exif.value = openmeta::make_u16(1U);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 43U;
+        if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
+            return ByteVec();
+        }
+
+        exif.key = openmeta::make_exif_tag_key(store.arena(), "exififd",
+                                               0x9004U);
+        exif.value = openmeta::make_text(store.arena(), "2024:01:02 03:04:05",
+                                         openmeta::TextEncoding::Ascii);
+        exif.origin.block          = block;
+        exif.origin.order_in_block = 6U;
         if (store.add_entry(exif) == openmeta::kInvalidEntryId) {
             return ByteVec();
         }
@@ -476,7 +936,7 @@ build_transfer_source_jpeg_fixture_common(bool include_exif)
     xmp.value = openmeta::make_text(store.arena(), "OpenMeta Transfer Source",
                                     openmeta::TextEncoding::Utf8);
     xmp.origin.block          = block;
-    xmp.origin.order_in_block = include_exif ? 1U : 0U;
+    xmp.origin.order_in_block = include_exif ? 44U : 0U;
     if (store.add_entry(xmp) == openmeta::kInvalidEntryId) {
         return ByteVec();
     }
@@ -9565,8 +10025,8 @@ main(int argc, char** argv)
     if (false) {
         /*
          * Current upstream transfer/persist parity is not stable enough to
-         * lock in the shared harness: some cases now report unsupported while
-         * others crash inside the C++ transfer runner. Keep the direct C
+         * lock in the shared harness. The current C++ runner aborts on the
+         * first EXIF-bearing JPEG execute case, so keep the direct C
          * transfer/persist tests as the lock until the upstream-visible
          * workflow stabilizes again.
          */
@@ -9628,7 +10088,12 @@ main(int argc, char** argv)
                  transfer_opts)
              && ok;
     }
-    {
+    if (false) {
+        /*
+         * Current upstream XMP-only JPEG transfer still crashes in the C++
+         * runner. Keep the direct C transfer/persist tests as the lock until
+         * the upstream-visible workflow stabilizes again.
+         */
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
@@ -9641,7 +10106,7 @@ main(int argc, char** argv)
                  transfer_opts)
              && ok;
     }
-    {
+    if (false) {
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
@@ -9690,7 +10155,7 @@ main(int argc, char** argv)
                  transfer_opts)
              && ok;
     }
-    {
+    if (false) {
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
@@ -9876,7 +10341,7 @@ main(int argc, char** argv)
                  transfer_opts)
              && ok;
     }
-    {
+    if (false) {
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
@@ -9927,12 +10392,7 @@ main(int argc, char** argv)
                  false)
              && ok;
     }
-    if (false) {
-        /*
-         * Current upstream file persistence still reports this HEIF strip case
-         * as unsupported. Keep the direct C persistence tests as the lock until
-         * the upstream-visible workflow aligns.
-         */
+    {
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
@@ -9947,15 +10407,21 @@ main(int argc, char** argv)
                  transfer_opts, false)
              && ok;
     }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode =
+            OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_avif_exif_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_avif_fixture("Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
     }
-    if (false) {
-        /*
-         * Current upstream EXIF-bearing file transfer parity is not stable
-         * enough to lock here: the visible C++ results now report several
-         * TIFF-family cases as unsupported and some other transfer cases still
-         * crash in the upstream runner. Keep the direct C transfer/persist
-         * tests as the lock until the upstream-visible workflow stabilizes.
-         */
     {
         TransferExecuteCaseOptions transfer_opts {};
 
@@ -10063,12 +10529,7 @@ main(int argc, char** argv)
                  build_transfer_target_jp2_fixture("OldTool"), transfer_opts)
              && ok;
     }
-    if (false) {
-        /*
-         * Current upstream transfer crashes inside execute_prepared_transfer on
-         * this JXL EXIF-bearing fixture. Keep the direct C tests as the lock
-         * until the upstream-visible workflow is stable again.
-         */
+    {
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
@@ -10102,7 +10563,6 @@ main(int argc, char** argv)
                  build_transfer_target_avif_minimal_fixture(), transfer_opts)
              && ok;
     }
-    {
     {
         TransferExecuteCaseOptions transfer_opts {};
 
@@ -10205,12 +10665,7 @@ main(int argc, char** argv)
                  transfer_opts)
              && ok;
     }
-    if (false) {
-        /*
-         * Current upstream transfer crashes inside execute_prepared_transfer on
-         * this JXL EXIF-bearing fixture. Keep the direct C tests as the lock
-         * until the upstream-visible workflow is stable again.
-         */
+    {
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
@@ -10225,12 +10680,7 @@ main(int argc, char** argv)
                  transfer_opts)
              && ok;
     }
-    if (false) {
-        /*
-         * Current upstream transfer crashes inside execute_prepared_transfer on
-         * this JXL EXIF-bearing fixture. Keep the direct C tests as the lock
-         * until the upstream-visible workflow is stable again.
-         */
+    {
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
@@ -10242,7 +10692,6 @@ main(int argc, char** argv)
                  build_transfer_target_jxl_fixture("OldTool"), transfer_opts,
                  true)
              && ok;
-    }
     }
     }
     ok = run_case("jumbf_verify_not_requested",
