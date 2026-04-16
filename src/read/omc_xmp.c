@@ -117,6 +117,38 @@ omc_xmp_opts_init(omc_xmp_opts* opts)
 }
 
 static void
+omc_xmp_set_res(omc_xmp_res* res, omc_xmp_status status)
+{
+    if (res == (omc_xmp_res*)0) {
+        return;
+    }
+    res->status = status;
+    res->entries_decoded = 0U;
+}
+
+static int
+omc_xmp_u32_mul_add_fits(omc_u32 value, omc_u32 mul, omc_u32 add,
+                         omc_u32* out_value)
+{
+    if (out_value == (omc_u32*)0) {
+        return 0;
+    }
+    if (mul != 0U
+        && value > (((omc_u32)(~(omc_u32)0) - add) / mul)) {
+        return 0;
+    }
+
+    *out_value = value * mul + add;
+    return 1;
+}
+
+static int
+omc_xmp_alloc_size_fits(omc_size count, omc_size elem_size)
+{
+    return elem_size == 0U || count <= ((omc_size)(~(omc_size)0) / elem_size);
+}
+
+static void
 omc_xmp_mark_malformed(omc_xmp_ctx* ctx)
 {
     if (ctx == (omc_xmp_ctx*)0) {
@@ -1090,8 +1122,21 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
     }
 
     ctx->frame_cap = ctx->opts.limits.max_depth;
-    ns_cap = ctx->frame_cap * 8U + 32U;
-    path_cap = ctx->opts.limits.max_path_bytes + 32U;
+    if (!omc_xmp_u32_mul_add_fits(ctx->frame_cap, 8U, 32U, &ns_cap)
+        || !omc_xmp_u32_mul_add_fits(ctx->opts.limits.max_path_bytes, 1U,
+                                     32U, &path_cap)) {
+        omc_xmp_set_res(&ctx->res, OMC_XMP_LIMIT);
+        return 0;
+    }
+    if (!omc_xmp_alloc_size_fits((omc_size)ctx->frame_cap,
+                                 sizeof(*ctx->frames))
+        || !omc_xmp_alloc_size_fits((omc_size)ns_cap,
+                                    sizeof(*ctx->ns_decls))
+        || !omc_xmp_alloc_size_fits((omc_size)path_cap,
+                                    sizeof(*ctx->path_buf))) {
+        omc_xmp_set_res(&ctx->res, OMC_XMP_LIMIT);
+        return 0;
+    }
 
     ctx->frames = (omc_xmp_frame*)malloc((omc_size)ctx->frame_cap
                                          * sizeof(*ctx->frames));
@@ -1103,7 +1148,7 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
 
     if (ctx->frames == (omc_xmp_frame*)0 || ctx->ns_decls == (omc_xmp_ns_decl*)0
         || ctx->path_buf == (char*)0) {
-        ctx->res.status = OMC_XMP_NOMEM;
+        omc_xmp_set_res(&ctx->res, OMC_XMP_NOMEM);
         return 0;
     }
     return 1;

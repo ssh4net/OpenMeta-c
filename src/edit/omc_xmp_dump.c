@@ -26,8 +26,21 @@ typedef enum omc_xmp_dump_pass {
 typedef enum omc_xmp_dump_container_kind {
     OMC_XMP_DUMP_CONTAINER_NONE = 0,
     OMC_XMP_DUMP_CONTAINER_SEQ = 1,
-    OMC_XMP_DUMP_CONTAINER_BAG = 2
+    OMC_XMP_DUMP_CONTAINER_BAG = 2,
+    OMC_XMP_DUMP_CONTAINER_ALT = 3,
+    OMC_XMP_DUMP_CONTAINER_STRUCT_RESOURCE = 4,
+    OMC_XMP_DUMP_CONTAINER_STRUCT_SEQ = 5,
+    OMC_XMP_DUMP_CONTAINER_STRUCT_BAG = 6
 } omc_xmp_dump_container_kind;
+
+#define OMC_XMP_DUMP_MAX_STRUCT_SEG 4U
+
+typedef struct omc_xmp_dump_path_seg {
+    omc_xmp_ns_view prefix;
+    omc_xmp_ns_view name;
+    omc_u32 index;
+    omc_xmp_ns_view lang;
+} omc_xmp_dump_path_seg;
 
 typedef enum omc_xmp_dump_value_mode {
     OMC_XMP_DUMP_VALUE_NORMAL = 0,
@@ -58,6 +71,9 @@ typedef struct omc_xmp_dump_property {
     omc_xmp_dump_value_mode value_mode;
     omc_xmp_dump_container_kind container_kind;
     omc_u32 item_index;
+    omc_xmp_ns_view lang;
+    omc_u32 struct_seg_count;
+    omc_xmp_dump_path_seg struct_seg[OMC_XMP_DUMP_MAX_STRUCT_SEG];
 } omc_xmp_dump_property;
 
 static int
@@ -66,14 +82,32 @@ omc_xmp_dump_property_has_output(const omc_xmp_dump_property* prop);
 static int
 omc_xmp_dump_rational_to_double(omc_urational r, double* out_value);
 
+static int
+omc_xmp_dump_schema_from_prefix(omc_xmp_ns_view prefix,
+                                omc_xmp_ns_view* out_schema);
+
 static const char k_xmp_ns_xap[] = "http://ns.adobe.com/xap/1.0/";
 static const char k_xmp_ns_dc[] = "http://purl.org/dc/elements/1.1/";
 static const char k_xmp_ns_ps[] = "http://ns.adobe.com/photoshop/1.0/";
 static const char k_xmp_ns_exif[] = "http://ns.adobe.com/exif/1.0/";
 static const char k_xmp_ns_tiff[] = "http://ns.adobe.com/tiff/1.0/";
 static const char k_xmp_ns_mm[] = "http://ns.adobe.com/xap/1.0/mm/";
+static const char k_xmp_ns_st_ref[]
+    = "http://ns.adobe.com/xap/1.0/sType/ResourceRef#";
+static const char k_xmp_ns_st_evt[]
+    = "http://ns.adobe.com/xap/1.0/sType/ResourceEvent#";
+static const char k_xmp_ns_st_ver[]
+    = "http://ns.adobe.com/xap/1.0/sType/Version#";
+static const char k_xmp_ns_st_mfs[]
+    = "http://ns.adobe.com/xap/1.0/sType/ManifestItem#";
+static const char k_xmp_ns_rights[] = "http://ns.adobe.com/xap/1.0/rights/";
+static const char k_xmp_ns_pdf[] = "http://ns.adobe.com/pdf/1.3/";
+static const char k_xmp_ns_lr[] = "http://ns.adobe.com/lightroom/1.0/";
+static const char k_xmp_ns_plus[] = "http://ns.useplus.org/ldf/xmp/1.0/";
 static const char k_xmp_ns_iptc4xmp[]
     = "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/";
+static const char k_xmp_ns_iptc4xmp_ext[]
+    = "http://iptc.org/std/Iptc4xmpExt/2008-02-29/";
 
 static const char k_prop_make[] = "Make";
 static const char k_prop_model[] = "Model";
@@ -166,6 +200,7 @@ static const char k_prop_xp_keywords[] = "XPKeywords";
 static const char k_prop_xp_subject[] = "XPSubject";
 static const char k_prop_title[] = "title";
 static const char k_prop_description[] = "description";
+static const char k_prop_rights[] = "rights";
 static const char k_prop_creator[] = "creator";
 static const char k_prop_subject[] = "subject";
 static const char k_prop_category[] = "Category";
@@ -179,6 +214,8 @@ static const char k_prop_headline[] = "Headline";
 static const char k_prop_credit[] = "Credit";
 static const char k_prop_source[] = "Source";
 static const char k_prop_caption_writer[] = "CaptionWriter";
+static const char k_prop_owner[] = "Owner";
+static const char k_prop_hierarchical_subject[] = "hierarchicalSubject";
 static const char k_prop_maker_note[] = "MakerNote";
 static const char k_prop_dng_private_data[] = "DNGPrivateData";
 static void
@@ -396,7 +433,12 @@ omc_xmp_dump_existing_container_kind(omc_xmp_ns_view schema_ns,
         return OMC_XMP_DUMP_CONTAINER_SEQ;
     }
     if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_dc)
-        && omc_xmp_dump_view_equal_lit(property_name, k_prop_subject)) {
+        && (omc_xmp_dump_view_equal_lit(property_name, k_prop_subject)
+            || omc_xmp_dump_view_equal_lit(property_name, "language")
+            || omc_xmp_dump_view_equal_lit(property_name, "contributor")
+            || omc_xmp_dump_view_equal_lit(property_name, "publisher")
+            || omc_xmp_dump_view_equal_lit(property_name, "relation")
+            || omc_xmp_dump_view_equal_lit(property_name, "type"))) {
         return OMC_XMP_DUMP_CONTAINER_BAG;
     }
     if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_ps)
@@ -404,7 +446,42 @@ omc_xmp_dump_existing_container_kind(omc_xmp_ns_view schema_ns,
                                        k_prop_supplemental_categories)) {
         return OMC_XMP_DUMP_CONTAINER_BAG;
     }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_xap)
+        && (omc_xmp_dump_view_equal_lit(property_name, "Identifier")
+            || omc_xmp_dump_view_equal_lit(property_name, "Advisory"))) {
+        return OMC_XMP_DUMP_CONTAINER_BAG;
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_rights)
+        && omc_xmp_dump_view_equal_lit(property_name, k_prop_owner)) {
+        return OMC_XMP_DUMP_CONTAINER_BAG;
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_lr)
+        && omc_xmp_dump_view_equal_lit(property_name,
+                                       k_prop_hierarchical_subject)) {
+        return OMC_XMP_DUMP_CONTAINER_BAG;
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_mm)
+        && (omc_xmp_dump_view_equal_lit(property_name, "Ingredients")
+            || omc_xmp_dump_view_equal_lit(property_name, "Pantry"))) {
+        return OMC_XMP_DUMP_CONTAINER_BAG;
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_plus)
+        && omc_xmp_dump_view_equal_lit(property_name,
+                                       "ImageAlterationConstraints")) {
+        return OMC_XMP_DUMP_CONTAINER_BAG;
+    }
     return OMC_XMP_DUMP_CONTAINER_SEQ;
+}
+
+static omc_xmp_dump_container_kind
+omc_xmp_dump_structured_root_container_kind(omc_xmp_ns_view schema_ns,
+                                            omc_xmp_ns_view property_name)
+{
+    if (omc_xmp_dump_existing_container_kind(schema_ns, property_name)
+        == OMC_XMP_DUMP_CONTAINER_BAG) {
+        return OMC_XMP_DUMP_CONTAINER_STRUCT_BAG;
+    }
+    return OMC_XMP_DUMP_CONTAINER_STRUCT_SEQ;
 }
 
 static int
@@ -482,6 +559,411 @@ omc_xmp_dump_parse_indexed_property_name(omc_xmp_ns_view property_path,
         *out_index = normalized;
     }
     return 1;
+}
+
+static int
+omc_xmp_dump_parse_lang_alt_property_name(omc_xmp_ns_view property_path,
+                                          omc_xmp_ns_view* out_base_name,
+                                          omc_xmp_ns_view* out_lang)
+{
+    static const char k_lang_prefix[] = "[@xml:lang=";
+    omc_size prefix_size;
+    omc_size i;
+
+    if (out_base_name == (omc_xmp_ns_view*)0
+        || out_lang == (omc_xmp_ns_view*)0) {
+        return 0;
+    }
+
+    out_base_name->data = (const omc_u8*)0;
+    out_base_name->size = 0U;
+    out_lang->data = (const omc_u8*)0;
+    out_lang->size = 0U;
+
+    if (property_path.data == (const omc_u8*)0 || property_path.size < 15U
+        || property_path.data[property_path.size - 1U] != (omc_u8)']') {
+        return 0;
+    }
+
+    prefix_size = sizeof(k_lang_prefix) - 1U;
+    for (i = 0U; i + prefix_size < property_path.size; ++i) {
+        if (property_path.data[i] != (omc_u8)'[') {
+            continue;
+        }
+        if (memcmp(property_path.data + i, k_lang_prefix, prefix_size) != 0) {
+            continue;
+        }
+        if (i == 0U) {
+            return 0;
+        }
+        out_base_name->data = property_path.data;
+        out_base_name->size = i;
+        if (!omc_xmp_dump_is_simple_name(*out_base_name)) {
+            return 0;
+        }
+        out_lang->data = property_path.data + i + prefix_size;
+        out_lang->size = property_path.size - (i + prefix_size) - 1U;
+        if (out_lang->size == 0U) {
+            return 0;
+        }
+        return 1;
+    }
+
+    return 0;
+}
+
+static int
+omc_xmp_dump_parse_struct_segment(omc_xmp_ns_view segment,
+                                  omc_xmp_dump_path_seg* out_seg)
+{
+    static const char k_lang_prefix[] = "[@xml:lang=";
+    omc_xmp_ns_view base_name;
+    omc_size i;
+    omc_size prefix_size;
+
+    if (out_seg == (omc_xmp_dump_path_seg*)0
+        || segment.data == (const omc_u8*)0 || segment.size == 0U) {
+        return 0;
+    }
+
+    out_seg->prefix.data = (const omc_u8*)0;
+    out_seg->prefix.size = 0U;
+    out_seg->name = segment;
+    out_seg->index = 0U;
+    out_seg->lang.data = (const omc_u8*)0;
+    out_seg->lang.size = 0U;
+
+    base_name = segment;
+    prefix_size = sizeof(k_lang_prefix) - 1U;
+    if (segment.size >= prefix_size + 2U
+        && segment.data[segment.size - 1U] == (omc_u8)']') {
+        for (i = 0U; i + prefix_size < segment.size; ++i) {
+            if (segment.data[i] != (omc_u8)'[') {
+                continue;
+            }
+            if (memcmp(segment.data + i, k_lang_prefix, prefix_size) != 0) {
+                continue;
+            }
+            if (i == 0U) {
+                return 0;
+            }
+            base_name.data = segment.data;
+            base_name.size = i;
+            out_seg->lang.data = segment.data + i + prefix_size;
+            out_seg->lang.size = segment.size - (i + prefix_size) - 1U;
+            if (out_seg->lang.size == 0U) {
+                return 0;
+            }
+            break;
+        }
+    }
+
+    if (out_seg->lang.size == 0U && segment.size >= 3U
+        && segment.data[segment.size - 1U] == (omc_u8)']') {
+        omc_size open_pos;
+        omc_u32 index;
+        int saw_digit;
+
+        open_pos = segment.size - 2U;
+        saw_digit = 0;
+        index = 0U;
+        while (open_pos < segment.size
+               && segment.data[open_pos] != (omc_u8)'[') {
+            omc_u8 c;
+
+            c = segment.data[open_pos];
+            if (c < (omc_u8)'0' || c > (omc_u8)'9') {
+                saw_digit = 0;
+                break;
+            }
+            saw_digit = 1;
+            if (open_pos == 0U) {
+                break;
+            }
+            open_pos -= 1U;
+        }
+        if (saw_digit && open_pos < segment.size
+            && segment.data[open_pos] == (omc_u8)'[' && open_pos != 0U) {
+            omc_size p;
+
+            index = 0U;
+            for (p = open_pos + 1U; p + 1U < segment.size; ++p) {
+                index = index * 10U
+                        + (omc_u32)(segment.data[p] - (omc_u8)'0');
+            }
+            if (index == 0U) {
+                return 0;
+            }
+            base_name.data = segment.data;
+            base_name.size = open_pos;
+            out_seg->index = index;
+        }
+    }
+
+    out_seg->name = base_name;
+    for (i = 0U; i < base_name.size; ++i) {
+        if (base_name.data[i] == (omc_u8)':') {
+            if (i == 0U || i + 1U >= out_seg->name.size) {
+                return 0;
+            }
+            out_seg->prefix.data = base_name.data;
+            out_seg->prefix.size = i;
+            out_seg->name.data = base_name.data + i + 1U;
+            out_seg->name.size = base_name.size - i - 1U;
+            if (!omc_xmp_dump_is_simple_name(out_seg->prefix)
+                || !omc_xmp_dump_is_simple_name(out_seg->name)) {
+                return 0;
+            }
+            break;
+        }
+    }
+
+    if (out_seg->prefix.size == 0U
+        && !omc_xmp_dump_is_simple_name(out_seg->name)) {
+        return 0;
+    }
+    return omc_xmp_dump_is_simple_name(out_seg->name);
+}
+
+static int
+omc_xmp_dump_parse_structured_property_path(omc_xmp_ns_view property_path,
+                                            omc_u32* out_count,
+                                            omc_xmp_dump_path_seg* out_seg)
+{
+    omc_size start;
+    omc_u32 count;
+
+    if (out_count == (omc_u32*)0 || out_seg == (omc_xmp_dump_path_seg*)0
+        || property_path.data == (const omc_u8*)0 || property_path.size == 0U) {
+        return 0;
+    }
+
+    *out_count = 0U;
+    start = 0U;
+    count = 0U;
+    while (start < property_path.size) {
+        omc_size end;
+        omc_xmp_ns_view seg;
+
+        if (count >= OMC_XMP_DUMP_MAX_STRUCT_SEG) {
+            return 0;
+        }
+        end = start;
+        while (end < property_path.size
+               && property_path.data[end] != (omc_u8)'/') {
+            end += 1U;
+        }
+        if (end == start) {
+            return 0;
+        }
+        seg.data = property_path.data + start;
+        seg.size = end - start;
+        if (!omc_xmp_dump_parse_struct_segment(seg, &out_seg[count])) {
+            return 0;
+        }
+        count += 1U;
+        if (end == property_path.size) {
+            break;
+        }
+        start = end + 1U;
+    }
+
+    if (count < 2U) {
+        return 0;
+    }
+    *out_count = count;
+    return 1;
+}
+
+static int
+omc_xmp_dump_path_seg_equal(const omc_xmp_dump_path_seg* a,
+                            const omc_xmp_dump_path_seg* b)
+{
+    return omc_xmp_dump_views_equal(a->prefix, b->prefix)
+           && omc_xmp_dump_views_equal(a->name, b->name)
+           && a->index == b->index
+           && omc_xmp_dump_views_equal(a->lang, b->lang);
+}
+
+static int
+omc_xmp_dump_path_seg_name_equal(const omc_xmp_dump_path_seg* a,
+                                 const omc_xmp_dump_path_seg* b)
+{
+    return omc_xmp_dump_views_equal(a->prefix, b->prefix)
+           && omc_xmp_dump_views_equal(a->name, b->name);
+}
+
+static int
+omc_xmp_dump_existing_namespace_is_standard(omc_xmp_ns_view schema_ns)
+{
+    return omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_xap)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_dc)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_ps)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_exif)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_tiff)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_mm)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_iptc4xmp)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_iptc4xmp_ext)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_rights)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_pdf)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_lr)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_plus);
+}
+
+static int
+omc_xmp_dump_existing_namespace_allowed(omc_xmp_ns_view schema_ns,
+                                        const omc_xmp_sidecar_opts* opts)
+{
+    if (omc_xmp_dump_existing_namespace_is_standard(schema_ns)) {
+        return 1;
+    }
+    return opts != (const omc_xmp_sidecar_opts*)0
+           && opts->existing_namespace_policy
+                  == OMC_XMP_NS_PRESERVE_CUSTOM;
+}
+
+static int
+omc_xmp_dump_existing_promotes_scalar_to_lang_alt(omc_xmp_ns_view schema_ns,
+                                                  omc_xmp_ns_view base_name)
+{
+    if (!omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_dc)) {
+        return 0;
+    }
+    return omc_xmp_dump_view_equal_lit(base_name, k_prop_title)
+           || omc_xmp_dump_view_equal_lit(base_name, k_prop_description)
+           || omc_xmp_dump_view_equal_lit(base_name, k_prop_rights);
+}
+
+static int
+omc_xmp_dump_existing_promotes_scalar_to_indexed(omc_xmp_ns_view schema_ns,
+                                                 omc_xmp_ns_view base_name)
+{
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_dc)) {
+        return omc_xmp_dump_view_equal_lit(base_name, k_prop_subject)
+               || omc_xmp_dump_view_equal_lit(base_name, k_prop_creator);
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_ps)) {
+        return omc_xmp_dump_view_equal_lit(
+            base_name, k_prop_supplemental_categories);
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_rights)) {
+        return omc_xmp_dump_view_equal_lit(base_name, k_prop_owner);
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_lr)) {
+        return omc_xmp_dump_view_equal_lit(base_name,
+                                           k_prop_hierarchical_subject);
+    }
+    return 0;
+}
+
+static int
+omc_xmp_dump_structured_child_promotes_scalar_to_lang_alt(
+    omc_xmp_ns_view schema_ns, omc_xmp_ns_view child_name)
+{
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_iptc4xmp)) {
+        return omc_xmp_dump_view_equal_lit(child_name, "CiAdrCity");
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_iptc4xmp_ext)) {
+        return omc_xmp_dump_view_equal_lit(child_name, "Name")
+               || omc_xmp_dump_view_equal_lit(child_name, "PersonName")
+               || omc_xmp_dump_view_equal_lit(child_name, "ProductName")
+               || omc_xmp_dump_view_equal_lit(child_name,
+                                              "ProductDescription")
+               || omc_xmp_dump_view_equal_lit(child_name, "CvTermName")
+               || omc_xmp_dump_view_equal_lit(child_name, "AOTitle")
+               || omc_xmp_dump_view_equal_lit(child_name, "LocationName");
+    }
+    return 0;
+}
+
+static int
+omc_xmp_dump_structured_child_promotes_scalar_to_indexed(
+    omc_xmp_ns_view schema_ns, omc_xmp_ns_view child_name)
+{
+    if (!omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_iptc4xmp_ext)) {
+        return 0;
+    }
+    return omc_xmp_dump_view_equal_lit(child_name, "Role")
+           || omc_xmp_dump_view_equal_lit(child_name, "LocationId")
+           || omc_xmp_dump_view_equal_lit(child_name, "PersonId")
+           || omc_xmp_dump_view_equal_lit(child_name, "AOCreator")
+           || omc_xmp_dump_view_equal_lit(child_name, "AOStylePeriod")
+           || omc_xmp_dump_view_equal_lit(child_name, "LinkQualifier");
+}
+
+static int
+omc_xmp_dump_existing_has_explicit_lang_alt_base(const omc_store* store,
+                                                 omc_xmp_ns_view schema_ns,
+                                                 omc_xmp_ns_view base_name)
+{
+    omc_size i;
+
+    if (store == (const omc_store*)0) {
+        return 0;
+    }
+    for (i = 0U; i < store->entry_count; ++i) {
+        omc_xmp_ns_view entry_schema;
+        omc_xmp_ns_view path;
+        omc_xmp_ns_view parsed_base;
+        omc_xmp_ns_view parsed_lang;
+
+        if (store->entries[i].key.kind != OMC_KEY_XMP_PROPERTY) {
+            continue;
+        }
+        entry_schema = omc_xmp_dump_view_from_ref(
+            &store->arena, store->entries[i].key.u.xmp_property.schema_ns);
+        if (!omc_xmp_dump_views_equal(entry_schema, schema_ns)) {
+            continue;
+        }
+        path = omc_xmp_dump_view_from_ref(
+            &store->arena, store->entries[i].key.u.xmp_property.property_path);
+        if (!omc_xmp_dump_parse_lang_alt_property_name(path, &parsed_base,
+                                                       &parsed_lang)) {
+            continue;
+        }
+        if (omc_xmp_dump_views_equal(parsed_base, base_name)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
+omc_xmp_dump_existing_has_explicit_indexed_base(const omc_store* store,
+                                                omc_xmp_ns_view schema_ns,
+                                                omc_xmp_ns_view base_name)
+{
+    omc_size i;
+
+    if (store == (const omc_store*)0) {
+        return 0;
+    }
+    for (i = 0U; i < store->entry_count; ++i) {
+        omc_xmp_ns_view entry_schema;
+        omc_xmp_ns_view path;
+        omc_xmp_ns_view parsed_base;
+        omc_u32 parsed_index;
+
+        if (store->entries[i].key.kind != OMC_KEY_XMP_PROPERTY) {
+            continue;
+        }
+        entry_schema = omc_xmp_dump_view_from_ref(
+            &store->arena, store->entries[i].key.u.xmp_property.schema_ns);
+        if (!omc_xmp_dump_views_equal(entry_schema, schema_ns)) {
+            continue;
+        }
+        path = omc_xmp_dump_view_from_ref(
+            &store->arena, store->entries[i].key.u.xmp_property.property_path);
+        if (!omc_xmp_dump_parse_indexed_property_name(path, &parsed_base,
+                                                      &parsed_index)
+            || parsed_index == 0U) {
+            continue;
+        }
+        if (omc_xmp_dump_views_equal(parsed_base, base_name)) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static int
@@ -751,6 +1233,169 @@ omc_xmp_dump_rational_triplet_supported(const omc_val* value,
 }
 
 static int
+omc_xmp_dump_existing_generated_replacement_exists(const omc_store* store,
+                                                   omc_size skip_index,
+                                                   const omc_xmp_sidecar_opts* opts,
+                                                   omc_xmp_ns_view schema_ns,
+                                                   omc_xmp_ns_view property_name);
+
+static int
+omc_xmp_dump_structured_schema_supported(omc_xmp_ns_view schema_ns)
+{
+    return omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_iptc4xmp)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_iptc4xmp_ext)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_mm)
+           || omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_plus);
+}
+
+static int
+omc_xmp_dump_existing_has_structured_descendants(const omc_store* store,
+                                                 omc_xmp_ns_view schema_ns,
+                                                 omc_xmp_ns_view base_name)
+{
+    omc_size i;
+
+    if (store == (const omc_store*)0) {
+        return 0;
+    }
+    for (i = 0U; i < store->entry_count; ++i) {
+        omc_xmp_ns_view entry_schema;
+        omc_xmp_ns_view path;
+        omc_u32 seg_count;
+        omc_xmp_dump_path_seg seg[OMC_XMP_DUMP_MAX_STRUCT_SEG];
+
+        if (store->entries[i].key.kind != OMC_KEY_XMP_PROPERTY) {
+            continue;
+        }
+        entry_schema = omc_xmp_dump_view_from_ref(
+            &store->arena, store->entries[i].key.u.xmp_property.schema_ns);
+        if (!omc_xmp_dump_views_equal(entry_schema, schema_ns)) {
+            continue;
+        }
+        path = omc_xmp_dump_view_from_ref(
+            &store->arena, store->entries[i].key.u.xmp_property.property_path);
+        if (omc_xmp_dump_parse_structured_property_path(path, &seg_count, seg)
+            && omc_xmp_dump_views_equal(seg[0].name, base_name)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
+omc_xmp_dump_structured_path_shadowed(const omc_store* store, omc_size skip_index,
+                                      omc_xmp_ns_view schema_ns,
+                                      omc_u32 seg_count,
+                                      const omc_xmp_dump_path_seg* seg)
+{
+    omc_size i;
+
+    if (store == (const omc_store*)0) {
+        return 0;
+    }
+
+    for (i = 0U; i < store->entry_count; ++i) {
+        omc_xmp_ns_view entry_schema;
+        omc_xmp_ns_view path;
+        omc_u32 other_count;
+        omc_xmp_dump_path_seg other[OMC_XMP_DUMP_MAX_STRUCT_SEG];
+        omc_u32 k;
+        int prefix_ok;
+
+        if (i == skip_index || store->entries[i].key.kind != OMC_KEY_XMP_PROPERTY) {
+            continue;
+        }
+        entry_schema = omc_xmp_dump_view_from_ref(
+            &store->arena, store->entries[i].key.u.xmp_property.schema_ns);
+        if (!omc_xmp_dump_views_equal(entry_schema, schema_ns)) {
+            continue;
+        }
+        path = omc_xmp_dump_view_from_ref(
+            &store->arena, store->entries[i].key.u.xmp_property.property_path);
+        if (!omc_xmp_dump_parse_structured_property_path(path, &other_count,
+                                                         other)) {
+            continue;
+        }
+
+        if (other_count == seg_count) {
+            prefix_ok = 1;
+            for (k = 0U; k < seg_count; ++k) {
+                if (!omc_xmp_dump_views_equal(seg[k].prefix, other[k].prefix)
+                    || !omc_xmp_dump_views_equal(seg[k].name, other[k].name)) {
+                    prefix_ok = 0;
+                    break;
+                }
+            }
+            if (!prefix_ok) {
+                continue;
+            }
+            for (k = 0U; k < seg_count; ++k) {
+                if (seg[k].index == 0U && other[k].index != 0U) {
+                    return 1;
+                }
+                if (seg[k].lang.size == 0U && other[k].lang.size != 0U) {
+                    return 1;
+                }
+            }
+            continue;
+        }
+
+        if (other_count <= seg_count) {
+            continue;
+        }
+        prefix_ok = 1;
+        for (k = 0U; k < seg_count; ++k) {
+            if (!omc_xmp_dump_path_seg_equal(&seg[k], &other[k])) {
+                prefix_ok = 0;
+                break;
+            }
+        }
+        if (prefix_ok) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int
+omc_xmp_dump_structured_root_has_indexed(const omc_store* store,
+                                         omc_xmp_ns_view schema_ns,
+                                         omc_xmp_ns_view root_name)
+{
+    omc_size i;
+
+    if (store == (const omc_store*)0) {
+        return 0;
+    }
+    for (i = 0U; i < store->entry_count; ++i) {
+        omc_xmp_ns_view entry_schema;
+        omc_xmp_ns_view path;
+        omc_u32 count;
+        omc_xmp_dump_path_seg seg[OMC_XMP_DUMP_MAX_STRUCT_SEG];
+
+        if (store->entries[i].key.kind != OMC_KEY_XMP_PROPERTY) {
+            continue;
+        }
+        entry_schema = omc_xmp_dump_view_from_ref(
+            &store->arena, store->entries[i].key.u.xmp_property.schema_ns);
+        if (!omc_xmp_dump_views_equal(entry_schema, schema_ns)) {
+            continue;
+        }
+        path = omc_xmp_dump_view_from_ref(
+            &store->arena, store->entries[i].key.u.xmp_property.property_path);
+        if (!omc_xmp_dump_parse_structured_property_path(path, &count, seg)) {
+            continue;
+        }
+        if (count >= 2U && omc_xmp_dump_views_equal(seg[0].name, root_name)
+            && seg[0].index != 0U) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
 omc_xmp_dump_extract_existing_property(const omc_store* store, omc_size index,
                                        const omc_xmp_sidecar_opts* opts,
                                        omc_xmp_dump_property* out_prop)
@@ -758,7 +1403,10 @@ omc_xmp_dump_extract_existing_property(const omc_store* store, omc_size index,
     omc_xmp_ns_view schema_ns;
     omc_xmp_ns_view property_name;
     omc_xmp_ns_view base_name;
+    omc_xmp_ns_view lang;
     omc_u32 item_index;
+    int has_lang_alt;
+    omc_u32 k;
 
     if (store == (const omc_store*)0 || opts == (const omc_xmp_sidecar_opts*)0
         || out_prop == (omc_xmp_dump_property*)0) {
@@ -779,10 +1427,120 @@ omc_xmp_dump_extract_existing_property(const omc_store* store, omc_size index,
         || property_name.data == (const omc_u8*)0) {
         return 0;
     }
-    if (!omc_xmp_dump_parse_indexed_property_name(property_name, &base_name,
-                                                  &item_index)) {
+    if (!omc_xmp_dump_existing_namespace_allowed(schema_ns, opts)) {
         return 0;
     }
+
+    if (omc_xmp_dump_structured_schema_supported(schema_ns)) {
+        omc_u32 struct_count;
+        omc_xmp_dump_path_seg struct_seg[OMC_XMP_DUMP_MAX_STRUCT_SEG];
+        int unsupported_child_prefix;
+
+        if (omc_xmp_dump_parse_structured_property_path(property_name,
+                                                        &struct_count,
+                                                        struct_seg)) {
+            unsupported_child_prefix = 0;
+            if (struct_seg[0].prefix.size != 0U) {
+                unsupported_child_prefix = 1;
+            }
+            for (k = 1U; !unsupported_child_prefix && k < struct_count; ++k) {
+                omc_xmp_ns_view child_schema;
+
+                if (struct_seg[k].prefix.size != 0U
+                    && !omc_xmp_dump_schema_from_prefix(
+                        struct_seg[k].prefix, &child_schema)) {
+                    unsupported_child_prefix = 1;
+                }
+            }
+
+            if (!unsupported_child_prefix) {
+                if (omc_xmp_dump_structured_path_shadowed(
+                        store, index, schema_ns, struct_count, struct_seg)) {
+                    return 0;
+                }
+                if (opts->existing_standard_namespace_policy
+                        == OMC_XMP_STD_NS_CANONICALIZE_MANAGED
+                    && omc_xmp_dump_existing_namespace_is_standard(schema_ns)
+                    && omc_xmp_dump_existing_generated_replacement_exists(
+                        store, index, opts, schema_ns,
+                        struct_seg[0].name)) {
+                    return 0;
+                }
+                if (struct_count > 1U
+                    && struct_seg[struct_count - 1U].lang.size == 0U
+                    && struct_seg[struct_count - 1U].index == 0U) {
+                    if (omc_xmp_dump_structured_child_promotes_scalar_to_lang_alt(
+                            schema_ns, struct_seg[struct_count - 1U].name)) {
+                        struct_seg[struct_count - 1U].lang
+                            = omc_xmp_dump_view_from_lit("x-default");
+                    } else if (omc_xmp_dump_structured_child_promotes_scalar_to_indexed(
+                                   schema_ns,
+                                   struct_seg[struct_count - 1U].name)) {
+                        struct_seg[struct_count - 1U].index = 1U;
+                    }
+                }
+                if (!omc_xmp_dump_scalar_or_text_supported(
+                        &store->entries[index].value, &store->arena)) {
+                    return 0;
+                }
+
+                out_prop->schema_ns = schema_ns;
+                out_prop->property_name = struct_seg[0].name;
+                out_prop->store = store;
+                out_prop->exif_ifd.data = (const omc_u8*)0;
+                out_prop->exif_ifd.size = 0U;
+                out_prop->exif_tag = 0U;
+                out_prop->value = &store->entries[index].value;
+                out_prop->arena = &store->arena;
+                out_prop->value_mode = OMC_XMP_DUMP_VALUE_NORMAL;
+                out_prop->item_index = 0U;
+                out_prop->lang.data = (const omc_u8*)0;
+                out_prop->lang.size = 0U;
+                out_prop->struct_seg_count = struct_count;
+                for (k = 0U; k < struct_count; ++k) {
+                    out_prop->struct_seg[k] = struct_seg[k];
+                }
+                for (; k < OMC_XMP_DUMP_MAX_STRUCT_SEG; ++k) {
+                    out_prop->struct_seg[k].prefix.data = (const omc_u8*)0;
+                    out_prop->struct_seg[k].prefix.size = 0U;
+                    out_prop->struct_seg[k].name.data = (const omc_u8*)0;
+                    out_prop->struct_seg[k].name.size = 0U;
+                    out_prop->struct_seg[k].index = 0U;
+                    out_prop->struct_seg[k].lang.data = (const omc_u8*)0;
+                    out_prop->struct_seg[k].lang.size = 0U;
+                }
+                if (omc_xmp_dump_structured_root_has_indexed(
+                        store, schema_ns, struct_seg[0].name)) {
+                    out_prop->container_kind
+                        = omc_xmp_dump_structured_root_container_kind(
+                            schema_ns, struct_seg[0].name);
+                } else {
+                    out_prop->container_kind
+                        = OMC_XMP_DUMP_CONTAINER_STRUCT_RESOURCE;
+                }
+                return 1;
+            }
+        }
+    }
+
+    lang.data = (const omc_u8*)0;
+    lang.size = 0U;
+    item_index = 0U;
+    has_lang_alt = omc_xmp_dump_parse_lang_alt_property_name(
+        property_name, &base_name, &lang);
+    if (!has_lang_alt) {
+        if (!omc_xmp_dump_parse_indexed_property_name(property_name, &base_name,
+                                                      &item_index)) {
+            return 0;
+        }
+    }
+
+    if (omc_xmp_dump_structured_schema_supported(schema_ns)
+        && omc_xmp_dump_existing_has_structured_descendants(
+            store, schema_ns, base_name)) {
+        return 0;
+    }
+
     if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_tiff)) {
         if (omc_xmp_dump_view_equal_lit(base_name, k_prop_image_length)) {
             base_name = omc_xmp_dump_view_from_lit(k_prop_image_height);
@@ -812,6 +1570,42 @@ omc_xmp_dump_extract_existing_property(const omc_store* store, omc_size index,
             return 0;
         }
     }
+
+    if (has_lang_alt) {
+        item_index = 0U;
+    } else if (item_index == 0U
+               && omc_xmp_dump_existing_promotes_scalar_to_lang_alt(schema_ns,
+                                                                    base_name)
+               && omc_xmp_dump_scalar_or_text_supported(
+                   &store->entries[index].value, &store->arena)) {
+        if (omc_xmp_dump_existing_has_explicit_lang_alt_base(store, schema_ns,
+                                                             base_name)) {
+            return 0;
+        }
+        lang = omc_xmp_dump_view_from_lit("x-default");
+        has_lang_alt = 1;
+    } else if (item_index == 0U
+               && omc_xmp_dump_existing_promotes_scalar_to_indexed(schema_ns,
+                                                                   base_name)
+               && omc_xmp_dump_scalar_or_text_supported(
+                   &store->entries[index].value, &store->arena)) {
+        if (omc_xmp_dump_existing_has_explicit_indexed_base(store, schema_ns,
+                                                            base_name)) {
+            return 0;
+        }
+        item_index = 1U;
+    }
+
+    if (opts->existing_standard_namespace_policy
+            == OMC_XMP_STD_NS_CANONICALIZE_MANAGED
+        && omc_xmp_dump_existing_namespace_is_standard(schema_ns)
+        && omc_xmp_dump_existing_generated_replacement_exists(
+            store, index, opts, schema_ns, base_name)) {
+        if (!has_lang_alt || omc_xmp_dump_view_equal_lit(lang, "x-default")) {
+            return 0;
+        }
+    }
+
     if (!omc_xmp_dump_scalar_or_text_supported(&store->entries[index].value,
                                                &store->arena)) {
         return 0;
@@ -827,7 +1621,20 @@ omc_xmp_dump_extract_existing_property(const omc_store* store, omc_size index,
     out_prop->arena = &store->arena;
     out_prop->value_mode = OMC_XMP_DUMP_VALUE_NORMAL;
     out_prop->item_index = item_index;
-    if (item_index != 0U) {
+    out_prop->lang = lang;
+    out_prop->struct_seg_count = 0U;
+    for (k = 0U; k < OMC_XMP_DUMP_MAX_STRUCT_SEG; ++k) {
+        out_prop->struct_seg[k].prefix.data = (const omc_u8*)0;
+        out_prop->struct_seg[k].prefix.size = 0U;
+        out_prop->struct_seg[k].name.data = (const omc_u8*)0;
+        out_prop->struct_seg[k].name.size = 0U;
+        out_prop->struct_seg[k].index = 0U;
+        out_prop->struct_seg[k].lang.data = (const omc_u8*)0;
+        out_prop->struct_seg[k].lang.size = 0U;
+    }
+    if (has_lang_alt) {
+        out_prop->container_kind = OMC_XMP_DUMP_CONTAINER_ALT;
+    } else if (item_index != 0U) {
         out_prop->container_kind = omc_xmp_dump_existing_container_kind(
             schema_ns, base_name);
     } else {
@@ -846,6 +1653,7 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
     omc_xmp_ns_view property_name;
     omc_xmp_dump_value_mode value_mode;
     omc_u16 tag;
+    omc_u32 k;
 
     if (store == (const omc_store*)0 || opts == (const omc_xmp_sidecar_opts*)0
         || out_prop == (omc_xmp_dump_property*)0) {
@@ -1428,6 +2236,27 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
     out_prop->value_mode = value_mode;
     out_prop->container_kind = OMC_XMP_DUMP_CONTAINER_NONE;
     out_prop->item_index = 0U;
+    out_prop->lang.data = (const omc_u8*)0;
+    out_prop->lang.size = 0U;
+    out_prop->struct_seg_count = 0U;
+    for (k = 0U; k < OMC_XMP_DUMP_MAX_STRUCT_SEG; ++k) {
+        out_prop->struct_seg[k].prefix.data = (const omc_u8*)0;
+        out_prop->struct_seg[k].prefix.size = 0U;
+        out_prop->struct_seg[k].name.data = (const omc_u8*)0;
+        out_prop->struct_seg[k].name.size = 0U;
+        out_prop->struct_seg[k].index = 0U;
+        out_prop->struct_seg[k].lang.data = (const omc_u8*)0;
+        out_prop->struct_seg[k].lang.size = 0U;
+    }
+    if (omc_xmp_dump_existing_promotes_scalar_to_lang_alt(schema_ns,
+                                                          property_name)) {
+        out_prop->container_kind = OMC_XMP_DUMP_CONTAINER_ALT;
+        out_prop->lang = omc_xmp_dump_view_from_lit("x-default");
+    } else if (omc_xmp_dump_existing_promotes_scalar_to_indexed(
+                   schema_ns, property_name)) {
+        out_prop->container_kind = omc_xmp_dump_existing_container_kind(
+            schema_ns, property_name);
+    }
     return 1;
 }
 
@@ -1440,6 +2269,7 @@ omc_xmp_dump_extract_iptc_property(const omc_store* store, omc_size index,
     omc_xmp_ns_view property_name;
     omc_u16 record;
     omc_u16 dataset;
+    omc_u32 k;
 
     if (store == (const omc_store*)0 || opts == (const omc_xmp_sidecar_opts*)0
         || out_prop == (omc_xmp_dump_property*)0) {
@@ -1516,6 +2346,10 @@ omc_xmp_dump_extract_iptc_property(const omc_store* store, omc_size index,
         schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_ps);
         property_name = omc_xmp_dump_view_from_lit(k_prop_source);
         break;
+    case 116U:
+        schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_dc);
+        property_name = omc_xmp_dump_view_from_lit(k_prop_rights);
+        break;
     case 120U:
         schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_dc);
         property_name = omc_xmp_dump_view_from_lit(k_prop_description);
@@ -1537,10 +2371,26 @@ omc_xmp_dump_extract_iptc_property(const omc_store* store, omc_size index,
     out_prop->arena = &store->arena;
     out_prop->value_mode = OMC_XMP_DUMP_VALUE_BYTES_TEXT;
     out_prop->item_index = 0U;
-    if (dataset == 20U || dataset == 25U) {
-        out_prop->container_kind = OMC_XMP_DUMP_CONTAINER_BAG;
-    } else if (dataset == 80U) {
-        out_prop->container_kind = OMC_XMP_DUMP_CONTAINER_SEQ;
+    out_prop->lang.data = (const omc_u8*)0;
+    out_prop->lang.size = 0U;
+    out_prop->struct_seg_count = 0U;
+    for (k = 0U; k < OMC_XMP_DUMP_MAX_STRUCT_SEG; ++k) {
+        out_prop->struct_seg[k].prefix.data = (const omc_u8*)0;
+        out_prop->struct_seg[k].prefix.size = 0U;
+        out_prop->struct_seg[k].name.data = (const omc_u8*)0;
+        out_prop->struct_seg[k].name.size = 0U;
+        out_prop->struct_seg[k].index = 0U;
+        out_prop->struct_seg[k].lang.data = (const omc_u8*)0;
+        out_prop->struct_seg[k].lang.size = 0U;
+    }
+    if (omc_xmp_dump_existing_promotes_scalar_to_lang_alt(schema_ns,
+                                                          property_name)) {
+        out_prop->container_kind = OMC_XMP_DUMP_CONTAINER_ALT;
+        out_prop->lang = omc_xmp_dump_view_from_lit("x-default");
+    } else if (omc_xmp_dump_existing_promotes_scalar_to_indexed(
+                   schema_ns, property_name)) {
+        out_prop->container_kind = omc_xmp_dump_existing_container_kind(
+            schema_ns, property_name);
     } else {
         out_prop->container_kind = OMC_XMP_DUMP_CONTAINER_NONE;
     }
@@ -1563,6 +2413,40 @@ omc_xmp_dump_extract_pass_property(const omc_store* store, omc_size index,
         return omc_xmp_dump_extract_iptc_property(store, index, opts, out_prop);
     default: return 0;
     }
+}
+
+static int
+omc_xmp_dump_existing_generated_replacement_exists(const omc_store* store,
+                                                   omc_size skip_index,
+                                                   const omc_xmp_sidecar_opts* opts,
+                                                   omc_xmp_ns_view schema_ns,
+                                                   omc_xmp_ns_view property_name)
+{
+    omc_size i;
+    omc_xmp_dump_property prop;
+
+    if (store == (const omc_store*)0 || opts == (const omc_xmp_sidecar_opts*)0) {
+        return 0;
+    }
+
+    for (i = 0U; i < store->entry_count; ++i) {
+        if (i == skip_index) {
+            continue;
+        }
+        if (omc_xmp_dump_extract_exif_property(store, i, opts, &prop)
+            || omc_xmp_dump_extract_iptc_property(store, i, opts, &prop)) {
+            if (!omc_xmp_dump_property_has_output(&prop)) {
+                continue;
+            }
+            if (omc_xmp_dump_views_equal(prop.schema_ns, schema_ns)
+                && omc_xmp_dump_views_equal(prop.property_name,
+                                            property_name)) {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
 }
 
 static int
@@ -1865,6 +2749,52 @@ omc_xmp_dump_claimed_before(const omc_store* store, omc_size index,
 }
 
 static int
+omc_xmp_dump_alt_lang_claimed_before(const omc_store* store, omc_size index,
+                                     const omc_xmp_sidecar_opts* opts,
+                                     omc_xmp_dump_pass pass,
+                                     const omc_xmp_dump_property* prop,
+                                     omc_xmp_ns_view lang)
+{
+    omc_xmp_dump_pass order[OMC_XMP_DUMP_PASS_COUNT];
+    omc_u32 p;
+    omc_size i;
+    omc_size end;
+    omc_xmp_dump_property prior;
+
+    omc_xmp_dump_fill_pass_order(opts, order);
+
+    for (p = 0U; p < OMC_XMP_DUMP_PASS_COUNT; ++p) {
+        omc_xmp_dump_pass cur_pass;
+
+        cur_pass = order[p];
+        end = store->entry_count;
+        if (cur_pass == pass) {
+            end = index;
+        }
+        for (i = 0U; i < end; ++i) {
+            if (!omc_xmp_dump_extract_pass_property(store, i, opts, cur_pass,
+                                                    &prior)) {
+                continue;
+            }
+            if (!omc_xmp_dump_property_keys_equal(&prior, prop)
+                || prior.container_kind != OMC_XMP_DUMP_CONTAINER_ALT
+                || prior.lang.data == (const omc_u8*)0
+                || prior.lang.size == 0U) {
+                continue;
+            }
+            if (omc_xmp_dump_views_equal(prior.lang, lang)) {
+                return 1;
+            }
+        }
+        if (cur_pass == pass) {
+            break;
+        }
+    }
+
+    return 0;
+}
+
+static int
 omc_xmp_dump_schema_first_for_emitted(const omc_store* store, omc_size index,
                                       const omc_xmp_sidecar_opts* opts,
                                       omc_xmp_dump_pass pass,
@@ -1942,8 +2872,123 @@ omc_xmp_dump_known_prefix(omc_xmp_ns_view schema_ns, const char** out_prefix)
         *out_prefix = "xmpMM";
         return 1;
     }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_st_ref)) {
+        *out_prefix = "stRef";
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_st_evt)) {
+        *out_prefix = "stEvt";
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_st_ver)) {
+        *out_prefix = "stVer";
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_st_mfs)) {
+        *out_prefix = "stMfs";
+        return 1;
+    }
     if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_iptc4xmp)) {
         *out_prefix = "Iptc4xmpCore";
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_iptc4xmp_ext)) {
+        *out_prefix = "Iptc4xmpExt";
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_rights)) {
+        *out_prefix = "xmpRights";
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_pdf)) {
+        *out_prefix = "pdf";
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_lr)) {
+        *out_prefix = "lr";
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_plus)) {
+        *out_prefix = "plus";
+        return 1;
+    }
+
+    return 0;
+}
+
+static int
+omc_xmp_dump_schema_from_prefix(omc_xmp_ns_view prefix,
+                                omc_xmp_ns_view* out_schema)
+{
+    if (out_schema == (omc_xmp_ns_view*)0) {
+        return 0;
+    }
+
+    out_schema->data = (const omc_u8*)0;
+    out_schema->size = 0U;
+
+    if (omc_xmp_dump_view_equal_lit(prefix, "xmp")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_xap);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "dc")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_dc);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "photoshop")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_ps);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "exif")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_exif);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "tiff")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_tiff);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "xmpMM")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_mm);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "stRef")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_st_ref);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "stEvt")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_st_evt);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "stVer")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_st_ver);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "stMfs")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_st_mfs);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "Iptc4xmpCore")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_iptc4xmp);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "Iptc4xmpExt")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_iptc4xmp_ext);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "xmpRights")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_rights);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "pdf")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_pdf);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "lr")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_lr);
+        return 1;
+    }
+    if (omc_xmp_dump_view_equal_lit(prefix, "plus")) {
+        *out_schema = omc_xmp_dump_view_from_lit(k_xmp_ns_plus);
         return 1;
     }
 
@@ -3454,6 +4499,507 @@ omc_xmp_dump_write_property_close(omc_xmp_dump_writer* writer,
 }
 
 static void
+omc_xmp_dump_write_named_open_ex(omc_xmp_dump_writer* writer,
+                                 const omc_store* store, omc_size index,
+                                 const omc_xmp_sidecar_opts* opts,
+                                 omc_xmp_dump_pass pass,
+                                 omc_xmp_ns_view schema_ns,
+                                 omc_xmp_ns_view property_name,
+                                 int resource_attr,
+                                 int local_ns_decl)
+{
+    const char* known_prefix;
+
+    omc_xmp_dump_write_byte(writer, '<');
+    omc_xmp_dump_write_prefix(writer, store, index, opts, pass, schema_ns);
+    omc_xmp_dump_write_byte(writer, ':');
+    omc_xmp_dump_write_xml_escaped(writer, property_name.data,
+                                   property_name.size, 0);
+    if (local_ns_decl
+        && omc_xmp_dump_known_prefix(schema_ns, &known_prefix)) {
+        omc_xmp_dump_write_bytes(writer, " xmlns:", 7U);
+        omc_xmp_dump_write_bytes(writer, known_prefix, strlen(known_prefix));
+        omc_xmp_dump_write_bytes(writer, "=\"", 2U);
+        omc_xmp_dump_write_xml_escaped(writer, schema_ns.data,
+                                       schema_ns.size, 1);
+        omc_xmp_dump_write_byte(writer, '"');
+    }
+    if (resource_attr) {
+        omc_xmp_dump_write_bytes(writer, " rdf:parseType=\"Resource\"", 25U);
+    }
+    omc_xmp_dump_write_byte(writer, '>');
+}
+
+static void
+omc_xmp_dump_write_named_open(omc_xmp_dump_writer* writer,
+                              const omc_store* store, omc_size index,
+                              const omc_xmp_sidecar_opts* opts,
+                              omc_xmp_dump_pass pass,
+                              omc_xmp_ns_view schema_ns,
+                              omc_xmp_ns_view property_name,
+                              int resource_attr)
+{
+    omc_xmp_dump_write_named_open_ex(writer, store, index, opts, pass,
+                                     schema_ns, property_name, resource_attr,
+                                     0);
+}
+
+static void
+omc_xmp_dump_write_named_close(omc_xmp_dump_writer* writer,
+                               const omc_store* store, omc_size index,
+                               const omc_xmp_sidecar_opts* opts,
+                               omc_xmp_dump_pass pass,
+                               omc_xmp_ns_view schema_ns,
+                               omc_xmp_ns_view property_name)
+{
+    omc_xmp_dump_write_bytes(writer, "</", 2U);
+    omc_xmp_dump_write_prefix(writer, store, index, opts, pass, schema_ns);
+    omc_xmp_dump_write_byte(writer, ':');
+    omc_xmp_dump_write_xml_escaped(writer, property_name.data,
+                                   property_name.size, 0);
+    omc_xmp_dump_write_byte(writer, '>');
+}
+
+static int
+omc_xmp_dump_structured_root_matches(const omc_xmp_dump_property* item,
+                                     const omc_xmp_dump_property* prop)
+{
+    return item->struct_seg_count >= 2U
+           && omc_xmp_dump_property_keys_equal(item, prop);
+}
+
+static int
+omc_xmp_dump_structured_prefix_matches(const omc_xmp_dump_property* item,
+                                       const omc_xmp_dump_path_seg* prefix,
+                                       omc_u32 prefix_count)
+{
+    omc_u32 k;
+
+    if (item->struct_seg_count <= prefix_count) {
+        return 0;
+    }
+    for (k = 0U; k < prefix_count; ++k) {
+        if (!omc_xmp_dump_path_seg_equal(&item->struct_seg[k], &prefix[k])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+omc_xmp_dump_structured_child_group_seen(const omc_store* store,
+                                         omc_size start_index,
+                                         omc_size end_index,
+                                         const omc_xmp_sidecar_opts* opts,
+                                         omc_xmp_dump_pass pass,
+                                         const omc_xmp_dump_property* prop,
+                                         const omc_xmp_dump_path_seg* prefix,
+                                         omc_u32 prefix_count,
+                                         const omc_xmp_dump_path_seg* child)
+{
+    omc_size j;
+
+    for (j = start_index; j < end_index; ++j) {
+        omc_xmp_dump_property prior;
+
+        if (!omc_xmp_dump_extract_pass_property(store, j, opts, pass, &prior)) {
+            continue;
+        }
+        if (!omc_xmp_dump_structured_root_matches(&prior, prop)
+            || !omc_xmp_dump_structured_prefix_matches(&prior, prefix,
+                                                       prefix_count)
+            || !omc_xmp_dump_path_seg_name_equal(
+                   &prior.struct_seg[prefix_count], child)) {
+            continue;
+        }
+        return 1;
+    }
+
+    return 0;
+}
+
+static void
+omc_xmp_dump_emit_structured_children(omc_xmp_dump_writer* writer,
+                                      const omc_store* store, omc_size index,
+                                      const omc_xmp_sidecar_opts* opts,
+                                      omc_xmp_dump_pass pass,
+                                      const omc_xmp_dump_property* prop,
+                                      const omc_xmp_dump_path_seg* prefix,
+                                      omc_u32 prefix_count)
+{
+    omc_size i;
+
+    for (i = index; i < store->entry_count; ++i) {
+        omc_xmp_dump_property item;
+        omc_xmp_dump_path_seg child;
+        omc_xmp_ns_view child_schema;
+        int child_local_ns_decl;
+        int has_deeper;
+        int has_lang;
+        int has_index;
+        omc_size j;
+
+        if (!omc_xmp_dump_extract_pass_property(store, i, opts, pass, &item)) {
+            continue;
+        }
+        if (!omc_xmp_dump_structured_root_matches(&item, prop)
+            || !omc_xmp_dump_structured_prefix_matches(&item, prefix,
+                                                       prefix_count)) {
+            continue;
+        }
+
+        child = item.struct_seg[prefix_count];
+        child_schema = prop->schema_ns;
+        child_local_ns_decl = 0;
+        if (child.prefix.size != 0U) {
+            if (!omc_xmp_dump_schema_from_prefix(child.prefix, &child_schema)) {
+                continue;
+            }
+            child_local_ns_decl = 1;
+        }
+        if (omc_xmp_dump_structured_child_group_seen(
+                store, index, i, opts, pass, prop, prefix, prefix_count,
+                &child)) {
+            continue;
+        }
+
+        has_deeper = 0;
+        has_lang = 0;
+        has_index = 0;
+        for (j = index; j < store->entry_count; ++j) {
+            omc_xmp_dump_property probe;
+
+            if (!omc_xmp_dump_extract_pass_property(store, j, opts, pass,
+                                                    &probe)) {
+                continue;
+            }
+            if (!omc_xmp_dump_structured_root_matches(&probe, prop)
+                || !omc_xmp_dump_structured_prefix_matches(&probe, prefix,
+                                                           prefix_count)
+                || !omc_xmp_dump_path_seg_name_equal(
+                       &probe.struct_seg[prefix_count], &child)) {
+                continue;
+            }
+            if (probe.struct_seg_count > prefix_count + 1U) {
+                has_deeper = 1;
+            }
+            if (probe.struct_seg[prefix_count].lang.size != 0U) {
+                has_lang = 1;
+            }
+            if (probe.struct_seg[prefix_count].index != 0U) {
+                has_index = 1;
+            }
+        }
+
+        if (has_deeper) {
+            omc_xmp_dump_path_seg next_prefix[OMC_XMP_DUMP_MAX_STRUCT_SEG];
+            omc_u32 k;
+
+            for (k = 0U; k < prefix_count; ++k) {
+                next_prefix[k] = prefix[k];
+            }
+            next_prefix[prefix_count] = child;
+            next_prefix[prefix_count].index = 0U;
+            next_prefix[prefix_count].lang.data = (const omc_u8*)0;
+            next_prefix[prefix_count].lang.size = 0U;
+
+            if (has_index) {
+                omc_u32 want_index;
+
+                omc_xmp_dump_write_named_open(writer, store, index, opts, pass,
+                                              child_schema, child.name, 0);
+                omc_xmp_dump_write_bytes(writer, "<rdf:Seq>", 9U);
+                want_index = 1U;
+                for (;;) {
+                    int found;
+                    omc_u32 next_index;
+
+                    found = 0;
+                    next_index = 0U;
+                    for (j = index; j < store->entry_count; ++j) {
+                        omc_xmp_dump_property probe;
+
+                        if (!omc_xmp_dump_extract_pass_property(
+                                store, j, opts, pass, &probe)) {
+                            continue;
+                        }
+                        if (!omc_xmp_dump_structured_root_matches(&probe, prop)
+                            || !omc_xmp_dump_structured_prefix_matches(
+                                   &probe, prefix, prefix_count)
+                            || !omc_xmp_dump_path_seg_name_equal(
+                                   &probe.struct_seg[prefix_count], &child)
+                            || probe.struct_seg[prefix_count].index == 0U) {
+                            continue;
+                        }
+                        if (probe.struct_seg[prefix_count].index
+                            == want_index) {
+                            next_prefix[prefix_count].index = want_index;
+                            omc_xmp_dump_write_bytes(
+                                writer, "<rdf:li rdf:parseType=\"Resource\">",
+                                34U);
+                            omc_xmp_dump_emit_structured_children(
+                                writer, store, index, opts, pass, prop,
+                                next_prefix, prefix_count + 1U);
+                            omc_xmp_dump_write_bytes(writer, "</rdf:li>", 9U);
+                            found = 1;
+                            want_index += 1U;
+                            break;
+                        }
+                        if (probe.struct_seg[prefix_count].index > want_index
+                            && (next_index == 0U
+                                || probe.struct_seg[prefix_count].index
+                                       < next_index)) {
+                            next_index = probe.struct_seg[prefix_count].index;
+                        }
+                    }
+                    if (found) {
+                        continue;
+                    }
+                    if (next_index == 0U) {
+                        break;
+                    }
+                    want_index = next_index;
+                }
+                omc_xmp_dump_write_bytes(writer, "</rdf:Seq>", 10U);
+                omc_xmp_dump_write_named_close(writer, store, index, opts, pass,
+                                               child_schema, child.name);
+            } else {
+                omc_xmp_dump_write_named_open_ex(writer, store, index, opts,
+                                                 pass, child_schema, child.name,
+                                                 1, child_local_ns_decl);
+                omc_xmp_dump_emit_structured_children(writer, store, index,
+                                                      opts, pass, prop,
+                                                      next_prefix,
+                                                      prefix_count + 1U);
+                omc_xmp_dump_write_named_close(writer, store, index, opts, pass,
+                                               child_schema, child.name);
+            }
+            continue;
+        }
+
+        if (has_lang) {
+            omc_xmp_dump_write_named_open_ex(writer, store, index, opts, pass,
+                                             child_schema, child.name, 0,
+                                             child_local_ns_decl);
+            omc_xmp_dump_write_bytes(writer, "<rdf:Alt>", 9U);
+            for (j = index; j < store->entry_count; ++j) {
+                omc_xmp_dump_property probe;
+
+                if (!omc_xmp_dump_extract_pass_property(store, j, opts, pass,
+                                                        &probe)) {
+                    continue;
+                }
+                if (!omc_xmp_dump_structured_root_matches(&probe, prop)
+                    || !omc_xmp_dump_structured_prefix_matches(
+                           &probe, prefix, prefix_count)
+                    || probe.struct_seg_count != prefix_count + 1U
+                    || !omc_xmp_dump_path_seg_name_equal(
+                           &probe.struct_seg[prefix_count], &child)
+                    || probe.struct_seg[prefix_count].lang.size == 0U) {
+                    continue;
+                }
+                omc_xmp_dump_write_bytes(writer, "<rdf:li xml:lang=\"", 18U);
+                omc_xmp_dump_write_xml_escaped(
+                    writer, probe.struct_seg[prefix_count].lang.data,
+                    probe.struct_seg[prefix_count].lang.size, 1);
+                omc_xmp_dump_write_bytes(writer, "\">", 2U);
+                omc_xmp_dump_write_value(writer, &probe);
+                omc_xmp_dump_write_bytes(writer, "</rdf:li>", 9U);
+            }
+            omc_xmp_dump_write_bytes(writer, "</rdf:Alt>", 10U);
+            omc_xmp_dump_write_named_close(writer, store, index, opts, pass,
+                                           child_schema, child.name);
+            continue;
+        }
+
+        if (has_index) {
+            omc_u32 want_index;
+            omc_xmp_dump_container_kind child_kind;
+
+            child_kind = omc_xmp_dump_existing_container_kind(child_schema,
+                                                              child.name);
+            if (omc_xmp_dump_view_equal_lit(child_schema, k_xmp_ns_xap)
+                && omc_xmp_dump_view_equal_lit(child.name, "Identifier")) {
+                child_kind = OMC_XMP_DUMP_CONTAINER_BAG;
+            } else if (omc_xmp_dump_view_equal_lit(child_schema,
+                                                   k_xmp_ns_iptc4xmp_ext)
+                       && (omc_xmp_dump_view_equal_lit(child.name,
+                                                       "LocationId")
+                           || omc_xmp_dump_view_equal_lit(child.name, "Role")
+                           || omc_xmp_dump_view_equal_lit(child.name,
+                                                          "PersonId"))) {
+                child_kind = OMC_XMP_DUMP_CONTAINER_BAG;
+            }
+
+            omc_xmp_dump_write_named_open_ex(writer, store, index, opts, pass,
+                                             child_schema, child.name, 0,
+                                             child_local_ns_decl);
+            if (child_kind == OMC_XMP_DUMP_CONTAINER_BAG) {
+                omc_xmp_dump_write_bytes(writer, "<rdf:Bag>", 9U);
+            } else {
+                omc_xmp_dump_write_bytes(writer, "<rdf:Seq>", 9U);
+            }
+            want_index = 1U;
+            for (;;) {
+                int found;
+                omc_u32 next_index;
+
+                found = 0;
+                next_index = 0U;
+                for (j = index; j < store->entry_count; ++j) {
+                    omc_xmp_dump_property probe;
+
+                    if (!omc_xmp_dump_extract_pass_property(store, j, opts,
+                                                            pass, &probe)) {
+                        continue;
+                    }
+                    if (!omc_xmp_dump_structured_root_matches(&probe, prop)
+                        || !omc_xmp_dump_structured_prefix_matches(
+                               &probe, prefix, prefix_count)
+                        || probe.struct_seg_count != prefix_count + 1U
+                        || !omc_xmp_dump_path_seg_name_equal(
+                               &probe.struct_seg[prefix_count], &child)
+                        || probe.struct_seg[prefix_count].lang.size != 0U
+                        || probe.struct_seg[prefix_count].index == 0U) {
+                        continue;
+                    }
+                    if (probe.struct_seg[prefix_count].index == want_index) {
+                        omc_xmp_dump_write_bytes(writer, "<rdf:li>", 8U);
+                        omc_xmp_dump_write_value(writer, &probe);
+                        omc_xmp_dump_write_bytes(writer, "</rdf:li>", 9U);
+                        found = 1;
+                        want_index += 1U;
+                        break;
+                    }
+                    if (probe.struct_seg[prefix_count].index > want_index
+                        && (next_index == 0U
+                            || probe.struct_seg[prefix_count].index
+                                   < next_index)) {
+                        next_index = probe.struct_seg[prefix_count].index;
+                    }
+                }
+                if (found) {
+                    continue;
+                }
+                if (next_index == 0U) {
+                    break;
+                }
+                want_index = next_index;
+            }
+            if (child_kind == OMC_XMP_DUMP_CONTAINER_BAG) {
+                omc_xmp_dump_write_bytes(writer, "</rdf:Bag>", 10U);
+            } else {
+                omc_xmp_dump_write_bytes(writer, "</rdf:Seq>", 10U);
+            }
+            omc_xmp_dump_write_named_close(writer, store, index, opts, pass,
+                                           child_schema, child.name);
+            continue;
+        }
+
+        omc_xmp_dump_write_named_open_ex(writer, store, index, opts, pass,
+                                         child_schema, child.name, 0,
+                                         child_local_ns_decl);
+        omc_xmp_dump_write_value(writer, &item);
+        omc_xmp_dump_write_named_close(writer, store, index, opts, pass,
+                                       child_schema, child.name);
+    }
+}
+
+static void
+omc_xmp_dump_emit_structured_property(omc_xmp_dump_writer* writer,
+                                      const omc_store* store, omc_size index,
+                                      const omc_xmp_sidecar_opts* opts,
+                                      omc_xmp_dump_pass pass,
+                                      const omc_xmp_dump_property* prop)
+{
+    omc_xmp_dump_path_seg prefix[OMC_XMP_DUMP_MAX_STRUCT_SEG];
+    omc_u32 k;
+
+    if (prop->struct_seg_count == 0U) {
+        return;
+    }
+
+    for (k = 0U; k < prop->struct_seg_count; ++k) {
+        prefix[k] = prop->struct_seg[k];
+    }
+
+    if (prop->container_kind == OMC_XMP_DUMP_CONTAINER_STRUCT_SEQ
+        || prop->container_kind == OMC_XMP_DUMP_CONTAINER_STRUCT_BAG) {
+        omc_u32 want_index;
+        int is_bag;
+
+        omc_xmp_dump_write_named_open(writer, store, index, opts, pass,
+                                      prop->schema_ns, prop->property_name, 0);
+        is_bag = prop->container_kind == OMC_XMP_DUMP_CONTAINER_STRUCT_BAG;
+        if (is_bag) {
+            omc_xmp_dump_write_bytes(writer, "<rdf:Bag>", 9U);
+        } else {
+            omc_xmp_dump_write_bytes(writer, "<rdf:Seq>", 9U);
+        }
+        want_index = 1U;
+        for (;;) {
+            int found;
+            omc_u32 next_index;
+            omc_size i;
+
+            found = 0;
+            next_index = 0U;
+            for (i = index; i < store->entry_count; ++i) {
+                omc_xmp_dump_property item;
+
+                if (!omc_xmp_dump_extract_pass_property(store, i, opts, pass,
+                                                        &item)) {
+                    continue;
+                }
+                if (!omc_xmp_dump_structured_root_matches(&item, prop)
+                    || item.struct_seg[0].index == 0U) {
+                    continue;
+                }
+                if (item.struct_seg[0].index == want_index) {
+                    prefix[0] = item.struct_seg[0];
+                    omc_xmp_dump_write_bytes(
+                        writer, "<rdf:li rdf:parseType=\"Resource\">", 34U);
+                    omc_xmp_dump_emit_structured_children(writer, store, index,
+                                                          opts, pass, prop,
+                                                          prefix, 1U);
+                    omc_xmp_dump_write_bytes(writer, "</rdf:li>", 9U);
+                    found = 1;
+                    want_index += 1U;
+                    break;
+                }
+                if (item.struct_seg[0].index > want_index
+                    && (next_index == 0U
+                        || item.struct_seg[0].index < next_index)) {
+                    next_index = item.struct_seg[0].index;
+                }
+            }
+            if (found) {
+                continue;
+            }
+            if (next_index == 0U) {
+                break;
+            }
+            want_index = next_index;
+        }
+        if (is_bag) {
+            omc_xmp_dump_write_bytes(writer, "</rdf:Bag>", 10U);
+        } else {
+            omc_xmp_dump_write_bytes(writer, "</rdf:Seq>", 10U);
+        }
+        omc_xmp_dump_write_named_close(writer, store, index, opts, pass,
+                                       prop->schema_ns, prop->property_name);
+        return;
+    }
+
+    omc_xmp_dump_write_named_open(writer, store, index, opts, pass,
+                                  prop->schema_ns, prop->property_name, 1);
+    omc_xmp_dump_emit_structured_children(writer, store, index, opts, pass,
+                                          prop, prefix, 1U);
+    omc_xmp_dump_write_named_close(writer, store, index, opts, pass,
+                                   prop->schema_ns, prop->property_name);
+}
+
+static void
 omc_xmp_dump_emit_group_items(omc_xmp_dump_writer* writer,
                               const omc_store* store, omc_size index,
                               const omc_xmp_sidecar_opts* opts,
@@ -3504,6 +5050,47 @@ omc_xmp_dump_emit_group_items(omc_xmp_dump_writer* writer,
         return;
     }
 
+    if (prop->container_kind == OMC_XMP_DUMP_CONTAINER_ALT) {
+        omc_xmp_dump_pass order[OMC_XMP_DUMP_PASS_COUNT];
+        omc_u32 p;
+
+        omc_xmp_dump_fill_pass_order(opts, order);
+        for (p = 0U; p < OMC_XMP_DUMP_PASS_COUNT; ++p) {
+            omc_xmp_dump_pass cur_pass;
+            omc_size start;
+
+            cur_pass = order[p];
+            start = 0U;
+            if (cur_pass == pass) {
+                start = index;
+            }
+            for (i = start; i < store->entry_count; ++i) {
+                if (!omc_xmp_dump_extract_pass_property(store, i, opts,
+                                                        cur_pass, &item)) {
+                    continue;
+                }
+                if (!omc_xmp_dump_property_keys_equal(&item, prop)
+                    || item.container_kind != OMC_XMP_DUMP_CONTAINER_ALT
+                    || item.lang.data == (const omc_u8*)0
+                    || item.lang.size == 0U
+                    || omc_xmp_dump_alt_lang_claimed_before(
+                           store, i, opts, cur_pass, prop, item.lang)) {
+                    continue;
+                }
+                omc_xmp_dump_write_bytes(writer, "<rdf:li xml:lang=\"", 18U);
+                omc_xmp_dump_write_xml_escaped(writer, item.lang.data,
+                                               item.lang.size, 1);
+                omc_xmp_dump_write_bytes(writer, "\">", 2U);
+                omc_xmp_dump_write_value(writer, &item);
+                omc_xmp_dump_write_bytes(writer, "</rdf:li>", 9U);
+            }
+            if (cur_pass == pass) {
+                continue;
+            }
+        }
+        return;
+    }
+
     for (i = index; i < store->entry_count; ++i) {
         if (!omc_xmp_dump_extract_pass_property(store, i, opts, pass, &item)) {
             continue;
@@ -3524,6 +5111,14 @@ omc_xmp_dump_emit_one_property(omc_xmp_dump_writer* writer,
                                omc_xmp_dump_pass pass,
                                const omc_xmp_dump_property* prop)
 {
+    if (prop->container_kind == OMC_XMP_DUMP_CONTAINER_STRUCT_RESOURCE
+        || prop->container_kind == OMC_XMP_DUMP_CONTAINER_STRUCT_SEQ
+        || prop->container_kind == OMC_XMP_DUMP_CONTAINER_STRUCT_BAG) {
+        omc_xmp_dump_emit_structured_property(writer, store, index, opts, pass,
+                                              prop);
+        return;
+    }
+
     omc_xmp_dump_write_property_open(writer, store, index, opts, pass, prop);
     if (omc_xmp_dump_property_needs_group(prop)) {
         if (prop->container_kind == OMC_XMP_DUMP_CONTAINER_SEQ) {
@@ -3531,6 +5126,11 @@ omc_xmp_dump_emit_one_property(omc_xmp_dump_writer* writer,
             omc_xmp_dump_emit_group_items(writer, store, index, opts, pass,
                                           prop);
             omc_xmp_dump_write_bytes(writer, "</rdf:Seq>", 10U);
+        } else if (prop->container_kind == OMC_XMP_DUMP_CONTAINER_ALT) {
+            omc_xmp_dump_write_bytes(writer, "<rdf:Alt>", 9U);
+            omc_xmp_dump_emit_group_items(writer, store, index, opts, pass,
+                                          prop);
+            omc_xmp_dump_write_bytes(writer, "</rdf:Alt>", 10U);
         } else {
             omc_xmp_dump_write_bytes(writer, "<rdf:Bag>", 9U);
             omc_xmp_dump_emit_group_items(writer, store, index, opts, pass,
@@ -3652,6 +5252,9 @@ omc_xmp_sidecar_opts_init(omc_xmp_sidecar_opts* opts)
     opts->include_existing_xmp = 1;
     opts->include_exif = 0;
     opts->include_iptc = 0;
+    opts->existing_namespace_policy = OMC_XMP_NS_KNOWN_PORTABLE_ONLY;
+    opts->existing_standard_namespace_policy
+        = OMC_XMP_STD_NS_PRESERVE_ALL;
     opts->conflict_policy = OMC_XMP_CONFLICT_EXISTING_WINS;
     opts->exiftool_gpsdatetime_alias = 0;
 }
@@ -3668,6 +5271,9 @@ omc_xmp_portable_opts_init(omc_xmp_portable_opts* opts)
     opts->include_existing_xmp = 0;
     opts->include_exif = 1;
     opts->include_iptc = 1;
+    opts->existing_namespace_policy = OMC_XMP_NS_KNOWN_PORTABLE_ONLY;
+    opts->existing_standard_namespace_policy
+        = OMC_XMP_STD_NS_PRESERVE_ALL;
     opts->conflict_policy = OMC_XMP_CONFLICT_CURRENT_BEHAVIOR;
     opts->exiftool_gpsdatetime_alias = 0;
 }
@@ -3713,6 +5319,10 @@ omc_xmp_sidecar_req_init(omc_xmp_sidecar_req* req)
     req->include_exif = 1;
     req->include_iptc = 1;
     req->include_existing_xmp = 0;
+    req->portable_existing_namespace_policy
+        = OMC_XMP_NS_KNOWN_PORTABLE_ONLY;
+    req->portable_existing_standard_namespace_policy
+        = OMC_XMP_STD_NS_PRESERVE_ALL;
     req->portable_conflict_policy = OMC_XMP_CONFLICT_CURRENT_BEHAVIOR;
     req->portable_exiftool_gpsdatetime_alias = 0;
     req->include_origin = 1;
@@ -3745,6 +5355,10 @@ omc_xmp_sidecar_cfg_from_req(omc_xmp_sidecar_cfg* out_cfg,
     out_cfg->portable.include_exif = req->include_exif;
     out_cfg->portable.include_iptc = req->include_iptc;
     out_cfg->portable.include_existing_xmp = req->include_existing_xmp;
+    out_cfg->portable.existing_namespace_policy
+        = req->portable_existing_namespace_policy;
+    out_cfg->portable.existing_standard_namespace_policy
+        = req->portable_existing_standard_namespace_policy;
     out_cfg->portable.conflict_policy = req->portable_conflict_policy;
     out_cfg->portable.exiftool_gpsdatetime_alias
         = req->portable_exiftool_gpsdatetime_alias;

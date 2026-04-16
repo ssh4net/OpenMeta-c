@@ -59,6 +59,9 @@ omc_xmp_apply(const omc_u8* file_bytes, omc_size file_size,
     omc_xmp_write_opts_init(&write_opts);
     write_opts.format = opts->format;
     write_opts.embed = opts->embedded;
+    if (opts->writeback_mode == OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR) {
+        write_opts.embed.packet = opts->sidecar;
+    }
 
     if (opts->writeback_mode == OMC_XMP_WRITEBACK_SIDECAR_ONLY) {
         write_opts.write_embedded_xmp = 0;

@@ -365,19 +365,44 @@ omc_ciff_rotation_to_orientation(omc_s32 degrees)
 }
 
 static int
-omc_ciff_format_datetime(omc_u32 unix_seconds, char out_text[20])
+omc_ciff_localtime_copy(time_t raw_time, struct tm* out_tm)
 {
-    time_t raw_time;
-    struct tm* tm_parts;
-    size_t written;
-
-    raw_time = (time_t)unix_seconds;
-    tm_parts = localtime(&raw_time);
-    if (tm_parts == (struct tm*)0) {
+    if (out_tm == (struct tm*)0) {
         return 0;
     }
 
-    written = strftime(out_text, 20U, "%Y:%m:%d %H:%M:%S", tm_parts);
+#if defined(_MSC_VER)
+    return localtime_s(out_tm, &raw_time) == 0;
+#elif defined(_POSIX_C_SOURCE) || defined(_XOPEN_SOURCE) \
+    || defined(_GNU_SOURCE)
+    return localtime_r(&raw_time, out_tm) != (struct tm*)0;
+#else
+    {
+        struct tm* tm_parts;
+
+        tm_parts = localtime(&raw_time);
+        if (tm_parts == (struct tm*)0) {
+            return 0;
+        }
+        *out_tm = *tm_parts;
+        return 1;
+    }
+#endif
+}
+
+static int
+omc_ciff_format_datetime(omc_u32 unix_seconds, char out_text[20])
+{
+    time_t raw_time;
+    struct tm tm_parts;
+    size_t written;
+
+    raw_time = (time_t)unix_seconds;
+    if (!omc_ciff_localtime_copy(raw_time, &tm_parts)) {
+        return 0;
+    }
+
+    written = strftime(out_text, 20U, "%Y:%m:%d %H:%M:%S", &tm_parts);
     return written == 19U;
 }
 

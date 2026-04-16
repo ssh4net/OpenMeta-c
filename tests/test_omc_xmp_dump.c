@@ -47,6 +47,22 @@ contains_text(const omc_u8* bytes, omc_size size, const char* text)
 }
 
 static void
+add_xmp_text_entry(omc_store* store, const char* schema_ns,
+                   const char* property_path, const char* value)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(&entry.key, append_bytes(&store->arena, schema_ns),
+                              append_bytes(&store->arena, property_path));
+    omc_val_make_text(&entry.value, append_bytes(&store->arena, value),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
 test_sidecar_truncation_and_success(void)
 {
     omc_store store;
@@ -121,6 +137,7 @@ test_sidecar_uses_edit_commit_output(void)
     assert(status == OMC_STATUS_OK);
 
     omc_xmp_sidecar_opts_init(&opts);
+    opts.existing_namespace_policy = OMC_XMP_NS_PRESERVE_CUSTOM;
     status = omc_xmp_dump_sidecar(&merged, full, sizeof(full), &opts, &res);
     assert(status == OMC_STATUS_OK);
     assert(res.status == OMC_XMP_DUMP_OK);
@@ -181,7 +198,10 @@ test_sidecar_limits_and_skips_unsupported_properties(void)
     assert(status == OMC_STATUS_OK);
     assert(res.status == OMC_XMP_DUMP_LIMIT);
     assert(res.entries == 1U);
-    assert(contains_text(full, (omc_size)res.written, "<dc:title>hello</dc:title>"));
+    assert(contains_text(full, (omc_size)res.written, "<dc:title>"));
+    assert(contains_text(
+        full, (omc_size)res.written,
+        "<rdf:li xml:lang=\"x-default\">hello</rdf:li>"));
     assert(!contains_text(full, (omc_size)res.written, "bad[1]"));
     assert(!contains_text(full, (omc_size)res.written, "<dc:creator>5</dc:creator>"));
 
@@ -497,10 +517,12 @@ test_sidecar_portable_groups_repeated_iptc_properties(void)
     status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
     assert(status == OMC_STATUS_OK);
     assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(full, (omc_size)res.written, "<dc:title>"));
     assert(contains_text(full, (omc_size)res.written,
-                         "<dc:title>Sunset</dc:title>"));
+                         "<rdf:li xml:lang=\"x-default\">Sunset</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written, "<dc:description>"));
     assert(contains_text(full, (omc_size)res.written,
-                         "<dc:description>Golden hour over lake</dc:description>"));
+                         "<rdf:li xml:lang=\"x-default\">Golden hour over lake</rdf:li>"));
     assert(contains_text(full, (omc_size)res.written, "<dc:creator>"));
     assert(contains_text(full, (omc_size)res.written, "<rdf:Seq>"));
     assert(contains_text(full, (omc_size)res.written, "<rdf:li>Alice</rdf:li>"));
@@ -585,7 +607,9 @@ test_sidecar_portable_conflict_policies(void)
                          "<tiff:Make>Nikon</tiff:Make>"));
     assert(!contains_text(full, (omc_size)res.written,
                           "<tiff:Make>Canon</tiff:Make>"));
-    assert(contains_text(full, (omc_size)res.written, "<dc:title>XMP</dc:title>"));
+    assert(contains_text(full, (omc_size)res.written, "<dc:title>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">XMP</rdf:li>"));
     assert(!contains_text(full, (omc_size)res.written,
                           "<dc:title>IPTC</dc:title>"));
 
@@ -597,7 +621,9 @@ test_sidecar_portable_conflict_policies(void)
                          "<tiff:Make>Canon</tiff:Make>"));
     assert(!contains_text(full, (omc_size)res.written,
                           "<tiff:Make>Nikon</tiff:Make>"));
-    assert(contains_text(full, (omc_size)res.written, "<dc:title>XMP</dc:title>"));
+    assert(contains_text(full, (omc_size)res.written, "<dc:title>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">XMP</rdf:li>"));
     assert(!contains_text(full, (omc_size)res.written,
                           "<dc:title>IPTC</dc:title>"));
 
@@ -609,9 +635,11 @@ test_sidecar_portable_conflict_policies(void)
                          "<tiff:Make>Canon</tiff:Make>"));
     assert(!contains_text(full, (omc_size)res.written,
                           "<tiff:Make>Nikon</tiff:Make>"));
+    assert(contains_text(full, (omc_size)res.written, "<dc:title>"));
     assert(contains_text(full, (omc_size)res.written,
-                         "<dc:title>IPTC</dc:title>"));
-    assert(!contains_text(full, (omc_size)res.written, "<dc:title>XMP</dc:title>"));
+                         "<rdf:li xml:lang=\"x-default\">IPTC</rdf:li>"));
+    assert(!contains_text(full, (omc_size)res.written,
+                          "<rdf:li xml:lang=\"x-default\">XMP</rdf:li>"));
 
     omc_store_fini(&store);
 }
@@ -838,6 +866,2051 @@ test_sidecar_canonicalizes_existing_xmp_property_names(void)
     assert(!contains_text(full, (omc_size)res.written, "<exif:MakerNote>"));
     assert(!contains_text(full, (omc_size)res.written,
                           "<tiff:DNGPrivateData>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_known_portable_only_skips_custom_existing_xmp(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[1024];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key, append_bytes(&store.arena, "urn:test:writeback/"),
+        append_bytes(&store.arena, "Thing"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "42"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(!contains_text(full, (omc_size)res.written, "urn:test:writeback/"));
+    assert(!contains_text(full, (omc_size)res.written,
+                          "<ns1:Thing>42</ns1:Thing>"));
+
+    opts.existing_namespace_policy = OMC_XMP_NS_PRESERVE_CUSTOM;
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(full, (omc_size)res.written,
+                         "xmlns:ns1=\"urn:test:writeback/\""));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<ns1:Thing>42</ns1:Thing>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_lang_alt_emits_grouped_alt(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[2048];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://purl.org/dc/elements/1.1/"),
+        append_bytes(&store.arena, "title[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Legacy Title"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://purl.org/dc/elements/1.1/"),
+        append_bytes(&store.arena, "title[@xml:lang=fr]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Titre"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(res.entries == 1U);
+    assert(contains_text(full, (omc_size)res.written, "<dc:title>"));
+    assert(contains_text(full, (omc_size)res.written, "<rdf:Alt>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Legacy Title</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"fr\">Titre</rdf:li>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_promotes_flat_standard_scalars_to_canonical_shapes(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://purl.org/dc/elements/1.1/"),
+        append_bytes(&store.arena, "title"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Legacy Title"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://purl.org/dc/elements/1.1/"),
+        append_bytes(&store.arena, "subject"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-subject"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://ns.adobe.com/xap/1.0/rights/"),
+        append_bytes(&store.arena, "Owner"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "OpenMeta Labs"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://ns.adobe.com/lightroom/1.0/"),
+        append_bytes(&store.arena, "hierarchicalSubject"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Places|Museum"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(full, (omc_size)res.written, "<dc:title>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Legacy Title</rdf:li>"));
+    assert(!contains_text(full, (omc_size)res.written,
+                          "<dc:title>Legacy Title</dc:title>"));
+    assert(contains_text(full, (omc_size)res.written, "<dc:subject>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li>legacy-subject</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written, "<xmpRights:Owner>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li>OpenMeta Labs</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<lr:hierarchicalSubject>"));
+    assert(contains_text(full, (omc_size)res.written, "<rdf:Bag>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li>Places|Museum</rdf:li>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_lr_hierarchical_subject_emits_bag(void)
+{
+    omc_store store;
+    omc_xmp_sidecar_opts opts;
+    omc_xmp_dump_res res;
+    omc_status status;
+    omc_u8 out[1024];
+
+    omc_store_init(&store);
+    add_xmp_text_entry(&store, "http://ns.adobe.com/lightroom/1.0/",
+                       "hierarchicalSubject[1]", "Places|Japan|Tokyo");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/lightroom/1.0/",
+                       "hierarchicalSubject[2]", "Travel|Spring");
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+
+    status = omc_xmp_dump_sidecar(&store, out, sizeof(out), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(out, (omc_size)res.written,
+                         "<lr:hierarchicalSubject>"));
+    assert(contains_text(out, (omc_size)res.written, "<rdf:Bag>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>Places|Japan|Tokyo</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>Travel|Spring</rdf:li>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_emits_pdf_and_rights_namespaces(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[2048];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key, append_bytes(&store.arena, "http://ns.adobe.com/pdf/1.3/"),
+        append_bytes(&store.arena, "Keywords"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "tokyo,night"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://ns.adobe.com/xap/1.0/rights/"),
+        append_bytes(&store.arena, "Marked"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "True"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(full, (omc_size)res.written,
+                         "xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\""));
+    assert(contains_text(full, (omc_size)res.written,
+                         "xmlns:xmpRights=\"http://ns.adobe.com/xap/1.0/rights/\""));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<pdf:Keywords>tokyo,night</pdf:Keywords>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<xmpRights:Marked>True</xmpRights:Marked>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_canonicalize_managed_prefers_generated_portable_value(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[2048];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_iptc_dataset(&entry.key, 2U, 5U);
+    omc_val_make_bytes(&entry.value, append_bytes(&store.arena, "IPTC Title"));
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://purl.org/dc/elements/1.1/"),
+        append_bytes(&store.arena, "title"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Legacy Title"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 1;
+    opts.conflict_policy = OMC_XMP_CONFLICT_EXISTING_WINS;
+    opts.existing_standard_namespace_policy
+        = OMC_XMP_STD_NS_CANONICALIZE_MANAGED;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(full, (omc_size)res.written, "<dc:title>"));
+    assert(contains_text(full, (omc_size)res.written, "<rdf:Alt>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">IPTC Title</rdf:li>"));
+    assert(!contains_text(full, (omc_size)res.written, "Legacy Title"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_canonicalize_managed_replaces_xdefault_and_preserves_other_locales(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_iptc_dataset(&entry.key, 2U, 5U);
+    omc_val_make_bytes(&entry.value,
+                       append_bytes(&store.arena, "Generated Title"));
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://purl.org/dc/elements/1.1/"),
+        append_bytes(&store.arena, "title[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Default title"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://purl.org/dc/elements/1.1/"),
+        append_bytes(&store.arena, "title[@xml:lang=fr-FR]"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "Titre localise"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 1;
+    opts.conflict_policy = OMC_XMP_CONFLICT_EXISTING_WINS;
+    opts.existing_standard_namespace_policy
+        = OMC_XMP_STD_NS_CANONICALIZE_MANAGED;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(full, (omc_size)res.written, "<dc:title>"));
+    assert(contains_text(full, (omc_size)res.written, "<rdf:Alt>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Generated Title</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"fr-FR\">Titre localise</rdf:li>"));
+    assert(!contains_text(full, (omc_size)res.written,
+                          "<rdf:li xml:lang=\"x-default\">Default title</rdf:li>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_preserves_xmprights_standard_namespace(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_iptc_dataset(&entry.key, 2U, 116U);
+    omc_val_make_bytes(&entry.value,
+                       append_bytes(&store.arena, "Generated copyright"));
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://ns.adobe.com/xap/1.0/rights/"),
+        append_bytes(&store.arena, "UsageTerms[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "Licensed use only"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://ns.adobe.com/xap/1.0/rights/"),
+        append_bytes(&store.arena, "WebStatement"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena,
+                                   "https://example.test/license"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 1;
+    opts.conflict_policy = OMC_XMP_CONFLICT_GENERATED_WINS;
+    opts.existing_standard_namespace_policy
+        = OMC_XMP_STD_NS_CANONICALIZE_MANAGED;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(full, (omc_size)res.written,
+                         "xmlns:xmpRights=\"http://ns.adobe.com/xap/1.0/rights/\""));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Generated copyright</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Licensed use only</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<xmpRights:WebStatement>https://example.test/license</xmpRights:WebStatement>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_core_emits_resource(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"),
+        append_bytes(&store.arena, "CreatorContactInfo/CiEmailWork"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "editor@example.test"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"),
+        append_bytes(&store.arena, "CreatorContactInfo/CiUrlWork"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "https://example.test/contact"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(
+        full, (omc_size)res.written,
+        "xmlns:Iptc4xmpCore=\"http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/\""));
+    assert(contains_text(
+        full, (omc_size)res.written,
+        "<Iptc4xmpCore:CreatorContactInfo rdf:parseType=\"Resource\">"));
+    assert(contains_text(
+        full, (omc_size)res.written,
+        "<Iptc4xmpCore:CiEmailWork>editor@example.test</Iptc4xmpCore:CiEmailWork>"));
+    assert(contains_text(
+        full, (omc_size)res.written,
+        "<Iptc4xmpCore:CiUrlWork>https://example.test/contact</Iptc4xmpCore:CiUrlWork>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_indexed_resources_emit_seq(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown[1]/City"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Paris"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown[1]/CountryName"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "France"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown[2]/City"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Kyoto"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(
+        full, (omc_size)res.written,
+        "xmlns:Iptc4xmpExt=\"http://iptc.org/std/Iptc4xmpExt/2008-02-29/\""));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<Iptc4xmpExt:LocationShown>"));
+    assert(contains_text(full, (omc_size)res.written, "<rdf:Seq>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li rdf:parseType=\"Resource\">"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<Iptc4xmpExt:City>Paris</Iptc4xmpExt:City>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<Iptc4xmpExt:CountryName>France</Iptc4xmpExt:CountryName>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<Iptc4xmpExt:City>Kyoto</Iptc4xmpExt:City>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_canonicalizes_flat_bases(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"),
+        append_bytes(&store.arena, "CreatorContactInfo"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "legacy-flat-contact"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"),
+        append_bytes(&store.arena, "CreatorContactInfo/CiEmailWork"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "editor@example.test"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown/City"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "LegacyParis"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown[1]/City"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Paris"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key, append_bytes(&store.arena,
+                                 "http://ns.useplus.org/ldf/xmp/1.0/"),
+        append_bytes(&store.arena, "Licensee"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-licensee"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key, append_bytes(&store.arena,
+                                 "http://ns.useplus.org/ldf/xmp/1.0/"),
+        append_bytes(&store.arena, "Licensee[1]/LicenseeName"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Example Archive"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(
+        full, (omc_size)res.written,
+        "<Iptc4xmpCore:CreatorContactInfo rdf:parseType=\"Resource\">"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<Iptc4xmpExt:LocationShown>"));
+    assert(contains_text(full, (omc_size)res.written, "<plus:Licensee>"));
+    assert(!contains_text(full, (omc_size)res.written, "legacy-flat-contact"));
+    assert(!contains_text(full, (omc_size)res.written, "LegacyParis"));
+    assert(!contains_text(full, (omc_size)res.written, "legacy-licensee"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_nested_and_lang_alt(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"),
+        append_bytes(&store.arena,
+                     "CreatorContactInfo/CiAdrRegion/ProvinceName[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Tokyo"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"),
+        append_bytes(&store.arena,
+                     "CreatorContactInfo/CiAdrRegion/ProvinceName[@xml:lang=ja-JP]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "東京"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(
+        full, (omc_size)res.written,
+        "<Iptc4xmpCore:CreatorContactInfo rdf:parseType=\"Resource\">"));
+    assert(contains_text(
+        full, (omc_size)res.written,
+        "<Iptc4xmpCore:CiAdrRegion rdf:parseType=\"Resource\">"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<Iptc4xmpCore:ProvinceName>"));
+    assert(contains_text(full, (omc_size)res.written, "<rdf:Alt>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Tokyo</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"ja-JP\">東京</rdf:li>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_child_indexed_seq(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"),
+        append_bytes(&store.arena, "CreatorContactInfo/CiAdrExtadr"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-line"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"),
+        append_bytes(&store.arena, "CreatorContactInfo/CiAdrExtadr[1]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Line 1"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"),
+        append_bytes(&store.arena, "CreatorContactInfo/CiAdrExtadr[2]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Line 2"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(
+        full, (omc_size)res.written,
+        "<Iptc4xmpCore:CreatorContactInfo rdf:parseType=\"Resource\">"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<Iptc4xmpCore:CiAdrExtadr>"));
+    assert(contains_text(full, (omc_size)res.written, "<rdf:Seq>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li>Line 1</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li>Line 2</rdf:li>"));
+    assert(!contains_text(full, (omc_size)res.written, "legacy-line"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_mixed_namespace_children(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown[1]/xmp:Identifier[1]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "loc-001"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown[1]/xmp:Identifier[2]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "loc-002"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown[1]/exif:GPSLatitude"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "41,24.5N"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown[1]/exif:GPSLongitude"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "2,9E"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(full, (omc_size)res.written,
+                         "<Iptc4xmpExt:LocationShown>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<xmp:Identifier xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\">"));
+    assert(contains_text(full, (omc_size)res.written, "<rdf:Bag>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li>loc-001</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li>loc-002</rdf:li>"));
+    assert(contains_text(
+        full, (omc_size)res.written,
+        "<exif:GPSLatitude xmlns:exif=\"http://ns.adobe.com/exif/1.0/\">41,24.5N</exif:GPSLatitude>"));
+    assert(contains_text(
+        full, (omc_size)res.written,
+        "<exif:GPSLongitude xmlns:exif=\"http://ns.adobe.com/exif/1.0/\">2,9E</exif:GPSLongitude>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_location_child_shapes(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 full[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown[1]/LocationName"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-name"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena,
+                     "LocationShown[1]/LocationName[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Kyoto"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena,
+                     "LocationShown[1]/LocationName[@xml:lang=fr-FR]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Kyoto FR"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown[1]/LocationId"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-id"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown[1]/LocationId[1]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "loc-001"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena,
+                     "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "LocationShown[1]/LocationId[2]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "loc-002"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_existing_xmp = 1;
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+
+    status = omc_xmp_dump_sidecar(&store, full, sizeof(full), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(full, (omc_size)res.written,
+                         "<Iptc4xmpExt:LocationShown>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<Iptc4xmpExt:LocationName>"));
+    assert(contains_text(full, (omc_size)res.written, "<rdf:Alt>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Kyoto</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"fr-FR\">Kyoto FR</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<Iptc4xmpExt:LocationId>"));
+    assert(contains_text(full, (omc_size)res.written, "<rdf:Bag>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li>loc-001</rdf:li>"));
+    assert(contains_text(full, (omc_size)res.written,
+                         "<rdf:li>loc-002</rdf:li>"));
+    assert(!contains_text(full, (omc_size)res.written, "legacy-name"));
+    assert(!contains_text(full, (omc_size)res.written, "legacy-id"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_creator_shapes(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_sidecar_opts opts;
+    omc_xmp_dump_res res;
+    omc_status status;
+    omc_u8 out[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Creator"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-creator"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Creator[1]/Name"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-name"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Creator[1]/Name[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Alice Example"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Creator[1]/Name[@xml:lang=ja-JP]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "\xE3\x82\xA2\xE3\x83\xAA\xE3\x82\xB9"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Creator[1]/Role"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-role"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Creator[1]/Role[1]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "photographer"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Creator[1]/Role[2]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "editor"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+    opts.include_existing_xmp = 1;
+
+    status = omc_xmp_dump_sidecar(&store, out, sizeof(out), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(out, (omc_size)res.written, "<Iptc4xmpExt:Creator>"));
+    assert(contains_text(out, (omc_size)res.written, "<Iptc4xmpExt:Name>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Alice Example</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"ja-JP\">\xE3\x82\xA2\xE3\x83\xAA\xE3\x82\xB9</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written, "<Iptc4xmpExt:Role>"));
+    assert(contains_text(out, (omc_size)res.written, "<rdf:Bag>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>photographer</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>editor</rdf:li>"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-creator"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-name"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-role"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_artwork_shapes(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_sidecar_opts opts;
+    omc_xmp_dump_res res;
+    omc_status status;
+    omc_u8 out[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ArtworkOrObject"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-artwork"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ArtworkOrObject[1]/AOTitle"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-title"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ArtworkOrObject[1]/AOTitle[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Sunset Study"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ArtworkOrObject[1]/AOCreator"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-creator"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ArtworkOrObject[1]/AOCreator[1]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Alice Example"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ArtworkOrObject[1]/AOCreator[2]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Bob Example"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ArtworkOrObject[1]/AOStylePeriod"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-style"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ArtworkOrObject[1]/AOStylePeriod[1]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Impressionism"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ArtworkOrObject[1]/AOStylePeriod[2]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Modernism"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+    opts.include_existing_xmp = 1;
+
+    status = omc_xmp_dump_sidecar(&store, out, sizeof(out), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(out, (omc_size)res.written,
+                         "<Iptc4xmpExt:ArtworkOrObject>"));
+    assert(contains_text(out, (omc_size)res.written, "<Iptc4xmpExt:AOTitle>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Sunset Study</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<Iptc4xmpExt:AOCreator>"));
+    assert(contains_text(out, (omc_size)res.written, "<rdf:Seq>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>Alice Example</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>Bob Example</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<Iptc4xmpExt:AOStylePeriod>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>Impressionism</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>Modernism</rdf:li>"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-artwork"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-title"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-creator"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-style"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_person_and_cvterm_shapes(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_sidecar_opts opts;
+    omc_xmp_dump_res res;
+    omc_status status;
+    omc_u8 out[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PersonInImageWDetails"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-person"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PersonInImageWDetails[1]/PersonName"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-person-name"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PersonInImageWDetails[1]/PersonName[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Jane Doe"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PersonInImageWDetails[1]/PersonId"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-person-id"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PersonInImageWDetails[1]/PersonId[1]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "person-001"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PersonInImageWDetails[1]/PersonId[2]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "person-002"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "AboutCvTerm[1]/CvTermName"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Culture"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ProductInImage"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-product"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ProductInImage[1]/ProductName"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-product-name"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ProductInImage[1]/ProductName[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Camera Body"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ProductInImage[1]/ProductDescription"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "legacy-product-desc"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ProductInImage[1]/ProductDescription[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Mirrorless"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+    opts.include_existing_xmp = 1;
+
+    status = omc_xmp_dump_sidecar(&store, out, sizeof(out), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(out, (omc_size)res.written,
+                         "<Iptc4xmpExt:PersonInImageWDetails>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<Iptc4xmpExt:PersonName>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Jane Doe</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written, "<Iptc4xmpExt:PersonId>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>person-001</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>person-002</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<Iptc4xmpExt:AboutCvTerm>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<Iptc4xmpExt:CvTermName>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Culture</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<Iptc4xmpExt:ProductInImage>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<Iptc4xmpExt:ProductName>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Camera Body</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Mirrorless</rdf:li>"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-person"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-person-name"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-person-id"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-product"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-product-name"));
+    assert(!contains_text(out, (omc_size)res.written, "legacy-product-desc"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_flat_child_scalars_promote(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_sidecar_opts opts;
+    omc_xmp_dump_res res;
+    omc_status status;
+    omc_u8 out[4096];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Creator[1]/Name"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Alice Flat"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Creator[1]/Role"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "photographer"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ArtworkOrObject[1]/AOCreator"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Alice Example"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PersonInImageWDetails[1]/PersonId"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "person-001"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "AboutCvTerm[1]/CvTermName"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Culture"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+    opts.include_existing_xmp = 1;
+
+    status = omc_xmp_dump_sidecar(&store, out, sizeof(out), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Alice Flat</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written, "<Iptc4xmpExt:Role>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>photographer</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<Iptc4xmpExt:AOCreator>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>Alice Example</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<Iptc4xmpExt:PersonId>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>person-001</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<Iptc4xmpExt:CvTermName>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Culture</rdf:li>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<Iptc4xmpExt:Role>photographer</Iptc4xmpExt:Role>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_remaining_indexed_base_shapes(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_sidecar_opts opts;
+    omc_xmp_dump_res res;
+    omc_status status;
+    omc_u8 out[8192];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Contributor"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "legacy-contributor-base"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Contributor[1]/Name[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Desk Editor"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Contributor[1]/Role[1]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "editor"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PlanningRef"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "legacy-planning-base"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PlanningRef[1]/Name[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Editorial Plan"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PlanningRef[1]/Role[1]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "assignment"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PersonHeard"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "legacy-person-heard-base"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PersonHeard[1]/Name[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Witness"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ShownEvent"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "legacy-shown-event-base"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ShownEvent[1]/Name[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Press Conference"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "SupplyChainSource"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "legacy-supply-chain-base"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "SupplyChainSource[1]/Name[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Agency Feed"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "VideoShotType"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "legacy-video-shot-base"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "VideoShotType[1]/Name[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Interview"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "DopesheetLink"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "legacy-dopesheet-base"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "DopesheetLink[1]/LinkQualifier[1]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "keyframe"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Snapshot"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "legacy-snapshot-base"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Snapshot[1]/LinkQualifier[1]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "frame-001"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "TranscriptLink"));
+    omc_val_make_text(&entry.value,
+                      append_bytes(&store.arena, "legacy-transcript-base"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "TranscriptLink[1]/LinkQualifier[1]"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "quote"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+    opts.include_existing_xmp = 1;
+
+    status = omc_xmp_dump_sidecar(&store, out, sizeof(out), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Desk Editor</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>editor</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Editorial Plan</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>assignment</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Witness</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Press Conference</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Agency Feed</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Interview</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>keyframe</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>frame-001</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>quote</rdf:li>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "legacy-contributor-base"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "legacy-planning-base"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "legacy-person-heard-base"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "legacy-shown-event-base"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "legacy-supply-chain-base"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "legacy-video-shot-base"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "legacy-dopesheet-base"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "legacy-snapshot-base"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "legacy-transcript-base"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_structured_remaining_flat_child_promotions(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_xmp_sidecar_opts opts;
+    omc_xmp_dump_res res;
+    omc_status status;
+    omc_u8 out[8192];
+
+    omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Contributor[1]/Name"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Desk Editor"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Contributor[1]/Role"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "editor"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PlanningRef[1]/Name"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Editorial Plan"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "PlanningRef[1]/Role"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "assignment"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "ShownEvent[1]/Name"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Press Conference"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "SupplyChainSource[1]/Name"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Agency Feed"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "VideoShotType[1]/Name"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "Interview"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "Snapshot[1]/LinkQualifier"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "frame-001"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_bytes(&store.arena, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_bytes(&store.arena, "TranscriptLink[1]/LinkQualifier"));
+    omc_val_make_text(&entry.value, append_bytes(&store.arena, "quote"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+    opts.include_existing_xmp = 1;
+
+    status = omc_xmp_dump_sidecar(&store, out, sizeof(out), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Desk Editor</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>editor</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Editorial Plan</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>assignment</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Press Conference</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Agency Feed</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li xml:lang=\"x-default\">Interview</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>frame-001</rdf:li>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<rdf:li>quote</rdf:li>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<Iptc4xmpExt:Name>Desk Editor</Iptc4xmpExt:Name>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<Iptc4xmpExt:Role>editor</Iptc4xmpExt:Role>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<Iptc4xmpExt:Name>Editorial Plan</Iptc4xmpExt:Name>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<Iptc4xmpExt:Role>assignment</Iptc4xmpExt:Role>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<Iptc4xmpExt:Name>Press Conference</Iptc4xmpExt:Name>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<Iptc4xmpExt:Name>Agency Feed</Iptc4xmpExt:Name>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<Iptc4xmpExt:Name>Interview</Iptc4xmpExt:Name>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<Iptc4xmpExt:LinkQualifier>frame-001</Iptc4xmpExt:LinkQualifier>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<Iptc4xmpExt:LinkQualifier>quote</Iptc4xmpExt:LinkQualifier>"));
+
+    omc_store_fini(&store);
+}
+
+static void
+test_sidecar_existing_xmpmm_structured_resources(void)
+{
+    omc_store store;
+    omc_xmp_dump_res res;
+    omc_xmp_sidecar_opts opts;
+    omc_status status;
+    omc_u8 out[8192];
+
+    omc_store_init(&store);
+
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "DerivedFrom", "legacy-derived");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "DerivedFrom/stRef:documentID", "xmp.did:base");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "DerivedFrom/stRef:instanceID", "xmp.iid:base");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "ManagedFrom", "legacy-managed");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "ManagedFrom/stRef:documentID", "xmp.did:managed");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "RenditionOf", "legacy-rendition");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "RenditionOf/stRef:filePath", "/tmp/rendition.jpg");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Ingredients", "legacy-ingredients");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Ingredients[1]/stRef:documentID",
+                       "xmp.did:ingredient");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Manifest", "legacy-manifest");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Manifest[1]/stMfs:linkForm", "EmbedByReference");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Manifest[1]/stMfs:reference/stRef:filePath",
+                       "C:\\some path\\file.ext");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "History", "legacy-history");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "History[1]/stEvt:action", "saved");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions", "legacy-versions");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions[1]/stVer:event", "legacy-event");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions[1]/stVer:version", "1.0");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions[1]/stVer:event/stEvt:action", "saved");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Pantry", "legacy-pantry");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Pantry[1]/InstanceID", "uuid:pantry-1");
+    add_xmp_text_entry(&store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Pantry[1]/dc:format", "image/jpeg");
+
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_exif = 0;
+    opts.include_iptc = 0;
+    opts.include_existing_xmp = 1;
+
+    status = omc_xmp_dump_sidecar(&store, out, sizeof(out), &opts, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(out, (omc_size)res.written,
+                         "xmlns:stRef=\"http://ns.adobe.com/xap/1.0/sType/ResourceRef#\""));
+    assert(contains_text(out, (omc_size)res.written,
+                         "xmlns:stEvt=\"http://ns.adobe.com/xap/1.0/sType/ResourceEvent#\""));
+    assert(contains_text(out, (omc_size)res.written,
+                         "xmlns:stVer=\"http://ns.adobe.com/xap/1.0/sType/Version#\""));
+    assert(contains_text(out, (omc_size)res.written,
+                         "xmlns:stMfs=\"http://ns.adobe.com/xap/1.0/sType/ManifestItem#\""));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<xmpMM:DerivedFrom rdf:parseType=\"Resource\">"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "xmp.did:base</stRef:documentID>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<xmpMM:ManagedFrom rdf:parseType=\"Resource\">"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<xmpMM:RenditionOf rdf:parseType=\"Resource\">"));
+    assert(contains_text(out, (omc_size)res.written, "<xmpMM:Ingredients>"));
+    assert(contains_text(out, (omc_size)res.written, "<rdf:Bag>"));
+    assert(contains_text(out, (omc_size)res.written, "<xmpMM:Manifest>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<stMfs:reference"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "rdf:parseType=\"Resource\""));
+    assert(contains_text(out, (omc_size)res.written, "<xmpMM:History>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "saved</stEvt:action>"));
+    assert(contains_text(out, (omc_size)res.written, "<xmpMM:Versions>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<stVer:event"));
+    assert(contains_text(out, (omc_size)res.written, "<xmpMM:Pantry>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "<xmpMM:InstanceID>uuid:pantry-1</xmpMM:InstanceID>"));
+    assert(contains_text(out, (omc_size)res.written,
+                         "image/jpeg</dc:format>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<xmpMM:DerivedFrom>legacy-derived</xmpMM:DerivedFrom>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<xmpMM:ManagedFrom>legacy-managed</xmpMM:ManagedFrom>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<xmpMM:Ingredients>legacy-ingredients</xmpMM:Ingredients>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<xmpMM:Manifest>legacy-manifest</xmpMM:Manifest>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<xmpMM:History>legacy-history</xmpMM:History>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<xmpMM:Versions>legacy-versions</xmpMM:Versions>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<stVer:event>legacy-event</stVer:event>"));
+    assert(!contains_text(out, (omc_size)res.written,
+                          "<xmpMM:Pantry>legacy-pantry</xmpMM:Pantry>"));
 
     omc_store_fini(&store);
 }
@@ -2060,6 +4133,28 @@ main(void)
     test_sidecar_portable_generated_iptc_overrides_existing_indexed_xmp();
     test_sidecar_existing_indexed_xmp_emits_grouped_array();
     test_sidecar_canonicalizes_existing_xmp_property_names();
+    test_sidecar_known_portable_only_skips_custom_existing_xmp();
+    test_sidecar_existing_lang_alt_emits_grouped_alt();
+    test_sidecar_promotes_flat_standard_scalars_to_canonical_shapes();
+    test_sidecar_existing_lr_hierarchical_subject_emits_bag();
+    test_sidecar_emits_pdf_and_rights_namespaces();
+    test_sidecar_canonicalize_managed_prefers_generated_portable_value();
+    test_sidecar_canonicalize_managed_replaces_xdefault_and_preserves_other_locales();
+    test_sidecar_preserves_xmprights_standard_namespace();
+    test_sidecar_existing_structured_core_emits_resource();
+    test_sidecar_existing_structured_indexed_resources_emit_seq();
+    test_sidecar_existing_structured_canonicalizes_flat_bases();
+    test_sidecar_existing_structured_nested_and_lang_alt();
+    test_sidecar_existing_structured_child_indexed_seq();
+    test_sidecar_existing_structured_mixed_namespace_children();
+    test_sidecar_existing_structured_location_child_shapes();
+    test_sidecar_existing_structured_creator_shapes();
+    test_sidecar_existing_structured_artwork_shapes();
+    test_sidecar_existing_structured_person_and_cvterm_shapes();
+    test_sidecar_existing_structured_flat_child_scalars_promote();
+    test_sidecar_existing_structured_remaining_indexed_base_shapes();
+    test_sidecar_existing_structured_remaining_flat_child_promotions();
+    test_sidecar_existing_xmpmm_structured_resources();
     test_sidecar_portable_formats_common_exif_and_gps_values();
     test_sidecar_portable_skips_invalid_gps_values();
     test_sidecar_portable_alias_and_gps_text_overrides();

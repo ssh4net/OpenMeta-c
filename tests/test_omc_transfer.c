@@ -30,6 +30,24 @@ append_store_raw(omc_arena* arena, const void* src, omc_size size)
     return ref;
 }
 
+static int
+contains_text(const omc_u8* bytes, omc_size size, const char* text)
+{
+    omc_size text_size;
+    omc_size i;
+
+    text_size = strlen(text);
+    if (text_size > size) {
+        return 0;
+    }
+    for (i = 0U; i + text_size <= size; ++i) {
+        if (memcmp(bytes + i, text, text_size) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void
 append_u8(omc_u8* out, omc_size* io_size, omc_u8 value)
 {
@@ -416,6 +434,407 @@ build_store_with_creator_tool(omc_store* store, const char* tool)
                       OMC_TEXT_UTF8);
     status = omc_store_add_entry(store, &entry, NULL);
     assert(status == OMC_STATUS_OK);
+}
+
+static void
+build_store_with_custom_flag(omc_store* store)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena, "urn:vendor:test:1.0/"),
+        append_store_bytes(&store->arena, "Flag"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "Alpha"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+build_store_with_creator_contact_info(omc_store* store)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"),
+        append_store_bytes(&store->arena, "CreatorContactInfo/CiEmailWork"));
+    omc_val_make_text(&entry.value,
+                      append_store_bytes(&store->arena,
+                                         "editor@example.test"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"),
+        append_store_bytes(&store->arena, "CreatorContactInfo/CiUrlWork"));
+    omc_val_make_text(&entry.value,
+                      append_store_bytes(&store->arena,
+                                         "https://example.test/contact"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+build_store_with_mixed_location_shown_details(omc_store* store)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_store_bytes(&store->arena, "LocationShown[1]/xmp:Identifier[1]"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "loc-001"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_store_bytes(&store->arena, "LocationShown[1]/xmp:Identifier[2]"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "loc-002"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_store_bytes(&store->arena, "LocationShown[1]/exif:GPSLatitude"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "41,24.5N"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_store_bytes(&store->arena, "LocationShown[1]/exif:GPSLongitude"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "2,9E"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+add_xmp_text_entry(omc_store* store, const char* schema_ns,
+                   const char* property_path, const char* value)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(&entry.key,
+                              append_store_bytes(&store->arena, schema_ns),
+                              append_store_bytes(&store->arena, property_path));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, value),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+build_store_with_pdf_and_rights_namespaces(omc_store* store)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena, "http://ns.adobe.com/pdf/1.3/"),
+        append_store_bytes(&store->arena, "Keywords"));
+    omc_val_make_text(&entry.value,
+                      append_store_bytes(&store->arena, "tokyo,night"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://ns.adobe.com/xap/1.0/rights/"),
+        append_store_bytes(&store->arena, "Marked"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "True"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+build_store_with_rights_canonicalized(omc_store* store)
+{
+    omc_entry entry;
+    omc_status status;
+    static const char k_rights[] = "Generated copyright";
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_iptc_dataset(&entry.key, 2U, 116U);
+    omc_val_make_bytes(&entry.value,
+                       append_store_bytes(&store->arena, k_rights));
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://ns.adobe.com/xap/1.0/rights/"),
+        append_store_bytes(&store->arena, "UsageTerms[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value,
+                      append_store_bytes(&store->arena, "Licensed use only"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://ns.adobe.com/xap/1.0/rights/"),
+        append_store_bytes(&store->arena, "WebStatement"));
+    omc_val_make_text(&entry.value,
+                      append_store_bytes(&store->arena,
+                                         "https://example.test/license"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+build_store_with_location_child_shapes(omc_store* store)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_store_bytes(&store->arena, "LocationShown[1]/LocationName"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "legacy-name"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_store_bytes(&store->arena,
+                           "LocationShown[1]/LocationName[@xml:lang=x-default]"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "Kyoto"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_store_bytes(&store->arena,
+                           "LocationShown[1]/LocationName[@xml:lang=fr-FR]"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "Kyoto FR"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_store_bytes(&store->arena, "LocationShown[1]/LocationId"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "legacy-id"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_store_bytes(&store->arena, "LocationShown[1]/LocationId[1]"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "loc-001"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena,
+                           "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"),
+        append_store_bytes(&store->arena, "LocationShown[1]/LocationId[2]"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "loc-002"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+build_store_with_xmpmm_namespace(omc_store* store)
+{
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "DocumentID", "xmp.did:1234");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "InstanceID", "xmp.iid:5678");
+}
+
+static void
+build_store_with_xmpmm_structured_resources(omc_store* store)
+{
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "DerivedFrom", "legacy-derived");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "DerivedFrom/stRef:documentID", "xmp.did:base");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "ManagedFrom", "legacy-managed");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "ManagedFrom/stRef:documentID", "xmp.did:managed");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Ingredients", "legacy-ingredients");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Ingredients[1]/stRef:documentID",
+                       "xmp.did:ingredient");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Manifest", "legacy-manifest");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Manifest[1]/stMfs:linkForm", "EmbedByReference");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Manifest[1]/stMfs:reference/stRef:filePath",
+                       "C:\\some path\\file.ext");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "History", "legacy-history");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "History[1]/stEvt:action", "saved");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions", "legacy-versions");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions[1]/stVer:event", "legacy-event");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions[1]/stVer:version", "1.0");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions[1]/stVer:event/stEvt:action", "saved");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Pantry", "legacy-pantry");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Pantry[1]/InstanceID", "uuid:pantry-1");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Pantry[1]/dc:format", "image/jpeg");
+}
+
+static void
+build_store_with_advisory_bag(omc_store* store)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena, "http://ns.adobe.com/xap/1.0/"),
+        append_store_bytes(&store->arena, "Advisory[1]"));
+    omc_val_make_text(&entry.value,
+                      append_store_bytes(&store->arena, "xmp:MetadataDate"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena, "http://ns.adobe.com/xap/1.0/"),
+        append_store_bytes(&store->arena, "Advisory[2]"));
+    omc_val_make_text(&entry.value,
+                      append_store_bytes(&store->arena, "photoshop:City"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+build_store_with_language_and_date(omc_store* store)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena, "http://purl.org/dc/elements/1.1/"),
+        append_store_bytes(&store->arena, "language[1]"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "en-US"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena, "http://purl.org/dc/elements/1.1/"),
+        append_store_bytes(&store->arena, "language[2]"));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, "fr-FR"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena, "http://purl.org/dc/elements/1.1/"),
+        append_store_bytes(&store->arena, "date[1]"));
+    omc_val_make_text(&entry.value,
+                      append_store_bytes(&store->arena, "2026-04-15"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(
+        &entry.key,
+        append_store_bytes(&store->arena, "http://purl.org/dc/elements/1.1/"),
+        append_store_bytes(&store->arena, "date[2]"));
+    omc_val_make_text(&entry.value,
+                      append_store_bytes(&store->arena, "2026-04-16"),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+build_store_with_lr_hierarchical_subject(omc_store* store)
+{
+    add_xmp_text_entry(store, "http://ns.adobe.com/lightroom/1.0/",
+                       "hierarchicalSubject[1]", "Places|Japan|Tokyo");
+    add_xmp_text_entry(store, "http://ns.adobe.com/lightroom/1.0/",
+                       "hierarchicalSubject[2]", "Travel|Spring");
 }
 
 static void
@@ -2685,6 +3104,710 @@ test_transfer_prepare_reports_unsupported_for_embedded_only_gif(void)
     omc_store_fini(&store);
 }
 
+static void
+test_transfer_execute_embedded_and_sidecar_uses_sidecar_policy_for_embedded_custom_namespace(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_custom_flag(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+    opts.sidecar.portable_existing_namespace_policy =
+        OMC_XMP_NS_PRESERVE_CUSTOM;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "urn:vendor:test:1.0/"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "Flag>Alpha</"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "urn:vendor:test:1.0/"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "Flag>Alpha</"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_preserves_structured_creator_contact_info(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_creator_contact_info(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(
+        edited_out.data, edited_out.size,
+        "<Iptc4xmpCore:CreatorContactInfo rdf:parseType=\"Resource\">"));
+    assert(contains_text(
+        edited_out.data, edited_out.size,
+        "<Iptc4xmpCore:CiEmailWork>editor@example.test</Iptc4xmpCore:CiEmailWork>"));
+    assert(contains_text(
+        sidecar_out.data, sidecar_out.size,
+        "<Iptc4xmpCore:CreatorContactInfo rdf:parseType=\"Resource\">"));
+    assert(contains_text(
+        sidecar_out.data, sidecar_out.size,
+        "<Iptc4xmpCore:CiEmailWork>editor@example.test</Iptc4xmpCore:CiEmailWork>"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_preserves_mixed_namespace_location_details(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_mixed_location_shown_details(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<Iptc4xmpExt:LocationShown>"));
+    assert(contains_text(
+        edited_out.data, edited_out.size,
+        "<xmp:Identifier xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\">"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>loc-001</rdf:li>"));
+    assert(contains_text(
+        edited_out.data, edited_out.size,
+        "<exif:GPSLatitude xmlns:exif=\"http://ns.adobe.com/exif/1.0/\">41,24.5N</exif:GPSLatitude>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<Iptc4xmpExt:LocationShown>"));
+    assert(contains_text(
+        sidecar_out.data, sidecar_out.size,
+        "<xmp:Identifier xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\">"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>loc-001</rdf:li>"));
+    assert(contains_text(
+        sidecar_out.data, sidecar_out.size,
+        "<exif:GPSLatitude xmlns:exif=\"http://ns.adobe.com/exif/1.0/\">41,24.5N</exif:GPSLatitude>"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_preserves_xmpmm_namespace(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_xmpmm_namespace(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "xmlns:xmpMM=\"http://ns.adobe.com/xap/1.0/mm/\""));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<xmpMM:DocumentID>xmp.did:1234</xmpMM:DocumentID>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<xmpMM:InstanceID>xmp.iid:5678</xmpMM:InstanceID>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "xmlns:xmpMM=\"http://ns.adobe.com/xap/1.0/mm/\""));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<xmpMM:DocumentID>xmp.did:1234</xmpMM:DocumentID>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<xmpMM:InstanceID>xmp.iid:5678</xmpMM:InstanceID>"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_preserves_xmpmm_structured_resources(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_xmpmm_structured_resources(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "xmlns:stRef=\"http://ns.adobe.com/xap/1.0/sType/ResourceRef#\""));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<xmpMM:DerivedFrom rdf:parseType=\"Resource\">"));
+    assert(contains_text(edited_out.data, edited_out.size, "<xmpMM:Ingredients>"));
+    assert(contains_text(edited_out.data, edited_out.size, "<rdf:Bag>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<stMfs:reference"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "rdf:parseType=\"Resource\""));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<stVer:event"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<xmpMM:InstanceID>uuid:pantry-1</xmpMM:InstanceID>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "image/jpeg</dc:format>"));
+    assert(!contains_text(edited_out.data, edited_out.size, "legacy-derived"));
+    assert(!contains_text(edited_out.data, edited_out.size, "legacy-managed"));
+    assert(!contains_text(edited_out.data, edited_out.size,
+                          "legacy-ingredients"));
+    assert(!contains_text(edited_out.data, edited_out.size, "legacy-manifest"));
+    assert(!contains_text(edited_out.data, edited_out.size, "legacy-history"));
+    assert(!contains_text(edited_out.data, edited_out.size, "legacy-versions"));
+    assert(!contains_text(edited_out.data, edited_out.size, "legacy-event"));
+    assert(!contains_text(edited_out.data, edited_out.size, "legacy-pantry"));
+
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "xmlns:stRef=\"http://ns.adobe.com/xap/1.0/sType/ResourceRef#\""));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<xmpMM:DerivedFrom rdf:parseType=\"Resource\">"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<xmpMM:Ingredients>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<rdf:Bag>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<stMfs:reference"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "rdf:parseType=\"Resource\""));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<stVer:event"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<xmpMM:InstanceID>uuid:pantry-1</xmpMM:InstanceID>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "image/jpeg</dc:format>"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size, "legacy-derived"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size, "legacy-managed"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size,
+                          "legacy-ingredients"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size, "legacy-manifest"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size, "legacy-history"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size, "legacy-versions"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size, "legacy-event"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size, "legacy-pantry"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_preserves_xmp_advisory_bag(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_advisory_bag(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size, "<xmp:Advisory>"));
+    assert(contains_text(edited_out.data, edited_out.size, "<rdf:Bag>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>xmp:MetadataDate</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>photoshop:City</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<xmp:Advisory>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<rdf:Bag>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>xmp:MetadataDate</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>photoshop:City</rdf:li>"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_preserves_dc_language_and_date(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_language_and_date(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size, "<dc:language>"));
+    assert(contains_text(edited_out.data, edited_out.size, "<rdf:Bag>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>en-US</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>fr-FR</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size, "<dc:date>"));
+    assert(contains_text(edited_out.data, edited_out.size, "<rdf:Seq>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>2026-04-15</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>2026-04-16</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<dc:language>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<rdf:Bag>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>en-US</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>fr-FR</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<dc:date>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<rdf:Seq>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>2026-04-15</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>2026-04-16</rdf:li>"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_preserves_lr_hierarchical_subject(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_lr_hierarchical_subject(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<lr:hierarchicalSubject>"));
+    assert(contains_text(edited_out.data, edited_out.size, "<rdf:Bag>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>Places|Japan|Tokyo</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>Travel|Spring</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<lr:hierarchicalSubject>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<rdf:Bag>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>Places|Japan|Tokyo</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>Travel|Spring</rdf:li>"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_preserves_pdf_and_rights_namespaces(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_pdf_and_rights_namespaces(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<pdf:Keywords>tokyo,night</pdf:Keywords>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<xmpRights:Marked>True</xmpRights:Marked>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<pdf:Keywords>tokyo,night</pdf:Keywords>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<xmpRights:Marked>True</xmpRights:Marked>"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_canonicalizes_xmprights_usage_terms(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_rights_canonicalized(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 1;
+    opts.sidecar.include_existing_xmp = 1;
+    opts.sidecar.portable_conflict_policy = OMC_XMP_CONFLICT_GENERATED_WINS;
+    opts.sidecar.portable_existing_standard_namespace_policy =
+        OMC_XMP_STD_NS_CANONICALIZE_MANAGED;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Generated copyright</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Licensed use only</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<xmpRights:WebStatement>https://example.test/license</xmpRights:WebStatement>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Generated copyright</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Licensed use only</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<xmpRights:WebStatement>https://example.test/license</xmpRights:WebStatement>"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_canonicalizes_location_child_shapes(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_location_child_shapes(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Kyoto</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"fr-FR\">Kyoto FR</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>loc-001</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>loc-002</rdf:li>"));
+    assert(!contains_text(edited_out.data, edited_out.size, "legacy-name"));
+    assert(!contains_text(edited_out.data, edited_out.size, "legacy-id"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Kyoto</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"fr-FR\">Kyoto FR</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>loc-001</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>loc-002</rdf:li>"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size, "legacy-name"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size, "legacy-id"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
 int
 main(void)
 {
@@ -2705,5 +3828,16 @@ main(void)
     test_transfer_execute_jpeg_sidecar_only_strip_source_exif();
     test_transfer_execute_jpeg_sidecar_only_strip();
     test_transfer_prepare_reports_unsupported_for_embedded_only_gif();
+    test_transfer_execute_embedded_and_sidecar_uses_sidecar_policy_for_embedded_custom_namespace();
+    test_transfer_execute_embedded_and_sidecar_preserves_structured_creator_contact_info();
+    test_transfer_execute_embedded_and_sidecar_preserves_mixed_namespace_location_details();
+    test_transfer_execute_embedded_and_sidecar_preserves_xmpmm_namespace();
+    test_transfer_execute_embedded_and_sidecar_preserves_xmpmm_structured_resources();
+    test_transfer_execute_embedded_and_sidecar_preserves_xmp_advisory_bag();
+    test_transfer_execute_embedded_and_sidecar_preserves_dc_language_and_date();
+    test_transfer_execute_embedded_and_sidecar_preserves_lr_hierarchical_subject();
+    test_transfer_execute_embedded_and_sidecar_preserves_pdf_and_rights_namespaces();
+    test_transfer_execute_embedded_and_sidecar_canonicalizes_xmprights_usage_terms();
+    test_transfer_execute_embedded_and_sidecar_canonicalizes_location_child_shapes();
     return 0;
 }

@@ -24,11 +24,24 @@ typedef enum omc_xmp_conflict_policy {
     OMC_XMP_CONFLICT_GENERATED_WINS = 2
 } omc_xmp_conflict_policy;
 
+typedef enum omc_xmp_existing_namespace_policy {
+    OMC_XMP_NS_KNOWN_PORTABLE_ONLY = 0,
+    OMC_XMP_NS_PRESERVE_CUSTOM = 1
+} omc_xmp_existing_namespace_policy;
+
+typedef enum omc_xmp_existing_standard_namespace_policy {
+    OMC_XMP_STD_NS_PRESERVE_ALL = 0,
+    OMC_XMP_STD_NS_CANONICALIZE_MANAGED = 1
+} omc_xmp_existing_standard_namespace_policy;
+
 typedef struct omc_xmp_sidecar_opts {
     omc_xmp_dump_limits limits;
     int include_existing_xmp;
     int include_exif;
     int include_iptc;
+    omc_xmp_existing_namespace_policy existing_namespace_policy;
+    omc_xmp_existing_standard_namespace_policy
+        existing_standard_namespace_policy;
     omc_xmp_conflict_policy conflict_policy;
     int exiftool_gpsdatetime_alias;
 } omc_xmp_sidecar_opts;
@@ -68,6 +81,9 @@ typedef struct omc_xmp_sidecar_req {
     int include_exif;
     int include_iptc;
     int include_existing_xmp;
+    omc_xmp_existing_namespace_policy portable_existing_namespace_policy;
+    omc_xmp_existing_standard_namespace_policy
+        portable_existing_standard_namespace_policy;
     omc_xmp_conflict_policy portable_conflict_policy;
     int portable_exiftool_gpsdatetime_alias;
     int include_origin;

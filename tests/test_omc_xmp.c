@@ -47,6 +47,50 @@ assert_text_value(const omc_store* store, const omc_entry* entry,
 }
 
 static void
+test_limit_on_overflowing_depth_cap(void)
+{
+    static const char xmp[] =
+        "<x:xmpmeta xmlns:x='adobe:ns:meta/'>"
+        "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>"
+        "<rdf:Description xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+        "<dc:title>Title</dc:title>"
+        "</rdf:Description>"
+        "</rdf:RDF>"
+        "</x:xmpmeta>";
+    omc_xmp_opts opts;
+    omc_xmp_res res;
+
+    omc_xmp_opts_init(&opts);
+    opts.limits.max_depth = (omc_u32)~(omc_u32)0;
+
+    res = omc_xmp_meas((const omc_u8*)xmp, sizeof(xmp) - 1U, &opts);
+    assert(res.status == OMC_XMP_LIMIT);
+    assert(res.entries_decoded == 0U);
+}
+
+static void
+test_limit_on_overflowing_path_cap(void)
+{
+    static const char xmp[] =
+        "<x:xmpmeta xmlns:x='adobe:ns:meta/'>"
+        "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>"
+        "<rdf:Description xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+        "<dc:title>Title</dc:title>"
+        "</rdf:Description>"
+        "</rdf:RDF>"
+        "</x:xmpmeta>";
+    omc_xmp_opts opts;
+    omc_xmp_res res;
+
+    omc_xmp_opts_init(&opts);
+    opts.limits.max_path_bytes = (omc_u32)~(omc_u32)0;
+
+    res = omc_xmp_meas((const omc_u8*)xmp, sizeof(xmp) - 1U, &opts);
+    assert(res.status == OMC_XMP_LIMIT);
+    assert(res.entries_decoded == 0U);
+}
+
+static void
 test_decode_xmp_subset(void)
 {
     static const char xmp[] =
@@ -115,6 +159,8 @@ test_decode_xmp_subset(void)
 int
 main(void)
 {
+    test_limit_on_overflowing_depth_cap();
+    test_limit_on_overflowing_path_cap();
     test_decode_xmp_subset();
     return 0;
 }

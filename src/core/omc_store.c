@@ -11,6 +11,9 @@ omc_store_reserve_entries_internal(omc_store* store, omc_size capacity)
     if (capacity <= store->entry_capacity) {
         return OMC_STATUS_OK;
     }
+    if (capacity > ((omc_size)(~(omc_size)0) / sizeof(*store->entries))) {
+        return OMC_STATUS_OVERFLOW;
+    }
 
     new_mem = realloc(store->entries, capacity * sizeof(*store->entries));
     if (new_mem == NULL) {
@@ -29,6 +32,9 @@ omc_store_reserve_blocks_internal(omc_store* store, omc_size capacity)
 
     if (capacity <= store->block_capacity) {
         return OMC_STATUS_OK;
+    }
+    if (capacity > ((omc_size)(~(omc_size)0) / sizeof(*store->blocks))) {
+        return OMC_STATUS_OVERFLOW;
     }
 
     new_mem = realloc(store->blocks, capacity * sizeof(*store->blocks));
@@ -141,7 +147,7 @@ omc_store_add_block(omc_store* store, const omc_block_info* info,
     if (store == NULL || info == NULL) {
         return OMC_STATUS_INVALID_ARGUMENT;
     }
-    if (store->block_count > (omc_size)(~(omc_block_id)0)) {
+    if (store->block_count >= (omc_size)(~(omc_block_id)0)) {
         return OMC_STATUS_OVERFLOW;
     }
 
@@ -173,7 +179,7 @@ omc_store_add_entry(omc_store* store, const omc_entry* entry,
     if (store == NULL || entry == NULL) {
         return OMC_STATUS_INVALID_ARGUMENT;
     }
-    if (store->entry_count > (omc_size)(~(omc_entry_id)0)) {
+    if (store->entry_count >= (omc_size)(~(omc_entry_id)0)) {
         return OMC_STATUS_OVERFLOW;
     }
 

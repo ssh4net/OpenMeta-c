@@ -6,8 +6,8 @@
 #include <assert.h>
 #include <string.h>
 
-int
-main(void)
+static void
+test_store_roundtrip(void)
 {
     omc_store store;
     omc_block_info block;
@@ -61,5 +61,72 @@ main(void)
     assert(memcmp(ifd_view.data, "ifd0", 4U) == 0);
 
     omc_store_fini(&store);
+}
+
+static void
+test_add_entry_rejects_invalid_sentinel_id(void)
+{
+    omc_store store;
+    omc_entry entry;
+    omc_entry dummy_entries[1];
+    omc_status status;
+
+    omc_store_init(&store);
+    memset(&entry, 0, sizeof(entry));
+    memset(dummy_entries, 0, sizeof(dummy_entries));
+
+    omc_key_make_comment(&entry.key);
+    omc_val_make_u32(&entry.value, 7U);
+
+    store.entries = dummy_entries;
+    store.entry_capacity = (omc_size)OMC_INVALID_ENTRY_ID;
+    store.entry_count = (omc_size)OMC_INVALID_ENTRY_ID;
+
+    status = omc_store_add_entry(&store, &entry, (omc_entry_id*)0);
+    assert(status == OMC_STATUS_OVERFLOW);
+    assert(store.entry_count == (omc_size)OMC_INVALID_ENTRY_ID);
+
+    store.entries = (omc_entry*)0;
+    store.entry_capacity = 0U;
+    store.entry_count = 0U;
+    omc_store_fini(&store);
+}
+
+static void
+test_add_block_rejects_invalid_sentinel_id(void)
+{
+    omc_store store;
+    omc_block_info block;
+    omc_block_info dummy_blocks[1];
+    omc_status status;
+
+    omc_store_init(&store);
+    memset(&block, 0, sizeof(block));
+    memset(dummy_blocks, 0, sizeof(dummy_blocks));
+
+    block.format = OMC_SCAN_FMT_JPEG;
+    block.kind = OMC_BLK_EXIF;
+    block.id = 1U;
+
+    store.blocks = dummy_blocks;
+    store.block_capacity = (omc_size)OMC_INVALID_BLOCK_ID;
+    store.block_count = (omc_size)OMC_INVALID_BLOCK_ID;
+
+    status = omc_store_add_block(&store, &block, (omc_block_id*)0);
+    assert(status == OMC_STATUS_OVERFLOW);
+    assert(store.block_count == (omc_size)OMC_INVALID_BLOCK_ID);
+
+    store.blocks = (omc_block_info*)0;
+    store.block_capacity = 0U;
+    store.block_count = 0U;
+    omc_store_fini(&store);
+}
+
+int
+main(void)
+{
+    test_store_roundtrip();
+    test_add_entry_rejects_invalid_sentinel_id();
+    test_add_block_rejects_invalid_sentinel_id();
     return 0;
 }
