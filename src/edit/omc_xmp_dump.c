@@ -840,7 +840,17 @@ omc_xmp_dump_existing_promotes_scalar_to_indexed(omc_xmp_ns_view schema_ns,
 {
     if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_dc)) {
         return omc_xmp_dump_view_equal_lit(base_name, k_prop_subject)
-               || omc_xmp_dump_view_equal_lit(base_name, k_prop_creator);
+               || omc_xmp_dump_view_equal_lit(base_name, k_prop_creator)
+               || omc_xmp_dump_view_equal_lit(base_name, "language")
+               || omc_xmp_dump_view_equal_lit(base_name, "contributor")
+               || omc_xmp_dump_view_equal_lit(base_name, "publisher")
+               || omc_xmp_dump_view_equal_lit(base_name, "relation")
+               || omc_xmp_dump_view_equal_lit(base_name, "type")
+               || omc_xmp_dump_view_equal_lit(base_name, "date");
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_xap)) {
+        return omc_xmp_dump_view_equal_lit(base_name, "Identifier")
+               || omc_xmp_dump_view_equal_lit(base_name, "Advisory");
     }
     if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_ps)) {
         return omc_xmp_dump_view_equal_lit(
@@ -852,6 +862,10 @@ omc_xmp_dump_existing_promotes_scalar_to_indexed(omc_xmp_ns_view schema_ns,
     if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_lr)) {
         return omc_xmp_dump_view_equal_lit(base_name,
                                            k_prop_hierarchical_subject);
+    }
+    if (omc_xmp_dump_view_equal_lit(schema_ns, k_xmp_ns_plus)) {
+        return omc_xmp_dump_view_equal_lit(base_name,
+                                           "ImageAlterationConstraints");
     }
     return 0;
 }

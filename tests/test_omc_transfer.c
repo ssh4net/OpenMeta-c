@@ -715,14 +715,29 @@ build_store_with_xmpmm_structured_resources(omc_store* store)
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
                        "DerivedFrom/stRef:documentID", "xmp.did:base");
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "DerivedFrom/stRef:instanceID", "xmp.iid:base");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
                        "ManagedFrom", "legacy-managed");
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
                        "ManagedFrom/stRef:documentID", "xmp.did:managed");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "ManagedFrom/stRef:instanceID", "xmp.iid:managed");
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
                        "Ingredients", "legacy-ingredients");
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
                        "Ingredients[1]/stRef:documentID",
                        "xmp.did:ingredient");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Ingredients[1]/stRef:instanceID",
+                       "xmp.iid:ingredient");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "RenditionOf", "legacy-rendition");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "RenditionOf/stRef:documentID", "xmp.did:rendition");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "RenditionOf/stRef:filePath", "/tmp/rendition.jpg");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "RenditionOf/stRef:renditionClass", "proof:pdf");
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
                        "Manifest", "legacy-manifest");
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
@@ -735,13 +750,28 @@ build_store_with_xmpmm_structured_resources(omc_store* store)
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
                        "History[1]/stEvt:action", "saved");
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "History[1]/stEvt:when", "2026-04-15T09:00:00Z");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
                        "Versions", "legacy-versions");
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
                        "Versions[1]/stVer:event", "legacy-event");
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
                        "Versions[1]/stVer:version", "1.0");
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions[1]/stVer:comments", "Initial import");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions[1]/stVer:modifier", "OpenMeta");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions[1]/stVer:modifyDate",
+                       "2026-04-16T10:15:00Z");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
                        "Versions[1]/stVer:event/stEvt:action", "saved");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions[1]/stVer:event/stEvt:changed",
+                       "/metadata");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
+                       "Versions[1]/stVer:event/stEvt:when",
+                       "2026-04-16T10:15:00Z");
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
                        "Pantry", "legacy-pantry");
     add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/mm/",
@@ -835,6 +865,33 @@ build_store_with_lr_hierarchical_subject(omc_store* store)
                        "hierarchicalSubject[1]", "Places|Japan|Tokyo");
     add_xmp_text_entry(store, "http://ns.adobe.com/lightroom/1.0/",
                        "hierarchicalSubject[2]", "Travel|Spring");
+}
+
+static void
+build_store_with_remaining_standard_grouped_scalars(omc_store* store)
+{
+    add_xmp_text_entry(store, "http://purl.org/dc/elements/1.1/",
+                       "language", "en-US");
+    add_xmp_text_entry(store, "http://purl.org/dc/elements/1.1/",
+                       "contributor", "Alice");
+    add_xmp_text_entry(store, "http://purl.org/dc/elements/1.1/",
+                       "publisher", "OpenMeta Press");
+    add_xmp_text_entry(store, "http://purl.org/dc/elements/1.1/",
+                       "relation", "urn:related:test");
+    add_xmp_text_entry(store, "http://purl.org/dc/elements/1.1/",
+                       "type", "Image");
+    add_xmp_text_entry(store, "http://purl.org/dc/elements/1.1/",
+                       "date", "2026-04-15");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/",
+                       "Identifier", "urn:om:test:id");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/",
+                       "Advisory", "photoshop:City");
+    add_xmp_text_entry(store, "http://ns.adobe.com/xap/1.0/rights/",
+                       "Owner", "OpenMeta Labs");
+    add_xmp_text_entry(store, "http://ns.adobe.com/lightroom/1.0/",
+                       "hierarchicalSubject", "Places|Museum");
+    add_xmp_text_entry(store, "http://ns.useplus.org/ldf/xmp/1.0/",
+                       "ImageAlterationConstraints", "No compositing");
 }
 
 static void
@@ -2918,6 +2975,238 @@ test_transfer_execute_jpeg_embedded_only_source_exif(void)
 }
 
 static void
+exercise_transfer_existing_target_xmp_case(
+    omc_xmp_writeback_mode writeback_mode,
+    omc_xmp_destination_embedded_mode destination_mode,
+    const omc_store* existing_sidecar_store,
+    omc_transfer_existing_xmp_mode existing_sidecar_mode,
+    omc_transfer_existing_xmp_precedence existing_sidecar_precedence,
+    const omc_store* existing_embedded_store,
+    omc_transfer_existing_xmp_mode existing_embedded_mode,
+    omc_transfer_existing_xmp_precedence existing_embedded_precedence,
+    omc_transfer_existing_xmp_carrier_precedence carrier_precedence,
+    const char* expect_embedded_tool, const char* expect_sidecar_tool,
+    int expect_sidecar_present)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_store edited_store;
+    omc_store sidecar_store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_store_init(&edited_store);
+    omc_store_init(&sidecar_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_creator_tool(&store, "SourceTool");
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = writeback_mode;
+    opts.destination_embedded_mode = destination_mode;
+    opts.existing_sidecar_xmp_store = existing_sidecar_store;
+    opts.existing_sidecar_xmp_mode = existing_sidecar_mode;
+    opts.existing_sidecar_xmp_precedence = existing_sidecar_precedence;
+    opts.existing_embedded_xmp_store = existing_embedded_store;
+    opts.existing_embedded_xmp_mode = existing_embedded_mode;
+    opts.existing_embedded_xmp_precedence = existing_embedded_precedence;
+    opts.existing_xmp_carrier_precedence = carrier_precedence;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+    assert(exec.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present == expect_sidecar_present);
+
+    read_store_from_bytes(edited_out.data, edited_out.size, &edited_store);
+    assert_text_value(&edited_store,
+                      find_xmp_entry(&edited_store,
+                                     "http://ns.adobe.com/xap/1.0/",
+                                     "CreatorTool"),
+                      expect_embedded_tool);
+    assert_text_value(&edited_store, find_comment_entry(&edited_store),
+                      "Preserve me");
+
+    if (expect_sidecar_present) {
+        read_store_from_bytes(sidecar_out.data, sidecar_out.size,
+                              &sidecar_store);
+        assert_text_value(&sidecar_store,
+                          find_xmp_entry(&sidecar_store,
+                                         "http://ns.adobe.com/xap/1.0/",
+                                         "CreatorTool"),
+                          expect_sidecar_tool);
+    } else {
+        assert(sidecar_out.size == 0U);
+    }
+
+    omc_store_fini(&sidecar_store);
+    omc_store_fini(&edited_store);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_only_merges_existing_embedded_xmp_existing_wins(void)
+{
+    omc_store existing_embedded;
+
+    omc_store_init(&existing_embedded);
+    build_store_with_creator_tool(&existing_embedded,
+                                  "Target Embedded Existing");
+
+    exercise_transfer_existing_target_xmp_case(
+        OMC_XMP_WRITEBACK_EMBEDDED_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING, (const omc_store*)0,
+        OMC_TRANSFER_EXISTING_XMP_IGNORE,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_EXISTING, &existing_embedded,
+        OMC_TRANSFER_EXISTING_XMP_MERGE_IF_PRESENT,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_EXISTING,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_SIDECAR,
+        "Target Embedded Existing", (const char*)0, 0);
+
+    omc_store_fini(&existing_embedded);
+}
+
+static void
+test_transfer_execute_embedded_only_merges_existing_embedded_xmp_source_wins(void)
+{
+    omc_store existing_embedded;
+
+    omc_store_init(&existing_embedded);
+    build_store_with_creator_tool(&existing_embedded,
+                                  "Target Embedded Existing");
+
+    exercise_transfer_existing_target_xmp_case(
+        OMC_XMP_WRITEBACK_EMBEDDED_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING, (const omc_store*)0,
+        OMC_TRANSFER_EXISTING_XMP_IGNORE,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_EXISTING, &existing_embedded,
+        OMC_TRANSFER_EXISTING_XMP_MERGE_IF_PRESENT,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_SIDECAR, "SourceTool",
+        (const char*)0, 0);
+
+    omc_store_fini(&existing_embedded);
+}
+
+static void
+test_transfer_execute_sidecar_only_merges_existing_sidecar_xmp_existing_wins(void)
+{
+    omc_store existing_sidecar;
+
+    omc_store_init(&existing_sidecar);
+    build_store_with_creator_tool(&existing_sidecar,
+                                  "Target Sidecar Existing");
+
+    exercise_transfer_existing_target_xmp_case(
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING, &existing_sidecar,
+        OMC_TRANSFER_EXISTING_XMP_MERGE_IF_PRESENT,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_EXISTING, (const omc_store*)0,
+        OMC_TRANSFER_EXISTING_XMP_IGNORE,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_EXISTING,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_SIDECAR, "OldTool",
+        "Target Sidecar Existing", 1);
+
+    omc_store_fini(&existing_sidecar);
+}
+
+static void
+test_transfer_execute_sidecar_only_merges_existing_sidecar_xmp_source_wins(void)
+{
+    omc_store existing_sidecar;
+
+    omc_store_init(&existing_sidecar);
+    build_store_with_creator_tool(&existing_sidecar,
+                                  "Target Sidecar Existing");
+
+    exercise_transfer_existing_target_xmp_case(
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING, &existing_sidecar,
+        OMC_TRANSFER_EXISTING_XMP_MERGE_IF_PRESENT,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE, (const omc_store*)0,
+        OMC_TRANSFER_EXISTING_XMP_IGNORE,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_EXISTING,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_SIDECAR, "OldTool",
+        "SourceTool", 1);
+
+    omc_store_fini(&existing_sidecar);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_prefers_existing_sidecar_by_default(void)
+{
+    omc_store existing_sidecar;
+    omc_store existing_embedded;
+
+    omc_store_init(&existing_sidecar);
+    omc_store_init(&existing_embedded);
+    build_store_with_creator_tool(&existing_sidecar,
+                                  "Target Sidecar Existing");
+    build_store_with_creator_tool(&existing_embedded,
+                                  "Target Embedded Existing");
+
+    exercise_transfer_existing_target_xmp_case(
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING, &existing_sidecar,
+        OMC_TRANSFER_EXISTING_XMP_MERGE_IF_PRESENT,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_EXISTING, &existing_embedded,
+        OMC_TRANSFER_EXISTING_XMP_MERGE_IF_PRESENT,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_EXISTING,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_SIDECAR,
+        "Target Sidecar Existing", "Target Sidecar Existing", 1);
+
+    omc_store_fini(&existing_embedded);
+    omc_store_fini(&existing_sidecar);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_prefers_existing_embedded_when_requested(void)
+{
+    omc_store existing_sidecar;
+    omc_store existing_embedded;
+
+    omc_store_init(&existing_sidecar);
+    omc_store_init(&existing_embedded);
+    build_store_with_creator_tool(&existing_sidecar,
+                                  "Target Sidecar Existing");
+    build_store_with_creator_tool(&existing_embedded,
+                                  "Target Embedded Existing");
+
+    exercise_transfer_existing_target_xmp_case(
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING, &existing_sidecar,
+        OMC_TRANSFER_EXISTING_XMP_MERGE_IF_PRESENT,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_EXISTING, &existing_embedded,
+        OMC_TRANSFER_EXISTING_XMP_MERGE_IF_PRESENT,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_EXISTING,
+        OMC_TRANSFER_EXISTING_XMP_PREFER_EMBEDDED,
+        "Target Embedded Existing", "Target Embedded Existing", 1);
+
+    omc_store_fini(&existing_embedded);
+    omc_store_fini(&existing_sidecar);
+}
+
+static void
 test_transfer_prepare_and_execute_jpeg_embedded_and_sidecar(void)
 {
     omc_u8 file_bytes[1024];
@@ -3386,14 +3675,44 @@ test_transfer_execute_embedded_and_sidecar_preserves_xmpmm_structured_resources(
                          "xmlns:stRef=\"http://ns.adobe.com/xap/1.0/sType/ResourceRef#\""));
     assert(contains_text(edited_out.data, edited_out.size,
                          "<xmpMM:DerivedFrom rdf:parseType=\"Resource\">"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "xmp.iid:base</stRef:instanceID>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<xmpMM:ManagedFrom rdf:parseType=\"Resource\">"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "xmp.iid:managed</stRef:instanceID>"));
     assert(contains_text(edited_out.data, edited_out.size, "<xmpMM:Ingredients>"));
     assert(contains_text(edited_out.data, edited_out.size, "<rdf:Bag>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "xmp.iid:ingredient</stRef:instanceID>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<xmpMM:RenditionOf rdf:parseType=\"Resource\">"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "xmp.did:rendition</stRef:documentID>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "/tmp/rendition.jpg</stRef:filePath>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "proof:pdf</stRef:renditionClass>"));
     assert(contains_text(edited_out.data, edited_out.size,
                          "<stMfs:reference"));
     assert(contains_text(edited_out.data, edited_out.size,
                          "rdf:parseType=\"Resource\""));
     assert(contains_text(edited_out.data, edited_out.size,
+                         "<xmpMM:History>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "2026-04-15T09:00:00Z</stEvt:when>"));
+    assert(contains_text(edited_out.data, edited_out.size,
                          "<stVer:event"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "Initial import</stVer:comments>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "OpenMeta</stVer:modifier>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "2026-04-16T10:15:00Z</stVer:modifyDate>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "/metadata</stEvt:changed>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "2026-04-16T10:15:00Z</stEvt:when>"));
     assert(contains_text(edited_out.data, edited_out.size,
                          "<xmpMM:InstanceID>uuid:pantry-1</xmpMM:InstanceID>"));
     assert(contains_text(edited_out.data, edited_out.size,
@@ -3412,14 +3731,44 @@ test_transfer_execute_embedded_and_sidecar_preserves_xmpmm_structured_resources(
                          "xmlns:stRef=\"http://ns.adobe.com/xap/1.0/sType/ResourceRef#\""));
     assert(contains_text(sidecar_out.data, sidecar_out.size,
                          "<xmpMM:DerivedFrom rdf:parseType=\"Resource\">"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "xmp.iid:base</stRef:instanceID>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<xmpMM:ManagedFrom rdf:parseType=\"Resource\">"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "xmp.iid:managed</stRef:instanceID>"));
     assert(contains_text(sidecar_out.data, sidecar_out.size, "<xmpMM:Ingredients>"));
     assert(contains_text(sidecar_out.data, sidecar_out.size, "<rdf:Bag>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "xmp.iid:ingredient</stRef:instanceID>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<xmpMM:RenditionOf rdf:parseType=\"Resource\">"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "xmp.did:rendition</stRef:documentID>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "/tmp/rendition.jpg</stRef:filePath>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "proof:pdf</stRef:renditionClass>"));
     assert(contains_text(sidecar_out.data, sidecar_out.size,
                          "<stMfs:reference"));
     assert(contains_text(sidecar_out.data, sidecar_out.size,
                          "rdf:parseType=\"Resource\""));
     assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<xmpMM:History>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "2026-04-15T09:00:00Z</stEvt:when>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
                          "<stVer:event"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "Initial import</stVer:comments>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "OpenMeta</stVer:modifier>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "2026-04-16T10:15:00Z</stVer:modifyDate>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "/metadata</stEvt:changed>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "2026-04-16T10:15:00Z</stEvt:when>"));
     assert(contains_text(sidecar_out.data, sidecar_out.size,
                          "<xmpMM:InstanceID>uuid:pantry-1</xmpMM:InstanceID>"));
     assert(contains_text(sidecar_out.data, sidecar_out.size,
@@ -3628,6 +3977,132 @@ test_transfer_execute_embedded_and_sidecar_preserves_lr_hierarchical_subject(voi
 }
 
 static void
+test_transfer_execute_embedded_and_sidecar_preserves_remaining_standard_grouped_scalars(
+    void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_remaining_standard_grouped_scalars(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size, "<dc:language>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>en-US</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<dc:contributor>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>Alice</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<dc:publisher>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>OpenMeta Press</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size, "<dc:relation>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>urn:related:test</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size, "<dc:type>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>Image</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size, "<dc:date>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>2026-04-15</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<xmp:Identifier>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>urn:om:test:id</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size, "<xmp:Advisory>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>photoshop:City</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<xmpRights:Owner>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>OpenMeta Labs</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<lr:hierarchicalSubject>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>Places|Museum</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<plus:ImageAlterationConstraints>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>No compositing</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<dc:language>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>en-US</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<dc:contributor>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>Alice</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<dc:publisher>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>OpenMeta Press</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<dc:relation>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>urn:related:test</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<dc:type>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>Image</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size, "<dc:date>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>2026-04-15</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<xmp:Identifier>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>urn:om:test:id</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<xmp:Advisory>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>photoshop:City</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<xmpRights:Owner>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>OpenMeta Labs</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<lr:hierarchicalSubject>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>Places|Museum</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<plus:ImageAlterationConstraints>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>No compositing</rdf:li>"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
 test_transfer_execute_embedded_and_sidecar_preserves_pdf_and_rights_namespaces(void)
 {
     omc_u8 file_bytes[1024];
@@ -3826,6 +4301,12 @@ main(void)
     test_transfer_execute_jpeg_embedded_only_source_exif();
     test_transfer_execute_jpeg_sidecar_only_preserve_source_exif();
     test_transfer_execute_jpeg_sidecar_only_strip_source_exif();
+    test_transfer_execute_embedded_only_merges_existing_embedded_xmp_existing_wins();
+    test_transfer_execute_embedded_only_merges_existing_embedded_xmp_source_wins();
+    test_transfer_execute_sidecar_only_merges_existing_sidecar_xmp_existing_wins();
+    test_transfer_execute_sidecar_only_merges_existing_sidecar_xmp_source_wins();
+    test_transfer_execute_embedded_and_sidecar_prefers_existing_sidecar_by_default();
+    test_transfer_execute_embedded_and_sidecar_prefers_existing_embedded_when_requested();
     test_transfer_execute_jpeg_sidecar_only_strip();
     test_transfer_prepare_reports_unsupported_for_embedded_only_gif();
     test_transfer_execute_embedded_and_sidecar_uses_sidecar_policy_for_embedded_custom_namespace();
@@ -3836,6 +4317,7 @@ main(void)
     test_transfer_execute_embedded_and_sidecar_preserves_xmp_advisory_bag();
     test_transfer_execute_embedded_and_sidecar_preserves_dc_language_and_date();
     test_transfer_execute_embedded_and_sidecar_preserves_lr_hierarchical_subject();
+    test_transfer_execute_embedded_and_sidecar_preserves_remaining_standard_grouped_scalars();
     test_transfer_execute_embedded_and_sidecar_preserves_pdf_and_rights_namespaces();
     test_transfer_execute_embedded_and_sidecar_canonicalizes_xmprights_usage_terms();
     test_transfer_execute_embedded_and_sidecar_canonicalizes_location_child_shapes();

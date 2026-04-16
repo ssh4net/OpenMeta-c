@@ -28,10 +28,33 @@ typedef enum omc_transfer_embedded_action {
     OMC_TRANSFER_EMBEDDED_REWRITE = 2
 } omc_transfer_embedded_action;
 
+typedef enum omc_transfer_existing_xmp_mode {
+    OMC_TRANSFER_EXISTING_XMP_IGNORE = 0,
+    OMC_TRANSFER_EXISTING_XMP_MERGE_IF_PRESENT = 1
+} omc_transfer_existing_xmp_mode;
+
+typedef enum omc_transfer_existing_xmp_precedence {
+    OMC_TRANSFER_EXISTING_XMP_PREFER_EXISTING = 0,
+    OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE = 1
+} omc_transfer_existing_xmp_precedence;
+
+typedef enum omc_transfer_existing_xmp_carrier_precedence {
+    OMC_TRANSFER_EXISTING_XMP_PREFER_SIDECAR = 0,
+    OMC_TRANSFER_EXISTING_XMP_PREFER_EMBEDDED = 1
+} omc_transfer_existing_xmp_carrier_precedence;
+
 typedef struct omc_transfer_prepare_opts {
     omc_scan_fmt format;
     omc_xmp_writeback_mode writeback_mode;
     omc_xmp_destination_embedded_mode destination_embedded_mode;
+    const omc_store* existing_sidecar_xmp_store;
+    omc_transfer_existing_xmp_mode existing_sidecar_xmp_mode;
+    omc_transfer_existing_xmp_precedence existing_sidecar_xmp_precedence;
+    const omc_store* existing_embedded_xmp_store;
+    omc_transfer_existing_xmp_mode existing_embedded_xmp_mode;
+    omc_transfer_existing_xmp_precedence existing_embedded_xmp_precedence;
+    omc_transfer_existing_xmp_carrier_precedence
+        existing_xmp_carrier_precedence;
     omc_xmp_embed_opts embedded;
     omc_xmp_sidecar_req sidecar;
 } omc_transfer_prepare_opts;
@@ -46,6 +69,14 @@ typedef struct omc_transfer_bundle {
     omc_u32 existing_xmp_blocks;
     int sidecar_requested;
     int embedded_supported;
+    const omc_store* existing_sidecar_xmp_store;
+    omc_transfer_existing_xmp_mode existing_sidecar_xmp_mode;
+    omc_transfer_existing_xmp_precedence existing_sidecar_xmp_precedence;
+    const omc_store* existing_embedded_xmp_store;
+    omc_transfer_existing_xmp_mode existing_embedded_xmp_mode;
+    omc_transfer_existing_xmp_precedence existing_embedded_xmp_precedence;
+    omc_transfer_existing_xmp_carrier_precedence
+        existing_xmp_carrier_precedence;
     omc_xmp_embed_opts embedded;
     omc_xmp_sidecar_req sidecar;
 } omc_transfer_bundle;
@@ -61,6 +92,14 @@ typedef struct omc_transfer_exec {
     omc_xmp_writeback_mode writeback_mode;
     omc_u32 route_count;
     omc_transfer_route routes[2];
+    const omc_store* existing_sidecar_xmp_store;
+    omc_transfer_existing_xmp_mode existing_sidecar_xmp_mode;
+    omc_transfer_existing_xmp_precedence existing_sidecar_xmp_precedence;
+    const omc_store* existing_embedded_xmp_store;
+    omc_transfer_existing_xmp_mode existing_embedded_xmp_mode;
+    omc_transfer_existing_xmp_precedence existing_embedded_xmp_precedence;
+    omc_transfer_existing_xmp_carrier_precedence
+        existing_xmp_carrier_precedence;
     omc_xmp_write_opts embedded_write;
     omc_xmp_sidecar_req sidecar;
 } omc_transfer_exec;
