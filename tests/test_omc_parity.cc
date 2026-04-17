@@ -11426,6 +11426,204 @@ main(int argc, char** argv)
     {
         TransferExecuteCaseOptions transfer_opts {};
 
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_execute_case(
+                 "transfer_avif_existing_embedded_embedded_only_existing_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.existing_embedded_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_execute_case(
+                 "transfer_avif_existing_embedded_embedded_only_source_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        ok = run_transfer_execute_case(
+                 "transfer_avif_existing_sidecar_sidecar_only_existing_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture(nullptr), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.existing_sidecar_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_execute_case(
+                 "transfer_avif_existing_sidecar_sidecar_only_source_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture(nullptr), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_execute_case(
+                 "transfer_avif_existing_sidecar_and_embedded_default",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.carrier_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_EMBEDDED;
+        ok = run_transfer_execute_case(
+                 "transfer_avif_existing_sidecar_and_embedded_embedded_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_avif_existing_embedded_embedded_only_existing_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.existing_embedded_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_avif_existing_embedded_embedded_only_source_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_avif_existing_sidecar_sidecar_only_existing_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture(nullptr),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.existing_sidecar_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_avif_existing_sidecar_sidecar_only_source_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture(nullptr),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_avif_existing_sidecar_and_embedded_default",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.carrier_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_EMBEDDED;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_avif_existing_sidecar_and_embedded_embedded_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
         transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Heif;
         transfer_opts.target_suffix = ".heic";
