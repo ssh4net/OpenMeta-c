@@ -128,6 +128,29 @@ omc_transfer_build_sidecar_path(const char* base_path, omc_arena* arena,
     return OMC_STATUS_OK;
 }
 
+static int
+omc_transfer_persist_allows_missing_output_path(
+    const omc_transfer_res* transfer, const omc_transfer_persist_opts* opts)
+{
+    if (transfer == (const omc_transfer_res*)0
+        || opts == (const omc_transfer_persist_opts*)0) {
+        return 0;
+    }
+    if (transfer->format != OMC_SCAN_FMT_DNG
+        || transfer->dng_target_mode
+               != OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD) {
+        return 0;
+    }
+    if (transfer->writeback_mode != OMC_XMP_WRITEBACK_SIDECAR_ONLY) {
+        return 0;
+    }
+    if (opts->write_output) {
+        return 0;
+    }
+    return opts->xmp_sidecar_base_path != (const char*)0
+           && opts->xmp_sidecar_base_path[0] != '\0';
+}
+
 static omc_status
 omc_transfer_maybe_set_cleanup_path(
     const omc_transfer_res* transfer, const omc_transfer_persist_opts* opts,
@@ -199,6 +222,7 @@ omc_transfer_persist(const omc_u8* edited_bytes, omc_size edited_size,
     omc_status status;
     const char* sidecar_base;
     omc_const_bytes cleanup_path;
+    int allow_missing_output_path;
 
     if (transfer == (const omc_transfer_res*)0 || meta_out == (omc_arena*)0
         || out_res == (omc_transfer_persist_res*)0) {
@@ -218,13 +242,16 @@ omc_transfer_persist(const omc_u8* edited_bytes, omc_size edited_size,
     omc_transfer_persist_res_init(out_res);
     out_res->xmp_sidecar_requested =
         transfer->writeback_mode != OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    allow_missing_output_path =
+        omc_transfer_persist_allows_missing_output_path(transfer, opts);
 
     status = omc_transfer_append_cstr(meta_out, opts->output_path,
                                       &out_res->output_path);
     if (status != OMC_STATUS_OK) {
         return status;
     }
-    if (opts->output_path == (const char*)0 || opts->output_path[0] == '\0') {
+    if ((opts->output_path == (const char*)0 || opts->output_path[0] == '\0')
+        && !allow_missing_output_path) {
         out_res->status = OMC_TRANSFER_UNSUPPORTED;
         out_res->output_status = OMC_TRANSFER_UNSUPPORTED;
         status = omc_transfer_set_message(meta_out, &out_res->output_message,
@@ -239,9 +266,16 @@ omc_transfer_persist(const omc_u8* edited_bytes, omc_size edited_size,
     if (!opts->write_output) {
         out_res->output_status = OMC_TRANSFER_OK;
         out_res->output_bytes = opts->prewritten_output_bytes;
-        status = omc_transfer_set_message(
-            meta_out, &out_res->output_message,
-            "output bytes were already written by caller");
+        if (allow_missing_output_path) {
+            status = omc_transfer_set_message(
+                meta_out, &out_res->output_message,
+                "dng minimal scaffold sidecar persist does not require "
+                "output_path");
+        } else {
+            status = omc_transfer_set_message(
+                meta_out, &out_res->output_message,
+                "output bytes were already written by caller");
+        }
         if (status != OMC_STATUS_OK) {
             return status;
         }

@@ -2596,6 +2596,141 @@ test_transfer_persist_can_remove_stale_destination_sidecar(void)
     omc_store_fini(&source_store);
 }
 
+static void
+test_transfer_persist_dng_minimal_scaffold_sidecar_only_without_output_path(
+    void)
+{
+    omc_store source_store;
+    omc_store sidecar_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_arena file_read;
+    char sidecar_base[L_tmpnam + 8];
+    char sidecar_path[L_tmpnam + 8];
+    omc_const_bytes sidecar_path_view;
+    omc_status status;
+
+    build_temp_path(sidecar_base, ".dng");
+    derive_sidecar_path(sidecar_base, sidecar_path);
+
+    omc_store_init(&source_store);
+    omc_store_init(&sidecar_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_arena_init(&file_read);
+    build_store_with_creator_tool(&source_store, "NewTool");
+
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.format = OMC_SCAN_FMT_DNG;
+    prepare_opts.dng_target_mode = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
+    prepare_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+    execute_transfer((const omc_u8*)0, 0U, &source_store, &prepare_opts,
+                     &edited_out, &sidecar_out, &exec, &transfer_res);
+    assert(transfer_res.dng_target_mode
+           == OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD);
+    assert(!transfer_res.edited_present);
+    assert(transfer_res.sidecar_present);
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.write_output = 0;
+    persist_opts.xmp_sidecar_base_path = sidecar_base;
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    assert(status == OMC_STATUS_OK);
+    assert(persist_res.status == OMC_TRANSFER_OK);
+    assert(persist_res.output_status == OMC_TRANSFER_OK);
+    assert(persist_res.xmp_sidecar_status == OMC_TRANSFER_OK);
+    assert(persist_res.output_path.size == 0U);
+    sidecar_path_view = omc_arena_view(&meta_out, persist_res.xmp_sidecar_path);
+    assert(sidecar_path_view.size == strlen(sidecar_path));
+    assert(memcmp(sidecar_path_view.data, sidecar_path,
+                  sidecar_path_view.size) == 0);
+
+    assert(read_file_bytes(sidecar_path, &file_read));
+    read_store_from_bytes(file_read.data, file_read.size, &sidecar_store);
+    assert_text_value(&sidecar_store,
+                      find_xmp_entry(&sidecar_store,
+                                     "http://ns.adobe.com/xap/1.0/",
+                                     "CreatorTool"),
+                      "NewTool");
+
+    remove(sidecar_path);
+    omc_arena_fini(&file_read);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&sidecar_store);
+    omc_store_fini(&source_store);
+}
+
+static void
+test_transfer_persist_dng_template_sidecar_only_requires_output_path(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store source_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_arena file_read;
+    char sidecar_base[L_tmpnam + 8];
+    char sidecar_path[L_tmpnam + 8];
+    omc_status status;
+
+    file_size = make_test_dng_with_old_xmp_and_make(file_bytes);
+    build_temp_path(sidecar_base, ".dng");
+    derive_sidecar_path(sidecar_base, sidecar_path);
+
+    omc_store_init(&source_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_arena_init(&file_read);
+    build_store_with_creator_tool(&source_store, "NewTool");
+
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.format = OMC_SCAN_FMT_DNG;
+    prepare_opts.dng_target_mode = OMC_DNG_TARGET_TEMPLATE;
+    prepare_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+    execute_transfer(file_bytes, file_size, &source_store, &prepare_opts,
+                     &edited_out, &sidecar_out, &exec, &transfer_res);
+    assert(transfer_res.dng_target_mode == OMC_DNG_TARGET_TEMPLATE);
+    assert(transfer_res.edited_present);
+    assert(transfer_res.sidecar_present);
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.write_output = 0;
+    persist_opts.xmp_sidecar_base_path = sidecar_base;
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    assert(status == OMC_STATUS_OK);
+    assert(persist_res.status == OMC_TRANSFER_UNSUPPORTED);
+    assert(persist_res.output_status == OMC_TRANSFER_UNSUPPORTED);
+    assert(!read_file_bytes(sidecar_path, &file_read));
+
+    omc_arena_fini(&file_read);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&source_store);
+}
+
 int
 main(void)
 {
@@ -2622,5 +2757,7 @@ main(void)
     test_transfer_persist_rejects_existing_sidecar_without_overwrite();
     test_transfer_persist_uses_explicit_sidecar_base_path();
     test_transfer_persist_can_remove_stale_destination_sidecar();
+    test_transfer_persist_dng_minimal_scaffold_sidecar_only_without_output_path();
+    test_transfer_persist_dng_template_sidecar_only_requires_output_path();
     return 0;
 }

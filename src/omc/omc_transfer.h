@@ -43,8 +43,15 @@ typedef enum omc_transfer_existing_xmp_carrier_precedence {
     OMC_TRANSFER_EXISTING_XMP_PREFER_EMBEDDED = 1
 } omc_transfer_existing_xmp_carrier_precedence;
 
+typedef enum omc_dng_target_mode {
+    OMC_DNG_TARGET_EXISTING = 0,
+    OMC_DNG_TARGET_TEMPLATE = 1,
+    OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD = 2
+} omc_dng_target_mode;
+
 typedef struct omc_transfer_prepare_opts {
     omc_scan_fmt format;
+    omc_dng_target_mode dng_target_mode;
     omc_xmp_writeback_mode writeback_mode;
     omc_xmp_destination_embedded_mode destination_embedded_mode;
     const omc_store* existing_sidecar_xmp_store;
@@ -62,6 +69,7 @@ typedef struct omc_transfer_prepare_opts {
 typedef struct omc_transfer_bundle {
     omc_transfer_status status;
     omc_scan_fmt format;
+    omc_dng_target_mode dng_target_mode;
     omc_xmp_writeback_mode writeback_mode;
     omc_xmp_destination_embedded_mode destination_embedded_mode;
     omc_transfer_embedded_action embedded_action;
@@ -89,6 +97,7 @@ typedef struct omc_transfer_route {
 typedef struct omc_transfer_exec {
     omc_transfer_status status;
     omc_scan_fmt format;
+    omc_dng_target_mode dng_target_mode;
     omc_xmp_writeback_mode writeback_mode;
     omc_u32 route_count;
     omc_transfer_route routes[2];
@@ -107,6 +116,7 @@ typedef struct omc_transfer_exec {
 typedef struct omc_transfer_res {
     omc_transfer_status status;
     omc_scan_fmt format;
+    omc_dng_target_mode dng_target_mode;
     omc_xmp_writeback_mode writeback_mode;
     omc_u32 route_count;
     int edited_present;

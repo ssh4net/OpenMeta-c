@@ -4283,6 +4283,163 @@ test_transfer_execute_embedded_and_sidecar_canonicalizes_location_child_shapes(v
     omc_store_fini(&store);
 }
 
+static void
+test_transfer_prepare_opts_init_defaults_dng_target_mode(void)
+{
+    omc_transfer_prepare_opts opts;
+
+    omc_transfer_prepare_opts_init(&opts);
+    assert(opts.dng_target_mode == OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD);
+}
+
+static void
+test_transfer_prepare_dng_existing_and_template_modes_require_target_bytes(void)
+{
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_status status;
+
+    omc_store_init(&store);
+    build_store_with_creator_tool(&store, "NewTool");
+    omc_transfer_prepare_opts_init(&opts);
+    opts.format = OMC_SCAN_FMT_DNG;
+    opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+
+    opts.dng_target_mode = OMC_DNG_TARGET_EXISTING;
+    status = omc_transfer_prepare((const omc_u8*)0, 0U, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.format == OMC_SCAN_FMT_DNG);
+    assert(bundle.dng_target_mode == OMC_DNG_TARGET_EXISTING);
+    assert(bundle.status == OMC_TRANSFER_UNSUPPORTED);
+
+    opts.dng_target_mode = OMC_DNG_TARGET_TEMPLATE;
+    status = omc_transfer_prepare((const omc_u8*)0, 0U, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.format == OMC_SCAN_FMT_DNG);
+    assert(bundle.dng_target_mode == OMC_DNG_TARGET_TEMPLATE);
+    assert(bundle.status == OMC_TRANSFER_UNSUPPORTED);
+
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_dng_minimal_fresh_scaffold_sidecar_only_without_target_bytes(
+    void)
+{
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_creator_tool(&store, "NewTool");
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.format = OMC_SCAN_FMT_DNG;
+    opts.dng_target_mode = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
+    opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+
+    status = omc_transfer_prepare((const omc_u8*)0, 0U, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+    assert(bundle.dng_target_mode == OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+    assert(exec.dng_target_mode == OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD);
+
+    status = omc_transfer_execute((const omc_u8*)0, 0U, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(!res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "NewTool"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_dng_existing_and_template_modes_with_target_bytes(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_dng_with_old_xmp_and_make(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_creator_tool(&store, "NewTool");
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.format = OMC_SCAN_FMT_DNG;
+    opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+
+    opts.dng_target_mode = OMC_DNG_TARGET_EXISTING;
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+    assert(bundle.dng_target_mode == OMC_DNG_TARGET_EXISTING);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+    assert(exec.dng_target_mode == OMC_DNG_TARGET_EXISTING);
+
+    status = omc_transfer_execute((const omc_u8*)0, 0U, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_UNSUPPORTED);
+
+    omc_arena_reset(&edited_out);
+    omc_arena_reset(&sidecar_out);
+
+    opts.dng_target_mode = OMC_DNG_TARGET_TEMPLATE;
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+    assert(bundle.dng_target_mode == OMC_DNG_TARGET_TEMPLATE);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+    assert(exec.dng_target_mode == OMC_DNG_TARGET_TEMPLATE);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "NewTool"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
 int
 main(void)
 {
@@ -4321,5 +4478,9 @@ main(void)
     test_transfer_execute_embedded_and_sidecar_preserves_pdf_and_rights_namespaces();
     test_transfer_execute_embedded_and_sidecar_canonicalizes_xmprights_usage_terms();
     test_transfer_execute_embedded_and_sidecar_canonicalizes_location_child_shapes();
+    test_transfer_prepare_opts_init_defaults_dng_target_mode();
+    test_transfer_prepare_dng_existing_and_template_modes_require_target_bytes();
+    test_transfer_execute_dng_minimal_fresh_scaffold_sidecar_only_without_target_bytes();
+    test_transfer_execute_dng_existing_and_template_modes_with_target_bytes();
     return 0;
 }

@@ -24,6 +24,7 @@ omc_transfer_bundle_init(omc_transfer_bundle* bundle)
     memset(bundle, 0, sizeof(*bundle));
     bundle->status = OMC_TRANSFER_UNSUPPORTED;
     bundle->format = OMC_SCAN_FMT_UNKNOWN;
+    bundle->dng_target_mode = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
     bundle->writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
     bundle->destination_embedded_mode =
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING;
@@ -49,6 +50,7 @@ omc_transfer_exec_init(omc_transfer_exec* exec)
     memset(exec, 0, sizeof(*exec));
     exec->status = OMC_TRANSFER_UNSUPPORTED;
     exec->format = OMC_SCAN_FMT_UNKNOWN;
+    exec->dng_target_mode = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
     exec->writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
     exec->existing_sidecar_xmp_mode =
         OMC_TRANSFER_EXISTING_XMP_MERGE_IF_PRESENT;
@@ -73,6 +75,7 @@ omc_transfer_res_init(omc_transfer_res* res)
     memset(res, 0, sizeof(*res));
     res->status = OMC_TRANSFER_UNSUPPORTED;
     res->format = OMC_SCAN_FMT_UNKNOWN;
+    res->dng_target_mode = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
     res->writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
     res->embedded.status = OMC_XMP_WRITE_UNSUPPORTED;
     res->sidecar.status = OMC_XMP_DUMP_LIMIT;
@@ -223,6 +226,13 @@ omc_transfer_tiff_has_dng_version(const omc_u8* bytes, omc_size size)
         }
     }
     return 0;
+}
+
+static int
+omc_transfer_dng_target_requires_existing_target(omc_dng_target_mode mode)
+{
+    return mode == OMC_DNG_TARGET_EXISTING
+           || mode == OMC_DNG_TARGET_TEMPLATE;
 }
 
 typedef struct omc_transfer_bmff_box {
@@ -889,6 +899,7 @@ omc_transfer_prepare_opts_init(omc_transfer_prepare_opts* opts)
     }
 
     opts->format = OMC_SCAN_FMT_UNKNOWN;
+    opts->dng_target_mode = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
     opts->writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
     opts->destination_embedded_mode =
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING;
@@ -938,6 +949,7 @@ omc_transfer_prepare(const omc_u8* file_bytes, omc_size file_size,
     }
 
     omc_transfer_bundle_init(out_bundle);
+    out_bundle->dng_target_mode = opts->dng_target_mode;
     out_bundle->writeback_mode = opts->writeback_mode;
     out_bundle->destination_embedded_mode =
         opts->destination_embedded_mode;
@@ -966,6 +978,14 @@ omc_transfer_prepare(const omc_u8* file_bytes, omc_size file_size,
     out_bundle->embedded_supported = omc_transfer_embedded_supported(format);
     out_bundle->existing_xmp_blocks =
         omc_transfer_count_existing_xmp_blocks(file_bytes, file_size);
+
+    if (format == OMC_SCAN_FMT_DNG
+        && omc_transfer_dng_target_requires_existing_target(
+            opts->dng_target_mode)
+        && (file_bytes == (const omc_u8*)0 || file_size == 0U)) {
+        out_bundle->status = OMC_TRANSFER_UNSUPPORTED;
+        return OMC_STATUS_OK;
+    }
 
     sidecar_requested =
         opts->writeback_mode != OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
@@ -1021,6 +1041,7 @@ omc_transfer_compile(const omc_transfer_bundle* bundle,
     omc_transfer_exec_init(out_exec);
     out_exec->status = bundle->status;
     out_exec->format = bundle->format;
+    out_exec->dng_target_mode = bundle->dng_target_mode;
     out_exec->writeback_mode = bundle->writeback_mode;
     out_exec->existing_sidecar_xmp_store =
         bundle->existing_sidecar_xmp_store;
@@ -1096,6 +1117,7 @@ omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
 
     omc_transfer_res_init(out_res);
     out_res->format = exec->format;
+    out_res->dng_target_mode = exec->dng_target_mode;
     out_res->writeback_mode = exec->writeback_mode;
     out_res->route_count = exec->route_count;
     omc_arena_reset(edited_out);
@@ -1103,6 +1125,14 @@ omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
 
     if (exec->status != OMC_TRANSFER_OK) {
         out_res->status = exec->status;
+        return OMC_STATUS_OK;
+    }
+
+    if (exec->format == OMC_SCAN_FMT_DNG
+        && omc_transfer_dng_target_requires_existing_target(
+            exec->dng_target_mode)
+        && (file_bytes == (const omc_u8*)0 || file_size == 0U)) {
+        out_res->status = OMC_TRANSFER_UNSUPPORTED;
         return OMC_STATUS_OK;
     }
 
@@ -1214,6 +1244,26 @@ omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
         omc_xmp_apply_res apply_res;
 
         if (file_bytes == (const omc_u8*)0) {
+            if (exec->format == OMC_SCAN_FMT_DNG
+                && exec->dng_target_mode
+                       == OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD) {
+                status = omc_xmp_dump_sidecar_req(effective_store, sidecar_out,
+                                                  &exec->sidecar,
+                                                  &out_res->sidecar);
+                if (merged_store_ready) {
+                    omc_store_fini(&merged_store);
+                }
+                if (status != OMC_STATUS_OK) {
+                    return status;
+                }
+                out_res->sidecar_present =
+                    out_res->sidecar.status == OMC_XMP_DUMP_OK;
+                out_res->status = out_res->sidecar.status == OMC_XMP_DUMP_OK
+                                      ? OMC_TRANSFER_OK
+                                      : omc_transfer_status_from_dump(
+                                            out_res->sidecar.status);
+                return OMC_STATUS_OK;
+            }
             return OMC_STATUS_INVALID_ARGUMENT;
         }
 
