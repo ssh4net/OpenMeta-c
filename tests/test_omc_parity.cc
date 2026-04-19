@@ -12155,6 +12155,21 @@ main(int argc, char** argv)
     {
         TransferExecuteCaseOptions transfer_opts {};
 
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.persist_stage_output = true;
+        transfer_opts.persist_overwrite_output = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_output_overwrite_allowed",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_png_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
         transfer_opts.persist_staged_sidecar_creator_tool =
             "Persist Existing";
@@ -12162,6 +12177,22 @@ main(int argc, char** argv)
         transfer_opts.target_suffix = ".png";
         ok = run_transfer_persist_case(
                  "transfer_persist_png_existing_sidecar_overwrite_refused",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_png_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.persist_staged_sidecar_creator_tool =
+            "Persist Existing";
+        transfer_opts.persist_overwrite_xmp_sidecar = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_existing_sidecar_overwrite_allowed",
                  build_transfer_source_jpeg_fixture(),
                  build_transfer_target_png_fixture("OldTool"), transfer_opts,
                  false)
@@ -12198,6 +12229,21 @@ main(int argc, char** argv)
     {
         TransferExecuteCaseOptions transfer_opts {};
 
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.persist_stage_output = true;
+        transfer_opts.persist_overwrite_output = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Webp;
+        transfer_opts.target_suffix = ".webp";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_webp_output_overwrite_allowed",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_webp_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
         transfer_opts.persist_staged_sidecar_creator_tool =
             "Persist Existing";
@@ -12205,6 +12251,22 @@ main(int argc, char** argv)
         transfer_opts.target_suffix = ".webp";
         ok = run_transfer_persist_case(
                  "transfer_persist_webp_existing_sidecar_overwrite_refused",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_webp_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.persist_staged_sidecar_creator_tool =
+            "Persist Existing";
+        transfer_opts.persist_overwrite_xmp_sidecar = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Webp;
+        transfer_opts.target_suffix = ".webp";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_webp_existing_sidecar_overwrite_allowed",
                  build_transfer_source_jpeg_fixture(),
                  build_transfer_target_webp_fixture("OldTool"), transfer_opts,
                  false)
@@ -12241,6 +12303,21 @@ main(int argc, char** argv)
     {
         TransferExecuteCaseOptions transfer_opts {};
 
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.persist_stage_output = true;
+        transfer_opts.persist_overwrite_output = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Jp2;
+        transfer_opts.target_suffix = ".jp2";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jp2_output_overwrite_allowed",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_jp2_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
         transfer_opts.persist_staged_sidecar_creator_tool =
             "Persist Existing";
@@ -12248,6 +12325,22 @@ main(int argc, char** argv)
         transfer_opts.target_suffix = ".jp2";
         ok = run_transfer_persist_case(
                  "transfer_persist_jp2_existing_sidecar_overwrite_refused",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_jp2_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.persist_staged_sidecar_creator_tool =
+            "Persist Existing";
+        transfer_opts.persist_overwrite_xmp_sidecar = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Jp2;
+        transfer_opts.target_suffix = ".jp2";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jp2_existing_sidecar_overwrite_allowed",
                  build_transfer_source_jpeg_fixture(),
                  build_transfer_target_jp2_fixture("OldTool"), transfer_opts,
                  false)
@@ -12284,6 +12377,21 @@ main(int argc, char** argv)
     {
         TransferExecuteCaseOptions transfer_opts {};
 
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.persist_stage_output = true;
+        transfer_opts.persist_overwrite_output = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Heif;
+        transfer_opts.target_suffix = ".heic";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_heif_output_overwrite_allowed",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_heif_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
         transfer_opts.persist_staged_sidecar_creator_tool =
             "Persist Existing";
@@ -12291,6 +12399,22 @@ main(int argc, char** argv)
         transfer_opts.target_suffix = ".heic";
         ok = run_transfer_persist_case(
                  "transfer_persist_heif_existing_sidecar_overwrite_refused",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_heif_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.persist_staged_sidecar_creator_tool =
+            "Persist Existing";
+        transfer_opts.persist_overwrite_xmp_sidecar = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Heif;
+        transfer_opts.target_suffix = ".heic";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_heif_existing_sidecar_overwrite_allowed",
                  build_transfer_source_jpeg_fixture(),
                  build_transfer_target_heif_fixture("OldTool"), transfer_opts,
                  false)
@@ -12327,6 +12451,21 @@ main(int argc, char** argv)
     {
         TransferExecuteCaseOptions transfer_opts {};
 
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.persist_stage_output = true;
+        transfer_opts.persist_overwrite_output = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_avif_output_overwrite_allowed",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
         transfer_opts.persist_staged_sidecar_creator_tool =
             "Persist Existing";
@@ -12334,6 +12473,22 @@ main(int argc, char** argv)
         transfer_opts.target_suffix = ".avif";
         ok = run_transfer_persist_case(
                  "transfer_persist_avif_existing_sidecar_overwrite_refused",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_avif_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.persist_staged_sidecar_creator_tool =
+            "Persist Existing";
+        transfer_opts.persist_overwrite_xmp_sidecar = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix = ".avif";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_avif_existing_sidecar_overwrite_allowed",
                  build_transfer_source_jpeg_fixture(),
                  build_transfer_target_avif_fixture("OldTool"), transfer_opts,
                  false)
@@ -12370,6 +12525,21 @@ main(int argc, char** argv)
     {
         TransferExecuteCaseOptions transfer_opts {};
 
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.persist_stage_output = true;
+        transfer_opts.persist_overwrite_output = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Jxl;
+        transfer_opts.target_suffix = ".jxl";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jxl_output_overwrite_allowed",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_jxl_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
         transfer_opts.persist_staged_sidecar_creator_tool =
             "Persist Existing";
@@ -12377,6 +12547,22 @@ main(int argc, char** argv)
         transfer_opts.target_suffix = ".jxl";
         ok = run_transfer_persist_case(
                  "transfer_persist_jxl_existing_sidecar_overwrite_refused",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_jxl_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.persist_staged_sidecar_creator_tool =
+            "Persist Existing";
+        transfer_opts.persist_overwrite_xmp_sidecar = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Jxl;
+        transfer_opts.target_suffix = ".jxl";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jxl_existing_sidecar_overwrite_allowed",
                  build_transfer_source_jpeg_fixture(),
                  build_transfer_target_jxl_fixture("OldTool"), transfer_opts,
                  false)

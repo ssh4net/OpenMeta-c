@@ -895,6 +895,212 @@ build_store_with_remaining_standard_grouped_scalars(omc_store* store)
 }
 
 static void
+build_store_with_creator_contact_info_deep_children(omc_store* store)
+{
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+                       "CreatorContactInfo/CiAdrRegion/ProvinceName[@xml:lang=x-default]",
+                       "Tokyo Prefecture");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+                       "CreatorContactInfo/CiAdrRegion/ProvinceName[@xml:lang=ja-JP]",
+                       "東京都");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+                       "CreatorContactInfo/CiAdrExtadr[1]",
+                       "Building A");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+                       "CreatorContactInfo/CiAdrExtadr[2]",
+                       "Room 42");
+}
+
+static void
+build_store_with_structured_iptc_entities(omc_store* store)
+{
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ArtworkOrObject",
+                       "legacy-artwork");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ArtworkOrObject[1]/AOTitle",
+                       "legacy-title");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ArtworkOrObject[1]/AOTitle[@xml:lang=x-default]",
+                       "Sunset Study");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ArtworkOrObject[1]/AOCreator",
+                       "legacy-creator");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ArtworkOrObject[1]/AOCreator[1]",
+                       "Alice Example");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ArtworkOrObject[1]/AOCreator[2]",
+                       "Bob Example");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ArtworkOrObject[1]/AOStylePeriod",
+                       "legacy-style");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ArtworkOrObject[1]/AOStylePeriod[1]",
+                       "Impressionism");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ArtworkOrObject[1]/AOStylePeriod[2]",
+                       "Modernism");
+
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "PersonInImageWDetails",
+                       "legacy-person");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "PersonInImageWDetails[1]/PersonName",
+                       "legacy-person-name");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "PersonInImageWDetails[1]/PersonName[@xml:lang=x-default]",
+                       "Jane Doe");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "PersonInImageWDetails[1]/PersonId",
+                       "legacy-person-id");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "PersonInImageWDetails[1]/PersonId[1]",
+                       "person-001");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "PersonInImageWDetails[1]/PersonId[2]",
+                       "person-002");
+
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "AboutCvTerm[1]/CvTermName",
+                       "Culture");
+
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ProductInImage",
+                       "legacy-product");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ProductInImage[1]/ProductName",
+                       "legacy-product-name");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ProductInImage[1]/ProductName[@xml:lang=x-default]",
+                       "Camera Body");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ProductInImage[1]/ProductDescription",
+                       "legacy-product-desc");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ProductInImage[1]/ProductDescription[@xml:lang=x-default]",
+                       "Mirrorless");
+}
+
+static void
+build_store_with_remaining_iptc_structured_entities(omc_store* store)
+{
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "Contributor",
+                       "legacy-contributor-base");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "Contributor[1]/Name[@xml:lang=x-default]",
+                       "Desk Editor");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "Contributor[1]/Role[1]",
+                       "editor");
+
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "PlanningRef",
+                       "legacy-planning-base");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "PlanningRef[1]/Name[@xml:lang=x-default]",
+                       "Editorial Plan");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "PlanningRef[1]/Role[1]",
+                       "assignment");
+
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "PersonHeard",
+                       "legacy-person-heard-base");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "PersonHeard[1]/Name[@xml:lang=x-default]",
+                       "Witness");
+
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ShownEvent",
+                       "legacy-shown-event-base");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "ShownEvent[1]/Name[@xml:lang=x-default]",
+                       "Press Conference");
+
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "SupplyChainSource",
+                       "legacy-supply-chain-base");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "SupplyChainSource[1]/Name[@xml:lang=x-default]",
+                       "Agency Feed");
+
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "VideoShotType",
+                       "legacy-video-shot-base");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "VideoShotType[1]/Name[@xml:lang=x-default]",
+                       "Interview");
+
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "DopesheetLink",
+                       "legacy-dopesheet-base");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "DopesheetLink[1]/LinkQualifier[1]",
+                       "keyframe");
+
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "Snapshot",
+                       "legacy-snapshot-base");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "Snapshot[1]/LinkQualifier[1]",
+                       "frame-001");
+
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "TranscriptLink",
+                       "legacy-transcript-base");
+    add_xmp_text_entry(store,
+                       "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+                       "TranscriptLink[1]/LinkQualifier[1]",
+                       "quote");
+}
+
+static void
 build_store_with_creator_tool_and_datetime_original(omc_store* store,
                                                     const char* tool,
                                                     const char* dto)
@@ -4284,6 +4490,315 @@ test_transfer_execute_embedded_and_sidecar_canonicalizes_location_child_shapes(v
 }
 
 static void
+test_transfer_execute_embedded_and_sidecar_preserves_creator_contact_info_deep_children(
+    void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_creator_contact_info_deep_children(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(
+        edited_out.data, edited_out.size,
+        "<Iptc4xmpCore:CreatorContactInfo rdf:parseType=\"Resource\">"));
+    assert(contains_text(
+        edited_out.data, edited_out.size,
+        "<Iptc4xmpCore:CiAdrRegion rdf:parseType=\"Resource\">"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Tokyo Prefecture</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"ja-JP\">東京都</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<Iptc4xmpCore:CiAdrExtadr>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>Building A</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>Room 42</rdf:li>"));
+    assert(contains_text(
+        sidecar_out.data, sidecar_out.size,
+        "<Iptc4xmpCore:CreatorContactInfo rdf:parseType=\"Resource\">"));
+    assert(contains_text(
+        sidecar_out.data, sidecar_out.size,
+        "<Iptc4xmpCore:CiAdrRegion rdf:parseType=\"Resource\">"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Tokyo Prefecture</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"ja-JP\">東京都</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<Iptc4xmpCore:CiAdrExtadr>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>Building A</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>Room 42</rdf:li>"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_preserves_structured_iptc_entities(
+    void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_structured_iptc_entities(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<Iptc4xmpExt:ArtworkOrObject>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Sunset Study</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>Alice Example</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>Impressionism</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<Iptc4xmpExt:PersonInImageWDetails>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Jane Doe</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>person-001</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<Iptc4xmpExt:AboutCvTerm>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Culture</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<Iptc4xmpExt:ProductInImage>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Camera Body</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Mirrorless</rdf:li>"));
+    assert(!contains_text(edited_out.data, edited_out.size, "legacy-artwork"));
+    assert(!contains_text(edited_out.data, edited_out.size, "legacy-person"));
+    assert(!contains_text(edited_out.data, edited_out.size, "legacy-product"));
+
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<Iptc4xmpExt:ArtworkOrObject>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Sunset Study</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>Alice Example</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>Impressionism</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<Iptc4xmpExt:PersonInImageWDetails>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Jane Doe</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>person-001</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<Iptc4xmpExt:AboutCvTerm>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Culture</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<Iptc4xmpExt:ProductInImage>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Camera Body</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Mirrorless</rdf:li>"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size, "legacy-artwork"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size, "legacy-person"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size, "legacy-product"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_execute_embedded_and_sidecar_preserves_remaining_iptc_structured_entities(
+    void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    omc_store_init(&store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_remaining_iptc_structured_entities(&store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    opts.sidecar.include_exif = 0;
+    opts.sidecar.include_iptc = 0;
+    opts.sidecar.include_existing_xmp = 1;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &store, &edited_out,
+                                  &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Desk Editor</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>editor</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Editorial Plan</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>assignment</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Witness</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Press Conference</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Agency Feed</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Interview</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>keyframe</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>frame-001</rdf:li>"));
+    assert(contains_text(edited_out.data, edited_out.size,
+                         "<rdf:li>quote</rdf:li>"));
+    assert(!contains_text(edited_out.data, edited_out.size,
+                          "legacy-contributor-base"));
+    assert(!contains_text(edited_out.data, edited_out.size,
+                          "legacy-planning-base"));
+    assert(!contains_text(edited_out.data, edited_out.size,
+                          "legacy-person-heard-base"));
+    assert(!contains_text(edited_out.data, edited_out.size,
+                          "legacy-shown-event-base"));
+    assert(!contains_text(edited_out.data, edited_out.size,
+                          "legacy-supply-chain-base"));
+    assert(!contains_text(edited_out.data, edited_out.size,
+                          "legacy-video-shot-base"));
+    assert(!contains_text(edited_out.data, edited_out.size,
+                          "legacy-dopesheet-base"));
+    assert(!contains_text(edited_out.data, edited_out.size,
+                          "legacy-snapshot-base"));
+    assert(!contains_text(edited_out.data, edited_out.size,
+                          "legacy-transcript-base"));
+
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Desk Editor</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>editor</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Editorial Plan</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>assignment</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Witness</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Press Conference</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Agency Feed</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li xml:lang=\"x-default\">Interview</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>keyframe</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>frame-001</rdf:li>"));
+    assert(contains_text(sidecar_out.data, sidecar_out.size,
+                         "<rdf:li>quote</rdf:li>"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size,
+                          "legacy-contributor-base"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size,
+                          "legacy-planning-base"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size,
+                          "legacy-person-heard-base"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size,
+                          "legacy-shown-event-base"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size,
+                          "legacy-supply-chain-base"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size,
+                          "legacy-video-shot-base"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size,
+                          "legacy-dopesheet-base"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size,
+                          "legacy-snapshot-base"));
+    assert(!contains_text(sidecar_out.data, sidecar_out.size,
+                          "legacy-transcript-base"));
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&store);
+}
+
+static void
 test_transfer_prepare_opts_init_defaults_dng_target_mode(void)
 {
     omc_transfer_prepare_opts opts;
@@ -4478,6 +4993,9 @@ main(void)
     test_transfer_execute_embedded_and_sidecar_preserves_pdf_and_rights_namespaces();
     test_transfer_execute_embedded_and_sidecar_canonicalizes_xmprights_usage_terms();
     test_transfer_execute_embedded_and_sidecar_canonicalizes_location_child_shapes();
+    test_transfer_execute_embedded_and_sidecar_preserves_creator_contact_info_deep_children();
+    test_transfer_execute_embedded_and_sidecar_preserves_structured_iptc_entities();
+    test_transfer_execute_embedded_and_sidecar_preserves_remaining_iptc_structured_entities();
     test_transfer_prepare_opts_init_defaults_dng_target_mode();
     test_transfer_prepare_dng_existing_and_template_modes_require_target_bytes();
     test_transfer_execute_dng_minimal_fresh_scaffold_sidecar_only_without_target_bytes();
