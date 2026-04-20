@@ -975,6 +975,747 @@ build_transfer_source_jpeg_fixture_common(bool include_exif)
     return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
 }
 
+typedef bool (*TransferSourceXmpBuilderFn)(openmeta::MetaStore& store,
+                                           openmeta::BlockId block);
+
+static ByteVec
+build_transfer_xmp_sidecar_fixture_from_builder(TransferSourceXmpBuilderFn builder)
+{
+    openmeta::MetaStore store;
+    openmeta::BlockId block;
+    openmeta::XmpSidecarRequest request;
+    openmeta::XmpDumpResult result;
+    std::vector<std::byte> out;
+
+    if (builder == nullptr) {
+        return ByteVec();
+    }
+    block = store.add_block(openmeta::BlockInfo {});
+    if (block == openmeta::kInvalidBlockId) {
+        return ByteVec();
+    }
+    if (!builder(store, block)) {
+        return ByteVec();
+    }
+
+    request.format = openmeta::XmpSidecarFormat::Portable;
+    request.include_exif = false;
+    request.include_iptc = false;
+    request.include_existing_xmp = true;
+    result = openmeta::dump_xmp_sidecar(store, &out, request);
+    if (result.status != openmeta::XmpDumpStatus::Ok) {
+        return ByteVec();
+    }
+    return ByteVec(reinterpret_cast<const unsigned char*>(out.data()),
+                   reinterpret_cast<const unsigned char*>(out.data())
+                       + (std::ptrdiff_t)out.size());
+}
+
+static bool
+add_transfer_source_xmp_text(openmeta::MetaStore& store, openmeta::BlockId block,
+                             std::uint32_t order_in_block,
+                             const char* schema_ns, const char* property_path,
+                             const char* value)
+{
+    openmeta::Entry xmp;
+
+    xmp.key = openmeta::make_xmp_property_key(store.arena(), schema_ns,
+                                              property_path);
+    xmp.value = openmeta::make_text(store.arena(), value,
+                                    openmeta::TextEncoding::Utf8);
+    xmp.origin.block          = block;
+    xmp.origin.order_in_block = order_in_block;
+    return store.add_entry(xmp) != openmeta::kInvalidEntryId;
+}
+
+static bool
+add_transfer_source_iptc_dataset_bytes(openmeta::MetaStore& store,
+                                       openmeta::BlockId block,
+                                       std::uint32_t order_in_block,
+                                       std::uint16_t record,
+                                       std::uint16_t dataset,
+                                       const char* value)
+{
+    openmeta::Entry iptc;
+
+    iptc.key = openmeta::make_iptc_dataset_key(record, dataset);
+    iptc.value = openmeta::make_bytes(
+        store.arena(),
+        std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(value), std::strlen(value)));
+    iptc.origin.block          = block;
+    iptc.origin.order_in_block = order_in_block;
+    return store.add_entry(iptc) != openmeta::kInvalidEntryId;
+}
+
+static ByteVec
+build_transfer_source_jpeg_xmp_fixture(TransferSourceXmpBuilderFn builder)
+{
+    openmeta::MetaStore store;
+    openmeta::PreparedTransferBundle bundle;
+    openmeta::PreparedTransferExecutionPlan plan;
+    openmeta::PrepareTransferRequest request;
+    openmeta::PrepareTransferResult prepared;
+    openmeta::EmitTransferResult compiled;
+    openmeta::BlockId block;
+    std::array<unsigned char, 2048> file {};
+    std::size_t size = 0U;
+    std::size_t i;
+
+    if (builder == nullptr) {
+        return ByteVec();
+    }
+
+    block = store.add_block(openmeta::BlockInfo {});
+    if (block == openmeta::kInvalidBlockId) {
+        return ByteVec();
+    }
+    if (!builder(store, block)) {
+        return ByteVec();
+    }
+
+    store.finalize();
+
+    request.target_format      = openmeta::TransferTargetFormat::Jpeg;
+    request.include_icc_app2   = false;
+    request.include_iptc_app13 = false;
+    prepared = openmeta::prepare_metadata_for_target(store, request, &bundle);
+    if (prepared.status != openmeta::TransferStatus::Ok) {
+        return ByteVec();
+    }
+
+    compiled = openmeta::compile_prepared_transfer_execution(
+        bundle, openmeta::EmitTransferOptions {}, &plan);
+    if (compiled.status != openmeta::TransferStatus::Ok
+        || plan.target_format != openmeta::TransferTargetFormat::Jpeg) {
+        return ByteVec();
+    }
+
+    append_u8(file.data(), &size, 0xFFU);
+    append_u8(file.data(), &size, 0xD8U);
+    for (i = 0U; i < plan.jpeg_emit.ops.size(); ++i) {
+        const openmeta::PreparedJpegEmitOp& op = plan.jpeg_emit.ops[i];
+        if (op.block_index >= bundle.blocks.size()) {
+            return ByteVec();
+        }
+        append_jpeg_segment(
+            file.data(), &size, (std::uint16_t)(0xFF00U | op.marker_code),
+            (const unsigned char*)bundle.blocks[op.block_index].payload.data(),
+            bundle.blocks[op.block_index].payload.size());
+    }
+    append_u8(file.data(), &size, 0xFFU);
+    append_u8(file.data(), &size, 0xD9U);
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static bool
+build_transfer_source_creator_contact_deep_children_store(openmeta::MetaStore& store,
+                                                          openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U,
+               "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+               "CreatorContactInfo/CiAdrRegion/ProvinceName[@xml:lang=x-default]",
+               "Tokyo Prefecture")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+               "CreatorContactInfo/CiAdrRegion/ProvinceName[@xml:lang=ja-JP]",
+               "東京都")
+           && add_transfer_source_xmp_text(
+               store, block, 2U,
+               "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+               "CreatorContactInfo/CiAdrExtadr[1]", "Building A")
+           && add_transfer_source_xmp_text(
+               store, block, 3U,
+               "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+               "CreatorContactInfo/CiAdrExtadr[2]", "Room 42");
+}
+
+static bool
+build_transfer_source_creator_contact_info_store(openmeta::MetaStore& store,
+                                                 openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U,
+               "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+               "CreatorContactInfo/CiEmailWork", "editor@example.test")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+               "CreatorContactInfo/CiUrlWork",
+               "https://example.test/contact");
+}
+
+static bool
+build_existing_creator_contact_info_store(openmeta::MetaStore& store,
+                                          openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U,
+               "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+               "CreatorContactInfo/CiEmailWork",
+               "existing@example.test")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+               "CreatorContactInfo/CiUrlWork",
+               "https://existing.example.test/contact");
+}
+
+static bool
+build_transfer_source_mixed_location_shown_details_store(
+    openmeta::MetaStore& store, openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/xmp:Identifier[1]", "loc-001")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/xmp:Identifier[2]", "loc-002")
+           && add_transfer_source_xmp_text(
+               store, block, 2U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/exif:GPSLatitude", "41,24.5N")
+           && add_transfer_source_xmp_text(
+               store, block, 3U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/exif:GPSLongitude", "2,9E");
+}
+
+static bool
+build_transfer_source_pdf_and_rights_namespaces_store(
+    openmeta::MetaStore& store, openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U, "http://ns.adobe.com/pdf/1.3/",
+               "Keywords", "tokyo,night")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://ns.adobe.com/xap/1.0/rights/",
+               "Marked", "True");
+}
+
+static bool
+build_transfer_source_rights_canonicalized_store(openmeta::MetaStore& store,
+                                                 openmeta::BlockId block)
+{
+    return add_transfer_source_iptc_dataset_bytes(
+               store, block, 0U, 2U, 116U, "Generated copyright")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://ns.adobe.com/xap/1.0/rights/",
+               "UsageTerms[@xml:lang=x-default]", "Licensed use only")
+           && add_transfer_source_xmp_text(
+               store, block, 2U,
+               "http://ns.adobe.com/xap/1.0/rights/",
+               "WebStatement", "https://example.test/license");
+}
+
+static bool
+build_transfer_source_location_child_shapes_store(openmeta::MetaStore& store,
+                                                  openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/LocationName", "legacy-name")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/LocationName[@xml:lang=x-default]", "Kyoto")
+           && add_transfer_source_xmp_text(
+               store, block, 2U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/LocationName[@xml:lang=fr-FR]", "Kyoto FR")
+           && add_transfer_source_xmp_text(
+               store, block, 3U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/LocationId", "legacy-id")
+           && add_transfer_source_xmp_text(
+               store, block, 4U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/LocationId[1]", "loc-001")
+           && add_transfer_source_xmp_text(
+               store, block, 5U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/LocationId[2]", "loc-002");
+}
+
+static bool
+build_existing_location_child_shapes_store(openmeta::MetaStore& store,
+                                           openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/LocationName", "existing-name")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/LocationName[@xml:lang=x-default]",
+               "Osaka")
+           && add_transfer_source_xmp_text(
+               store, block, 2U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/LocationName[@xml:lang=fr-FR]",
+               "Osaka FR")
+           && add_transfer_source_xmp_text(
+               store, block, 3U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/LocationId", "existing-id")
+           && add_transfer_source_xmp_text(
+               store, block, 4U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/LocationId[1]", "osk-001")
+           && add_transfer_source_xmp_text(
+               store, block, 5U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "LocationShown[1]/LocationId[2]", "osk-002");
+}
+
+static bool
+build_transfer_source_xmpmm_namespace_store(openmeta::MetaStore& store,
+                                            openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "DocumentID", "xmp.did:1234")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "InstanceID", "xmp.iid:5678");
+}
+
+static bool
+build_existing_embedded_xmpmm_namespace_store(openmeta::MetaStore& store,
+                                              openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "DocumentID", "xmp.did:embedded")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "InstanceID", "xmp.iid:embedded");
+}
+
+static bool
+build_existing_sidecar_xmpmm_namespace_store(openmeta::MetaStore& store,
+                                             openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "DocumentID", "xmp.did:sidecar")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "InstanceID", "xmp.iid:sidecar");
+}
+
+static bool
+build_transfer_source_xmpmm_structured_resources_store(
+    openmeta::MetaStore& store, openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "DerivedFrom", "legacy-derived")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "DerivedFrom/stRef:documentID", "xmp.did:base")
+           && add_transfer_source_xmp_text(
+               store, block, 2U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "DerivedFrom/stRef:instanceID", "xmp.iid:base")
+           && add_transfer_source_xmp_text(
+               store, block, 3U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "ManagedFrom", "legacy-managed")
+           && add_transfer_source_xmp_text(
+               store, block, 4U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "ManagedFrom/stRef:documentID", "xmp.did:managed")
+           && add_transfer_source_xmp_text(
+               store, block, 5U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "ManagedFrom/stRef:instanceID", "xmp.iid:managed")
+           && add_transfer_source_xmp_text(
+               store, block, 6U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Ingredients", "legacy-ingredients")
+           && add_transfer_source_xmp_text(
+               store, block, 7U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Ingredients[1]/stRef:documentID", "xmp.did:ingredient")
+           && add_transfer_source_xmp_text(
+               store, block, 8U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Ingredients[1]/stRef:instanceID", "xmp.iid:ingredient")
+           && add_transfer_source_xmp_text(
+               store, block, 9U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "RenditionOf", "legacy-rendition")
+           && add_transfer_source_xmp_text(
+               store, block, 10U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "RenditionOf/stRef:documentID", "xmp.did:rendition")
+           && add_transfer_source_xmp_text(
+               store, block, 11U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "RenditionOf/stRef:filePath", "/tmp/rendition.jpg")
+           && add_transfer_source_xmp_text(
+               store, block, 12U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "RenditionOf/stRef:renditionClass", "proof:pdf")
+           && add_transfer_source_xmp_text(
+               store, block, 13U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Manifest", "legacy-manifest")
+           && add_transfer_source_xmp_text(
+               store, block, 14U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Manifest[1]/stMfs:linkForm", "EmbedByReference")
+           && add_transfer_source_xmp_text(
+               store, block, 15U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Manifest[1]/stMfs:reference/stRef:filePath",
+               "C:\\some path\\file.ext")
+           && add_transfer_source_xmp_text(
+               store, block, 16U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "History", "legacy-history")
+           && add_transfer_source_xmp_text(
+               store, block, 17U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "History[1]/stEvt:action", "saved")
+           && add_transfer_source_xmp_text(
+               store, block, 18U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "History[1]/stEvt:when", "2026-04-15T09:00:00Z")
+           && add_transfer_source_xmp_text(
+               store, block, 19U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Versions", "legacy-versions")
+           && add_transfer_source_xmp_text(
+               store, block, 20U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Versions[1]/stVer:event", "legacy-event")
+           && add_transfer_source_xmp_text(
+               store, block, 21U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Versions[1]/stVer:version", "1.0")
+           && add_transfer_source_xmp_text(
+               store, block, 22U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Versions[1]/stVer:comments", "Initial import")
+           && add_transfer_source_xmp_text(
+               store, block, 23U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Versions[1]/stVer:modifier", "OpenMeta")
+           && add_transfer_source_xmp_text(
+               store, block, 24U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Versions[1]/stVer:modifyDate", "2026-04-16T10:15:00Z")
+           && add_transfer_source_xmp_text(
+               store, block, 25U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Versions[1]/stVer:event/stEvt:action", "saved")
+           && add_transfer_source_xmp_text(
+               store, block, 26U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Versions[1]/stVer:event/stEvt:changed", "/metadata")
+           && add_transfer_source_xmp_text(
+               store, block, 27U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Versions[1]/stVer:event/stEvt:when",
+               "2026-04-16T10:15:00Z")
+           && add_transfer_source_xmp_text(
+               store, block, 28U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Pantry", "legacy-pantry")
+           && add_transfer_source_xmp_text(
+               store, block, 29U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Pantry[1]/InstanceID", "uuid:pantry-1")
+           && add_transfer_source_xmp_text(
+               store, block, 30U,
+               "http://ns.adobe.com/xap/1.0/mm/",
+               "Pantry[1]/dc:format", "image/jpeg");
+}
+
+static bool
+build_transfer_source_advisory_bag_store(openmeta::MetaStore& store,
+                                         openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U, "http://ns.adobe.com/xap/1.0/",
+               "Advisory[1]", "xmp:MetadataDate")
+           && add_transfer_source_xmp_text(
+               store, block, 1U, "http://ns.adobe.com/xap/1.0/",
+               "Advisory[2]", "photoshop:City");
+}
+
+static bool
+build_transfer_source_language_and_date_store(openmeta::MetaStore& store,
+                                              openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U, "http://purl.org/dc/elements/1.1/",
+               "language[1]", "en-US")
+           && add_transfer_source_xmp_text(
+               store, block, 1U, "http://purl.org/dc/elements/1.1/",
+               "language[2]", "fr-FR")
+           && add_transfer_source_xmp_text(
+               store, block, 2U, "http://purl.org/dc/elements/1.1/",
+               "date[1]", "2026-04-15")
+           && add_transfer_source_xmp_text(
+               store, block, 3U, "http://purl.org/dc/elements/1.1/",
+               "date[2]", "2026-04-16");
+}
+
+static bool
+build_transfer_source_lr_hierarchical_subject_store(openmeta::MetaStore& store,
+                                                    openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U, "http://ns.adobe.com/lightroom/1.0/",
+               "hierarchicalSubject[1]", "Places|Japan|Tokyo")
+           && add_transfer_source_xmp_text(
+               store, block, 1U, "http://ns.adobe.com/lightroom/1.0/",
+               "hierarchicalSubject[2]", "Travel|Spring");
+}
+
+static bool
+build_transfer_source_remaining_standard_grouped_scalars_store(
+    openmeta::MetaStore& store, openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U, "http://purl.org/dc/elements/1.1/",
+               "language", "en-US")
+           && add_transfer_source_xmp_text(
+               store, block, 1U, "http://purl.org/dc/elements/1.1/",
+               "contributor", "Alice")
+           && add_transfer_source_xmp_text(
+               store, block, 2U, "http://purl.org/dc/elements/1.1/",
+               "publisher", "OpenMeta Press")
+           && add_transfer_source_xmp_text(
+               store, block, 3U, "http://purl.org/dc/elements/1.1/",
+               "relation", "urn:related:test")
+           && add_transfer_source_xmp_text(
+               store, block, 4U, "http://purl.org/dc/elements/1.1/",
+               "type", "Image")
+           && add_transfer_source_xmp_text(
+               store, block, 5U, "http://purl.org/dc/elements/1.1/",
+               "date", "2026-04-15")
+           && add_transfer_source_xmp_text(
+               store, block, 6U, "http://ns.adobe.com/xap/1.0/",
+               "Identifier", "urn:om:test:id")
+           && add_transfer_source_xmp_text(
+               store, block, 7U, "http://ns.adobe.com/xap/1.0/",
+               "Advisory", "photoshop:City")
+           && add_transfer_source_xmp_text(
+               store, block, 8U,
+               "http://ns.adobe.com/xap/1.0/rights/",
+               "Owner", "OpenMeta Labs")
+           && add_transfer_source_xmp_text(
+               store, block, 9U, "http://ns.adobe.com/lightroom/1.0/",
+               "hierarchicalSubject", "Places|Museum")
+           && add_transfer_source_xmp_text(
+               store, block, 10U, "http://ns.useplus.org/ldf/xmp/1.0/",
+               "ImageAlterationConstraints", "No compositing");
+}
+
+static bool
+build_transfer_source_structured_iptc_entities_store(openmeta::MetaStore& store,
+                                                     openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ArtworkOrObject", "legacy-artwork")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ArtworkOrObject[1]/AOTitle", "legacy-title")
+           && add_transfer_source_xmp_text(
+               store, block, 2U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ArtworkOrObject[1]/AOTitle[@xml:lang=x-default]",
+               "Sunset Study")
+           && add_transfer_source_xmp_text(
+               store, block, 3U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ArtworkOrObject[1]/AOCreator", "legacy-creator")
+           && add_transfer_source_xmp_text(
+               store, block, 4U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ArtworkOrObject[1]/AOCreator[1]", "Alice Example")
+           && add_transfer_source_xmp_text(
+               store, block, 5U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ArtworkOrObject[1]/AOCreator[2]", "Bob Example")
+           && add_transfer_source_xmp_text(
+               store, block, 6U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ArtworkOrObject[1]/AOStylePeriod", "legacy-style")
+           && add_transfer_source_xmp_text(
+               store, block, 7U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ArtworkOrObject[1]/AOStylePeriod[1]", "Impressionism")
+           && add_transfer_source_xmp_text(
+               store, block, 8U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ArtworkOrObject[1]/AOStylePeriod[2]", "Modernism")
+           && add_transfer_source_xmp_text(
+               store, block, 9U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "PersonInImageWDetails", "legacy-person")
+           && add_transfer_source_xmp_text(
+               store, block, 10U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "PersonInImageWDetails[1]/PersonName", "legacy-person-name")
+           && add_transfer_source_xmp_text(
+               store, block, 11U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "PersonInImageWDetails[1]/PersonName[@xml:lang=x-default]",
+               "Jane Doe")
+           && add_transfer_source_xmp_text(
+               store, block, 12U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "PersonInImageWDetails[1]/PersonId", "legacy-person-id")
+           && add_transfer_source_xmp_text(
+               store, block, 13U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "PersonInImageWDetails[1]/PersonId[1]", "person-001")
+           && add_transfer_source_xmp_text(
+               store, block, 14U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "PersonInImageWDetails[1]/PersonId[2]", "person-002")
+           && add_transfer_source_xmp_text(
+               store, block, 15U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "AboutCvTerm[1]/CvTermName", "Culture")
+           && add_transfer_source_xmp_text(
+               store, block, 16U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ProductInImage", "legacy-product")
+           && add_transfer_source_xmp_text(
+               store, block, 17U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ProductInImage[1]/ProductName", "legacy-product-name")
+           && add_transfer_source_xmp_text(
+               store, block, 18U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ProductInImage[1]/ProductName[@xml:lang=x-default]",
+               "Camera Body")
+           && add_transfer_source_xmp_text(
+               store, block, 19U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ProductInImage[1]/ProductDescription",
+               "legacy-product-desc")
+           && add_transfer_source_xmp_text(
+               store, block, 20U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ProductInImage[1]/ProductDescription[@xml:lang=x-default]",
+               "Mirrorless");
+}
+
+static bool
+build_transfer_source_remaining_iptc_structured_entities_store(
+    openmeta::MetaStore& store, openmeta::BlockId block)
+{
+    return add_transfer_source_xmp_text(
+               store, block, 0U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "Contributor", "legacy-contributor-base")
+           && add_transfer_source_xmp_text(
+               store, block, 1U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "Contributor[1]/Name[@xml:lang=x-default]", "Desk Editor")
+           && add_transfer_source_xmp_text(
+               store, block, 2U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "Contributor[1]/Role[1]", "editor")
+           && add_transfer_source_xmp_text(
+               store, block, 3U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "PlanningRef", "legacy-planning-base")
+           && add_transfer_source_xmp_text(
+               store, block, 4U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "PlanningRef[1]/Name[@xml:lang=x-default]",
+               "Editorial Plan")
+           && add_transfer_source_xmp_text(
+               store, block, 5U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "PlanningRef[1]/Role[1]", "assignment")
+           && add_transfer_source_xmp_text(
+               store, block, 6U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "PersonHeard", "legacy-person-heard-base")
+           && add_transfer_source_xmp_text(
+               store, block, 7U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "PersonHeard[1]/Name[@xml:lang=x-default]", "Witness")
+           && add_transfer_source_xmp_text(
+               store, block, 8U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ShownEvent", "legacy-shown-event-base")
+           && add_transfer_source_xmp_text(
+               store, block, 9U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "ShownEvent[1]/Name[@xml:lang=x-default]",
+               "Press Conference")
+           && add_transfer_source_xmp_text(
+               store, block, 10U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "SupplyChainSource", "legacy-supply-chain-base")
+           && add_transfer_source_xmp_text(
+               store, block, 11U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "SupplyChainSource[1]/Name[@xml:lang=x-default]",
+               "Agency Feed")
+           && add_transfer_source_xmp_text(
+               store, block, 12U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "VideoShotType", "legacy-video-shot-base")
+           && add_transfer_source_xmp_text(
+               store, block, 13U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "VideoShotType[1]/Name[@xml:lang=x-default]", "Interview")
+           && add_transfer_source_xmp_text(
+               store, block, 14U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "DopesheetLink", "legacy-dopesheet-base")
+           && add_transfer_source_xmp_text(
+               store, block, 15U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "DopesheetLink[1]/LinkQualifier[1]", "keyframe")
+           && add_transfer_source_xmp_text(
+               store, block, 16U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "Snapshot", "legacy-snapshot-base")
+           && add_transfer_source_xmp_text(
+               store, block, 17U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "Snapshot[1]/LinkQualifier[1]", "frame-001")
+           && add_transfer_source_xmp_text(
+               store, block, 18U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "TranscriptLink", "legacy-transcript-base")
+           && add_transfer_source_xmp_text(
+               store, block, 19U,
+               "http://iptc.org/std/Iptc4xmpExt/2008-02-29/",
+               "TranscriptLink[1]/LinkQualifier[1]", "quote");
+}
+
 static ByteVec
 build_transfer_source_jpeg_fixture()
 {
@@ -985,6 +1726,104 @@ static ByteVec
 build_transfer_source_jpeg_exif_xmp_fixture()
 {
     return build_transfer_source_jpeg_fixture_common(true);
+}
+
+static ByteVec
+build_transfer_source_jpeg_creator_contact_deep_children_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_creator_contact_deep_children_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_structured_iptc_entities_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_structured_iptc_entities_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_remaining_iptc_structured_entities_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_remaining_iptc_structured_entities_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_creator_contact_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_creator_contact_info_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_mixed_location_shown_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_mixed_location_shown_details_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_pdf_and_rights_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_pdf_and_rights_namespaces_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_rights_canonicalized_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_rights_canonicalized_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_location_child_shapes_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_location_child_shapes_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_xmpmm_namespace_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_xmpmm_namespace_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_xmpmm_structured_resources_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_xmpmm_structured_resources_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_advisory_bag_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_advisory_bag_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_language_and_date_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_language_and_date_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_lr_hierarchical_subject_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_lr_hierarchical_subject_store);
+}
+
+static ByteVec
+build_transfer_source_jpeg_remaining_standard_grouped_scalars_fixture()
+{
+    return build_transfer_source_jpeg_xmp_fixture(
+        build_transfer_source_remaining_standard_grouped_scalars_store);
 }
 
 static ByteVec
@@ -1042,6 +1881,43 @@ build_transfer_target_png_fixture(const char* existing_creator_tool)
         append_png_chunk(file.data(), &size, "iTXt", xmp_payload.data(),
                          xmp_size);
     }
+    append_png_chunk(file.data(), &size, "IEND", (const unsigned char*)0, 0U);
+    return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
+}
+
+static ByteVec
+build_transfer_target_png_xmp_fixture(TransferSourceXmpBuilderFn builder)
+{
+    static const unsigned char png_sig[8] = {
+        0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU
+    };
+    std::array<unsigned char, 2048> file {};
+    std::array<unsigned char, 13> ihdr {};
+    std::array<unsigned char, 1536> xmp_payload {};
+    const ByteVec xml = build_transfer_xmp_sidecar_fixture_from_builder(builder);
+    std::size_t xmp_size = 0U;
+    std::size_t size = 0U;
+
+    ihdr[3] = 1U;
+    ihdr[7] = 1U;
+    ihdr[8] = 8U;
+    ihdr[9] = 2U;
+
+    append_bytes(file.data(), &size, png_sig, sizeof(png_sig));
+    append_png_chunk(file.data(), &size, "IHDR", ihdr.data(), ihdr.size());
+
+    if (!xml.empty()) {
+        append_text(xmp_payload.data(), &xmp_size, "XML:com.adobe.xmp");
+        append_u8(xmp_payload.data(), &xmp_size, 0U);
+        append_u8(xmp_payload.data(), &xmp_size, 0U);
+        append_u8(xmp_payload.data(), &xmp_size, 0U);
+        append_u8(xmp_payload.data(), &xmp_size, 0U);
+        append_u8(xmp_payload.data(), &xmp_size, 0U);
+        append_bytes(xmp_payload.data(), &xmp_size, xml.data(), xml.size());
+        append_png_chunk(file.data(), &size, "iTXt", xmp_payload.data(),
+                         xmp_size);
+    }
+
     append_png_chunk(file.data(), &size, "IEND", (const unsigned char*)0, 0U);
     return ByteVec(file.begin(), file.begin() + (std::ptrdiff_t)size);
 }
@@ -8870,6 +9746,7 @@ struct TransferExecuteCaseOptions final {
     omc_xmp_destination_embedded_mode destination_embedded_mode
         = OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING;
     const char* existing_sidecar_creator_tool = nullptr;
+    TransferSourceXmpBuilderFn existing_sidecar_xmp_builder = nullptr;
     omc_transfer_existing_xmp_precedence existing_sidecar_precedence
         = OMC_TRANSFER_EXISTING_XMP_PREFER_EXISTING;
     bool merge_existing_embedded = false;
@@ -9387,9 +10264,14 @@ run_omc_transfer_execute_case(const ByteVec& source_bytes,
     prepare_opts.dng_target_mode = options.omc_dng_target_mode;
     prepare_opts.destination_embedded_mode
         = options.destination_embedded_mode;
-    if (options.existing_sidecar_creator_tool != nullptr) {
-        const ByteVec sidecar_bytes = build_transfer_xmp_sidecar_fixture(
-            options.existing_sidecar_creator_tool);
+    if (options.existing_sidecar_creator_tool != nullptr
+        || options.existing_sidecar_xmp_builder != nullptr) {
+        const ByteVec sidecar_bytes =
+            (options.existing_sidecar_xmp_builder != nullptr)
+                ? build_transfer_xmp_sidecar_fixture_from_builder(
+                      options.existing_sidecar_xmp_builder)
+                : build_transfer_xmp_sidecar_fixture(
+                      options.existing_sidecar_creator_tool);
         if (!read_omc_store(sidecar_bytes, &existing_sidecar_store)) {
             omc_arena_fini(&sidecar_out);
             omc_arena_fini(&edited_out);
@@ -9527,10 +10409,15 @@ run_cpp_transfer_execute_case(const ByteVec& source_bytes,
         remove_file_if_present(target_path);
         return false;
     }
-    if (options.existing_sidecar_creator_tool != nullptr
-        && !write_file_bytes(sidecar_path,
-                             build_transfer_xmp_sidecar_fixture(
-                                 options.existing_sidecar_creator_tool))) {
+    if ((options.existing_sidecar_creator_tool != nullptr
+         || options.existing_sidecar_xmp_builder != nullptr)
+        && !write_file_bytes(
+               sidecar_path,
+               (options.existing_sidecar_xmp_builder != nullptr)
+                   ? build_transfer_xmp_sidecar_fixture_from_builder(
+                         options.existing_sidecar_xmp_builder)
+                   : build_transfer_xmp_sidecar_fixture(
+                         options.existing_sidecar_creator_tool))) {
         remove_file_if_present(source_path);
         remove_file_if_present(target_path);
         remove_file_if_present(sidecar_path);
@@ -9541,7 +10428,8 @@ run_cpp_transfer_execute_case(const ByteVec& source_bytes,
     exec_opts.prepare.prepare.dng_target_mode = options.cpp_dng_target_mode;
     exec_opts.prepare.prepare.include_icc_app2 = false;
     exec_opts.prepare.prepare.include_iptc_app13 = false;
-    if (options.existing_sidecar_creator_tool != nullptr) {
+    if (options.existing_sidecar_creator_tool != nullptr
+        || options.existing_sidecar_xmp_builder != nullptr) {
         exec_opts.prepare.prepare.xmp_include_existing = true;
         exec_opts.prepare.prepare.xmp_conflict_policy
             = openmeta::XmpConflictPolicy::ExistingWins;
@@ -9670,9 +10558,14 @@ run_omc_transfer_persist_case(const ByteVec& source_bytes,
     prepare_opts.dng_target_mode = options.omc_dng_target_mode;
     prepare_opts.destination_embedded_mode
         = options.destination_embedded_mode;
-    if (options.existing_sidecar_creator_tool != nullptr) {
-        const ByteVec sidecar_fixture = build_transfer_xmp_sidecar_fixture(
-            options.existing_sidecar_creator_tool);
+    if (options.existing_sidecar_creator_tool != nullptr
+        || options.existing_sidecar_xmp_builder != nullptr) {
+        const ByteVec sidecar_fixture =
+            (options.existing_sidecar_xmp_builder != nullptr)
+                ? build_transfer_xmp_sidecar_fixture_from_builder(
+                      options.existing_sidecar_xmp_builder)
+                : build_transfer_xmp_sidecar_fixture(
+                      options.existing_sidecar_creator_tool);
         if (!read_omc_store(sidecar_fixture, &existing_sidecar_store)) {
             omc_arena_fini(&meta_out);
             omc_arena_fini(&sidecar_out);
@@ -9945,10 +10838,15 @@ run_cpp_transfer_persist_case(const ByteVec& source_bytes,
         return false;
     }
     if (options.persist_staged_sidecar_creator_tool == nullptr
-        && options.existing_sidecar_creator_tool != nullptr
-        && !write_file_bytes(sidecar_path,
-                             build_transfer_xmp_sidecar_fixture(
-                                 options.existing_sidecar_creator_tool))) {
+        && (options.existing_sidecar_creator_tool != nullptr
+            || options.existing_sidecar_xmp_builder != nullptr)
+        && !write_file_bytes(
+               sidecar_path,
+               (options.existing_sidecar_xmp_builder != nullptr)
+                   ? build_transfer_xmp_sidecar_fixture_from_builder(
+                         options.existing_sidecar_xmp_builder)
+                   : build_transfer_xmp_sidecar_fixture(
+                         options.existing_sidecar_creator_tool))) {
         remove_file_if_present(source_path);
         remove_file_if_present(target_path);
         remove_file_if_present(sidecar_path);
@@ -9956,6 +10854,7 @@ run_cpp_transfer_persist_case(const ByteVec& source_bytes,
     }
     if (options.persist_staged_sidecar_creator_tool == nullptr
         && options.existing_sidecar_creator_tool == nullptr
+        && options.existing_sidecar_xmp_builder == nullptr
         && strip_destination_sidecar
         && !write_file_bytes(sidecar_path,
                              build_transfer_xmp_sidecar_fixture(
@@ -9970,7 +10869,8 @@ run_cpp_transfer_persist_case(const ByteVec& source_bytes,
     exec_opts.prepare.prepare.dng_target_mode = options.cpp_dng_target_mode;
     exec_opts.prepare.prepare.include_icc_app2 = false;
     exec_opts.prepare.prepare.include_iptc_app13 = false;
-    if (options.existing_sidecar_creator_tool != nullptr) {
+    if (options.existing_sidecar_creator_tool != nullptr
+        || options.existing_sidecar_xmp_builder != nullptr) {
         exec_opts.prepare.prepare.xmp_include_existing = true;
         exec_opts.prepare.prepare.xmp_conflict_policy
             = openmeta::XmpConflictPolicy::ExistingWins;
@@ -10688,6 +11588,94 @@ main(int argc, char** argv)
     {
         TransferExecuteCaseOptions transfer_opts {};
 
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_creator_contact_info_store;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_creator_contact_existing_sidecar_existing_wins",
+                 build_transfer_source_jpeg_creator_contact_fixture(),
+                 build_transfer_target_jpeg_fixture(nullptr, false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_creator_contact_info_store;
+        transfer_opts.existing_sidecar_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_creator_contact_existing_sidecar_source_wins",
+                 build_transfer_source_jpeg_creator_contact_fixture(),
+                 build_transfer_target_jpeg_fixture(nullptr, false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_location_child_shapes_existing_embedded_existing_wins",
+                 build_transfer_source_jpeg_location_child_shapes_fixture(),
+                 build_transfer_source_jpeg_xmp_fixture(
+                     build_existing_location_child_shapes_store),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.existing_embedded_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_location_child_shapes_existing_embedded_source_wins",
+                 build_transfer_source_jpeg_location_child_shapes_fixture(),
+                 build_transfer_source_jpeg_xmp_fixture(
+                     build_existing_location_child_shapes_store),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_sidecar_xmpmm_namespace_store;
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_xmpmm_existing_sidecar_and_embedded_default",
+                 build_transfer_source_jpeg_xmpmm_namespace_fixture(),
+                 build_transfer_source_jpeg_xmp_fixture(
+                     build_existing_embedded_xmpmm_namespace_store),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_sidecar_xmpmm_namespace_store;
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.carrier_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_EMBEDDED;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_xmpmm_existing_sidecar_and_embedded_embedded_wins",
+                 build_transfer_source_jpeg_xmpmm_namespace_fixture(),
+                 build_transfer_source_jpeg_xmp_fixture(
+                     build_existing_embedded_xmpmm_namespace_store),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
         ok = run_transfer_execute_case(
                  "transfer_jpeg_exif_sidecar_only_preserve",
@@ -10818,6 +11806,248 @@ main(int argc, char** argv)
                  build_transfer_source_jpeg_fixture(),
                  build_transfer_target_jpeg_fixture(
                      "Target Embedded Existing", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_creator_contact_info_store;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_creator_contact_existing_sidecar_existing_wins",
+                 build_transfer_source_jpeg_creator_contact_fixture(),
+                 build_transfer_target_jpeg_fixture(nullptr, false),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_creator_contact_info_store;
+        transfer_opts.existing_sidecar_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_creator_contact_existing_sidecar_source_wins",
+                 build_transfer_source_jpeg_creator_contact_fixture(),
+                 build_transfer_target_jpeg_fixture(nullptr, false),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_location_child_shapes_existing_embedded_existing_wins",
+                 build_transfer_source_jpeg_location_child_shapes_fixture(),
+                 build_transfer_source_jpeg_xmp_fixture(
+                     build_existing_location_child_shapes_store),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.existing_embedded_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_location_child_shapes_existing_embedded_source_wins",
+                 build_transfer_source_jpeg_location_child_shapes_fixture(),
+                 build_transfer_source_jpeg_xmp_fixture(
+                     build_existing_location_child_shapes_store),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_sidecar_xmpmm_namespace_store;
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_xmpmm_existing_sidecar_and_embedded_default",
+                 build_transfer_source_jpeg_xmpmm_namespace_fixture(),
+                 build_transfer_source_jpeg_xmp_fixture(
+                     build_existing_embedded_xmpmm_namespace_store),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_sidecar_xmpmm_namespace_store;
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.carrier_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_EMBEDDED;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_xmpmm_existing_sidecar_and_embedded_embedded_wins",
+                 build_transfer_source_jpeg_xmpmm_namespace_fixture(),
+                 build_transfer_source_jpeg_xmp_fixture(
+                     build_existing_embedded_xmpmm_namespace_store),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_creator_contact_embedded_and_sidecar",
+                 build_transfer_source_jpeg_creator_contact_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_mixed_location_shown_embedded_and_sidecar",
+                 build_transfer_source_jpeg_mixed_location_shown_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_xmpmm_namespace_embedded_and_sidecar",
+                 build_transfer_source_jpeg_xmpmm_namespace_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_xmpmm_structured_resources_embedded_and_sidecar",
+                 build_transfer_source_jpeg_xmpmm_structured_resources_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_xmp_advisory_bag_embedded_and_sidecar",
+                 build_transfer_source_jpeg_advisory_bag_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_dc_language_and_date_embedded_and_sidecar",
+                 build_transfer_source_jpeg_language_and_date_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_lr_hierarchical_subject_embedded_and_sidecar",
+                 build_transfer_source_jpeg_lr_hierarchical_subject_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_remaining_standard_grouped_scalars_embedded_and_sidecar",
+                 build_transfer_source_jpeg_remaining_standard_grouped_scalars_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_pdf_and_rights_embedded_and_sidecar",
+                 build_transfer_source_jpeg_pdf_and_rights_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_rights_canonicalized_embedded_and_sidecar",
+                 build_transfer_source_jpeg_rights_canonicalized_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_location_child_shapes_embedded_and_sidecar",
+                 build_transfer_source_jpeg_location_child_shapes_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_creator_contact_deep_children_embedded_and_sidecar",
+                 build_transfer_source_jpeg_creator_contact_deep_children_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_structured_iptc_entities_embedded_and_sidecar",
+                 build_transfer_source_jpeg_structured_iptc_entities_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_jpeg_remaining_iptc_structured_entities_embedded_and_sidecar",
+                 build_transfer_source_jpeg_remaining_iptc_structured_entities_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
                  transfer_opts, false)
              && ok;
     }
@@ -11008,6 +12238,204 @@ main(int argc, char** argv)
                  "transfer_persist_png_existing_sidecar_and_embedded_embedded_wins",
                  build_transfer_source_jpeg_fixture(),
                  build_transfer_target_png_fixture("Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_creator_contact_info_store;
+        ok = run_transfer_execute_case(
+                 "transfer_png_creator_contact_existing_sidecar_existing_wins",
+                 build_transfer_source_jpeg_creator_contact_fixture(),
+                 build_transfer_target_png_fixture(nullptr), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_creator_contact_info_store;
+        transfer_opts.existing_sidecar_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_execute_case(
+                 "transfer_png_creator_contact_existing_sidecar_source_wins",
+                 build_transfer_source_jpeg_creator_contact_fixture(),
+                 build_transfer_target_png_fixture(nullptr), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_execute_case(
+                 "transfer_png_location_child_shapes_existing_embedded_existing_wins",
+                 build_transfer_source_jpeg_location_child_shapes_fixture(),
+                 build_transfer_target_png_xmp_fixture(
+                     build_existing_location_child_shapes_store),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.existing_embedded_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_execute_case(
+                 "transfer_png_location_child_shapes_existing_embedded_source_wins",
+                 build_transfer_source_jpeg_location_child_shapes_fixture(),
+                 build_transfer_target_png_xmp_fixture(
+                     build_existing_location_child_shapes_store),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_sidecar_xmpmm_namespace_store;
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_execute_case(
+                 "transfer_png_xmpmm_existing_sidecar_and_embedded_default",
+                 build_transfer_source_jpeg_xmpmm_namespace_fixture(),
+                 build_transfer_target_png_xmp_fixture(
+                     build_existing_embedded_xmpmm_namespace_store),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_sidecar_xmpmm_namespace_store;
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.carrier_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_EMBEDDED;
+        ok = run_transfer_execute_case(
+                 "transfer_png_xmpmm_existing_sidecar_and_embedded_embedded_wins",
+                 build_transfer_source_jpeg_xmpmm_namespace_fixture(),
+                 build_transfer_target_png_xmp_fixture(
+                     build_existing_embedded_xmpmm_namespace_store),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_creator_contact_info_store;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_creator_contact_existing_sidecar_existing_wins",
+                 build_transfer_source_jpeg_creator_contact_fixture(),
+                 build_transfer_target_png_fixture(nullptr),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_creator_contact_info_store;
+        transfer_opts.existing_sidecar_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_creator_contact_existing_sidecar_source_wins",
+                 build_transfer_source_jpeg_creator_contact_fixture(),
+                 build_transfer_target_png_fixture(nullptr),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_location_child_shapes_existing_embedded_existing_wins",
+                 build_transfer_source_jpeg_location_child_shapes_fixture(),
+                 build_transfer_target_png_xmp_fixture(
+                     build_existing_location_child_shapes_store),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.existing_embedded_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_location_child_shapes_existing_embedded_source_wins",
+                 build_transfer_source_jpeg_location_child_shapes_fixture(),
+                 build_transfer_target_png_xmp_fixture(
+                     build_existing_location_child_shapes_store),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_sidecar_xmpmm_namespace_store;
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_xmpmm_existing_sidecar_and_embedded_default",
+                 build_transfer_source_jpeg_xmpmm_namespace_fixture(),
+                 build_transfer_target_png_xmp_fixture(
+                     build_existing_embedded_xmpmm_namespace_store),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.existing_sidecar_xmp_builder =
+            build_existing_sidecar_xmpmm_namespace_store;
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.carrier_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_EMBEDDED;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_xmpmm_existing_sidecar_and_embedded_embedded_wins",
+                 build_transfer_source_jpeg_xmpmm_namespace_fixture(),
+                 build_transfer_target_png_xmp_fixture(
+                     build_existing_embedded_xmpmm_namespace_store),
                  transfer_opts, false)
              && ok;
     }
@@ -12580,6 +14008,160 @@ main(int argc, char** argv)
                  build_transfer_source_jpeg_fixture(),
                  build_transfer_target_jxl_fixture(nullptr), transfer_opts,
                  true)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_creator_contact_embedded_and_sidecar",
+                 build_transfer_source_jpeg_creator_contact_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_mixed_location_shown_embedded_and_sidecar",
+                 build_transfer_source_jpeg_mixed_location_shown_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_xmpmm_namespace_embedded_and_sidecar",
+                 build_transfer_source_jpeg_xmpmm_namespace_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_xmpmm_structured_resources_embedded_and_sidecar",
+                 build_transfer_source_jpeg_xmpmm_structured_resources_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_xmp_advisory_bag_embedded_and_sidecar",
+                 build_transfer_source_jpeg_advisory_bag_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_dc_language_and_date_embedded_and_sidecar",
+                 build_transfer_source_jpeg_language_and_date_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_lr_hierarchical_subject_embedded_and_sidecar",
+                 build_transfer_source_jpeg_lr_hierarchical_subject_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_remaining_standard_grouped_scalars_embedded_and_sidecar",
+                 build_transfer_source_jpeg_remaining_standard_grouped_scalars_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_pdf_and_rights_embedded_and_sidecar",
+                 build_transfer_source_jpeg_pdf_and_rights_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_rights_canonicalized_embedded_and_sidecar",
+                 build_transfer_source_jpeg_rights_canonicalized_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_location_child_shapes_embedded_and_sidecar",
+                 build_transfer_source_jpeg_location_child_shapes_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_creator_contact_deep_children_embedded_and_sidecar",
+                 build_transfer_source_jpeg_creator_contact_deep_children_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_structured_iptc_entities_embedded_and_sidecar",
+                 build_transfer_source_jpeg_structured_iptc_entities_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_remaining_iptc_structured_entities_embedded_and_sidecar",
+                 build_transfer_source_jpeg_remaining_iptc_structured_entities_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", false),
+                 transfer_opts)
              && ok;
     }
     {
