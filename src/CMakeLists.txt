@@ -51,6 +51,7 @@ set(OMC_SOURCES
   edit/omc_xmp_dump.c
   edit/omc_xmp_write.c
   read/omc_bmff.c
+  read/omc_ccm_query.c
   read/omc_ciff.c
   read/omc_exr.c
   read/omc_exif.c
@@ -60,8 +61,10 @@ set(OMC_SOURCES
   read/omc_irb.c
   read/omc_jumbf.c
   read/omc_pay.c
+  read/omc_preview.c
   read/omc_read.c
   read/omc_scan.c
+  read/omc_validate.c
   read/omc_xmp.c
 )
 

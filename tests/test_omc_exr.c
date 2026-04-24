@@ -1,7 +1,7 @@
 #include "omc/omc_exr.h"
 #include "omc/omc_read.h"
 
-#include <assert.h>
+#include "omc_test_assert.h"
 #include <string.h>
 
 static void

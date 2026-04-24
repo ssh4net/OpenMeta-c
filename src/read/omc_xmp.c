@@ -70,11 +70,15 @@ typedef struct omc_xmp_ctx {
     char* path_buf;
     omc_u32 path_cap;
     int saw_xmp_shape;
+    omc_u8* input_copy;
 } omc_xmp_ctx;
 
 static const char k_ns_meta[] = "adobe:ns:meta/";
 static const char k_ns_rdf[] = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 static const char k_ns_xml[] = "http://www.w3.org/XML/1998/namespace";
+
+static void
+omc_xmp_ctx_fini(omc_xmp_ctx* ctx);
 
 static void
 omc_xmp_opts_apply_defaults(omc_xmp_opts* opts)
@@ -1100,8 +1104,6 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
     omc_u32 path_cap;
 
     memset(ctx, 0, sizeof(*ctx));
-    ctx->bytes = xmp_bytes;
-    ctx->size = xmp_size;
     ctx->store = store;
     ctx->source_block = source_block;
     ctx->base_flags = flags;
@@ -1121,11 +1123,27 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
         ctx->opts.limits.max_depth = 128U;
     }
 
+    if (xmp_size != 0U) {
+        /* Keep parser spans stable even when decoded properties append into
+         * store->arena during the same parse. */
+        ctx->input_copy = (omc_u8*)malloc(xmp_size);
+        if (ctx->input_copy == (omc_u8*)0) {
+            omc_xmp_set_res(&ctx->res, OMC_XMP_NOMEM);
+            return 0;
+        }
+        memcpy(ctx->input_copy, xmp_bytes, xmp_size);
+        ctx->bytes = ctx->input_copy;
+    } else {
+        ctx->bytes = xmp_bytes;
+    }
+    ctx->size = xmp_size;
+
     ctx->frame_cap = ctx->opts.limits.max_depth;
     if (!omc_xmp_u32_mul_add_fits(ctx->frame_cap, 8U, 32U, &ns_cap)
         || !omc_xmp_u32_mul_add_fits(ctx->opts.limits.max_path_bytes, 1U,
                                      32U, &path_cap)) {
         omc_xmp_set_res(&ctx->res, OMC_XMP_LIMIT);
+        omc_xmp_ctx_fini(ctx);
         return 0;
     }
     if (!omc_xmp_alloc_size_fits((omc_size)ctx->frame_cap,
@@ -1135,6 +1153,7 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
         || !omc_xmp_alloc_size_fits((omc_size)path_cap,
                                     sizeof(*ctx->path_buf))) {
         omc_xmp_set_res(&ctx->res, OMC_XMP_LIMIT);
+        omc_xmp_ctx_fini(ctx);
         return 0;
     }
 
@@ -1149,6 +1168,7 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
     if (ctx->frames == (omc_xmp_frame*)0 || ctx->ns_decls == (omc_xmp_ns_decl*)0
         || ctx->path_buf == (char*)0) {
         omc_xmp_set_res(&ctx->res, OMC_XMP_NOMEM);
+        omc_xmp_ctx_fini(ctx);
         return 0;
     }
     return 1;
@@ -1157,9 +1177,13 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
 static void
 omc_xmp_ctx_fini(omc_xmp_ctx* ctx)
 {
+    if (ctx == (omc_xmp_ctx*)0) {
+        return;
+    }
     free(ctx->frames);
     free(ctx->ns_decls);
     free(ctx->path_buf);
+    free(ctx->input_copy);
 }
 
 omc_xmp_res

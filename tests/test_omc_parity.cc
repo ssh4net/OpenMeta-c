@@ -18,7 +18,7 @@ extern "C" {
 
 #include <algorithm>
 #include <array>
-#include <cassert>
+#include "omc_test_assert.h"
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -2324,6 +2324,13 @@ build_transfer_target_avif_fixture(const char* existing_creator_tool)
 {
     return build_transfer_target_bmff_fixture(
         existing_creator_tool, make_fourcc('a', 'v', 'i', 'f'));
+}
+
+static ByteVec
+build_transfer_target_cr3_fixture(const char* existing_creator_tool)
+{
+    return build_transfer_target_bmff_fixture(
+        existing_creator_tool, make_fourcc('c', 'r', 'x', ' '));
 }
 
 static ByteVec
@@ -13239,6 +13246,204 @@ main(int argc, char** argv)
     {
         TransferExecuteCaseOptions transfer_opts {};
 
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_execute_case(
+                 "transfer_cr3_existing_embedded_embedded_only_existing_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.existing_embedded_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_execute_case(
+                 "transfer_cr3_existing_embedded_embedded_only_source_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        ok = run_transfer_execute_case(
+                 "transfer_cr3_existing_sidecar_sidecar_only_existing_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(nullptr), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.existing_sidecar_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_execute_case(
+                 "transfer_cr3_existing_sidecar_sidecar_only_source_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(nullptr), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_execute_case(
+                 "transfer_cr3_existing_sidecar_and_embedded_default",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.carrier_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_EMBEDDED;
+        ok = run_transfer_execute_case(
+                 "transfer_cr3_existing_sidecar_and_embedded_embedded_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_existing_embedded_embedded_only_existing_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.existing_embedded_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_existing_embedded_embedded_only_source_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_existing_sidecar_sidecar_only_existing_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(nullptr),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.existing_sidecar_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_existing_sidecar_sidecar_only_source_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(nullptr),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_existing_sidecar_and_embedded_default",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.carrier_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_EMBEDDED;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_existing_sidecar_and_embedded_embedded_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
         transfer_opts.persist_staged_sidecar_creator_tool =
             "Persist Existing";
@@ -13378,6 +13583,20 @@ main(int argc, char** argv)
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
         transfer_opts.persist_use_explicit_sidecar_base_path = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_explicit_sidecar_base_path",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.persist_use_explicit_sidecar_base_path = true;
         transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Jxl;
         transfer_opts.target_suffix = ".jxl";
         ok = run_transfer_persist_case(
@@ -13509,6 +13728,96 @@ main(int argc, char** argv)
                  build_transfer_source_jpeg_fixture(),
                  build_transfer_target_avif_fixture("OldTool"), transfer_opts,
                  false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.persist_stage_output = true;
+        transfer_opts.persist_write_output = false;
+        transfer_opts.persist_prewritten_output_bytes = 777U;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_prewritten_output_bytes",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.persist_stage_output = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_output_overwrite_refused",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.persist_stage_output = true;
+        transfer_opts.persist_overwrite_output = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_output_overwrite_allowed",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.persist_staged_sidecar_creator_tool =
+            "Persist Existing";
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_existing_sidecar_overwrite_refused",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.persist_staged_sidecar_creator_tool =
+            "Persist Existing";
+        transfer_opts.persist_overwrite_xmp_sidecar = true;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_existing_sidecar_overwrite_allowed",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture("OldTool"), transfer_opts,
+                 false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.persist_remove_destination_xmp_sidecar = false;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_embedded_only_strip_sidecar_keep_stale",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_cr3_fixture(nullptr), transfer_opts,
+                 true)
              && ok;
     }
     {
@@ -14196,6 +14505,23 @@ main(int argc, char** argv)
     {
         TransferExecuteCaseOptions transfer_opts {};
 
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.omc_dng_target_mode
+            = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Dng;
+        transfer_opts.cpp_dng_target_mode =
+            openmeta::DngTargetMode::MinimalFreshScaffold;
+        transfer_opts.target_suffix = ".dng";
+        transfer_opts.omit_edit_target_path = true;
+        ok = run_transfer_execute_case(
+                 "transfer_dng_minimal_scaffold_embedded_only_no_target_path",
+                 build_transfer_source_jpeg_fixture(), ByteVec(),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
         transfer_opts.omc_dng_target_mode
             = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
@@ -14212,6 +14538,23 @@ main(int argc, char** argv)
         transfer_opts.persist_overwrite_xmp_sidecar = true;
         ok = run_transfer_persist_case(
                  "transfer_persist_dng_minimal_scaffold_sidecar_only_no_output_path",
+                 build_transfer_source_jpeg_fixture(), ByteVec(),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.omc_dng_target_mode
+            = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Dng;
+        transfer_opts.cpp_dng_target_mode =
+            openmeta::DngTargetMode::MinimalFreshScaffold;
+        transfer_opts.target_suffix = ".dng";
+        transfer_opts.omit_edit_target_path = true;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_dng_minimal_scaffold_embedded_and_sidecar",
                  build_transfer_source_jpeg_fixture(), ByteVec(),
                  transfer_opts, false)
              && ok;
@@ -14324,6 +14667,18 @@ main(int argc, char** argv)
     {
         TransferExecuteCaseOptions transfer_opts {};
 
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        ok = run_transfer_execute_case(
+                 "transfer_cr3_exif_embedded_and_sidecar",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_cr3_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
         transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Webp;
         transfer_opts.target_suffix = ".webp";
@@ -14371,6 +14726,20 @@ main(int argc, char** argv)
                  "transfer_avif_exif_sidecar_only_preserve",
                  build_transfer_source_jpeg_exif_xmp_fixture(),
                  build_transfer_target_avif_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        ok = run_transfer_execute_case(
+                 "transfer_cr3_exif_sidecar_only_preserve",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_cr3_fixture(
                      "Target Embedded Existing"),
                  transfer_opts)
              && ok;
@@ -14433,6 +14802,22 @@ main(int argc, char** argv)
                  "transfer_avif_exif_sidecar_only_strip",
                  build_transfer_source_jpeg_exif_xmp_fixture(),
                  build_transfer_target_avif_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode
+            = OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        ok = run_transfer_execute_case(
+                 "transfer_cr3_exif_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_cr3_fixture(
                      "Target Embedded Existing"),
                  transfer_opts)
              && ok;
@@ -14515,6 +14900,21 @@ main(int argc, char** argv)
                  "transfer_persist_avif_exif_sidecar_only_strip",
                  build_transfer_source_jpeg_exif_xmp_fixture(),
                  build_transfer_target_avif_fixture("Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode =
+            OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix = ".cr3";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_cr3_exif_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_cr3_fixture("Target Embedded Existing"),
                  transfer_opts, false)
              && ok;
     }

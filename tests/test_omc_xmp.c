@@ -1,6 +1,6 @@
 #include "omc/omc_xmp.h"
 
-#include <assert.h>
+#include "omc_test_assert.h"
 #include <string.h>
 
 static const omc_entry*
@@ -38,12 +38,14 @@ assert_text_value(const omc_store* store, const omc_entry* entry,
                   const char* expect)
 {
     omc_const_bytes value;
+    omc_size expect_size;
 
-    assert(entry != (const omc_entry*)0);
-    assert(entry->value.kind == OMC_VAL_TEXT);
+    OMC_TEST_REQUIRE(entry != (const omc_entry*)0);
+    OMC_TEST_REQUIRE_U64_EQ(entry->value.kind, OMC_VAL_TEXT);
     value = omc_arena_view(&store->arena, entry->value.u.ref);
-    assert(value.size == strlen(expect));
-    assert(memcmp(value.data, expect, value.size) == 0);
+    expect_size = strlen(expect);
+    OMC_TEST_CHECK_SIZE_EQ(value.size, expect_size);
+    OMC_TEST_CHECK_MEM_EQ(value.data, value.size, expect, expect_size);
 }
 
 static void
@@ -162,5 +164,5 @@ main(void)
     test_limit_on_overflowing_depth_cap();
     test_limit_on_overflowing_path_cap();
     test_decode_xmp_subset();
-    return 0;
+    return omc_test_finish();
 }

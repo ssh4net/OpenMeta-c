@@ -1,14 +1,27 @@
+#include "omc/omc_icc.h"
 #include "omc/omc_read.h"
 #include "omc/omc_transfer.h"
 #include "omc/omc_transfer_persist.h"
 
-#include <assert.h>
+#include "omc_test_assert.h"
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#include <sys/stat.h>
+#else
+#include <unistd.h>
+#endif
 #include <stdio.h>
 #include <string.h>
+
+#define OMC_TEST_TEMP_PATH_CAP 256U
 
 static const omc_u8 k_png_sig[8] = {
     0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU
 };
+
+static omc_u32
+fourcc(char a, char b, char c, char d);
 
 static omc_byte_ref
 append_store_bytes(omc_arena* arena, const char* text)
@@ -30,6 +43,48 @@ append_store_raw(omc_arena* arena, const void* src, omc_size size)
     status = omc_arena_append(arena, src, size, &ref);
     assert(status == OMC_STATUS_OK);
     return ref;
+}
+
+static omc_u32
+read_u32be_at(const omc_u8* bytes, omc_size off)
+{
+    return ((omc_u32)bytes[off + 0U] << 24)
+           | ((omc_u32)bytes[off + 1U] << 16)
+           | ((omc_u32)bytes[off + 2U] << 8)
+           | (omc_u32)bytes[off + 3U];
+}
+
+static int
+has_jxl_brob_exif_box(const omc_u8* bytes, omc_size size)
+{
+    omc_size off;
+
+    if (bytes == (const omc_u8*)0 || size < 12U) {
+        return 0;
+    }
+    if (read_u32be_at(bytes, 0U) != 12U
+        || read_u32be_at(bytes, 4U) != fourcc('J', 'X', 'L', ' ')) {
+        return 0;
+    }
+
+    off = 12U;
+    while (off + 8U <= size) {
+        omc_u32 box_size;
+        omc_u32 box_type;
+
+        box_size = read_u32be_at(bytes, off);
+        box_type = read_u32be_at(bytes, off + 4U);
+        if (box_size < 8U || (omc_size)box_size > size - off) {
+            return 0;
+        }
+        if (box_type == fourcc('b', 'r', 'o', 'b') && box_size >= 12U
+            && read_u32be_at(bytes, off + 8U)
+                   == fourcc('E', 'x', 'i', 'f')) {
+            return 1;
+        }
+        off += (omc_size)box_size;
+    }
+    return 0;
 }
 
 static void
@@ -90,6 +145,35 @@ append_u64le(omc_u8* out, omc_size* io_size, omc_u64 value)
 }
 
 static void
+write_u16be_at(omc_u8* out, omc_size off, omc_u16 value)
+{
+    out[off + 0U] = (omc_u8)((value >> 8) & 0xFFU);
+    out[off + 1U] = (omc_u8)(value & 0xFFU);
+}
+
+static void
+write_u32be_at(omc_u8* out, omc_size off, omc_u32 value)
+{
+    out[off + 0U] = (omc_u8)((value >> 24) & 0xFFU);
+    out[off + 1U] = (omc_u8)((value >> 16) & 0xFFU);
+    out[off + 2U] = (omc_u8)((value >> 8) & 0xFFU);
+    out[off + 3U] = (omc_u8)(value & 0xFFU);
+}
+
+static void
+write_u64be_at(omc_u8* out, omc_size off, omc_u64 value)
+{
+    out[off + 0U] = (omc_u8)((value >> 56) & 0xFFU);
+    out[off + 1U] = (omc_u8)((value >> 48) & 0xFFU);
+    out[off + 2U] = (omc_u8)((value >> 40) & 0xFFU);
+    out[off + 3U] = (omc_u8)((value >> 32) & 0xFFU);
+    out[off + 4U] = (omc_u8)((value >> 24) & 0xFFU);
+    out[off + 5U] = (omc_u8)((value >> 16) & 0xFFU);
+    out[off + 6U] = (omc_u8)((value >> 8) & 0xFFU);
+    out[off + 7U] = (omc_u8)(value & 0xFFU);
+}
+
+static void
 append_raw(omc_u8* out, omc_size* io_size, const void* src, omc_size size)
 {
     memcpy(out + *io_size, src, size);
@@ -119,6 +203,21 @@ append_jpeg_segment(omc_u8* out, omc_size* io_size, omc_u8 marker,
     append_u8(out, io_size, marker);
     append_u16be(out, io_size, (omc_u16)(payload_size + 2U));
     append_raw(out, io_size, payload, payload_size);
+}
+
+static void
+append_irb_resource(omc_u8* out, omc_size* io_size, omc_u16 resource_id,
+                    const omc_u8* payload, omc_size payload_size)
+{
+    append_text(out, io_size, "8BIM");
+    append_u16be(out, io_size, resource_id);
+    append_u8(out, io_size, 0U);
+    append_u8(out, io_size, 0U);
+    append_u32be(out, io_size, (omc_u32)payload_size);
+    append_raw(out, io_size, payload, payload_size);
+    if ((payload_size & 1U) != 0U) {
+        append_u8(out, io_size, 0U);
+    }
 }
 
 static void
@@ -257,6 +356,140 @@ find_exif_entry(const omc_store* store, const char* ifd_name, omc_u16 tag)
     return (const omc_entry*)0;
 }
 
+static omc_size
+count_exif_entries(const omc_store* store, const char* ifd_name, omc_u16 tag)
+{
+    omc_size i;
+    omc_size count;
+
+    count = 0U;
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes ifd_view;
+
+        entry = &store->entries[i];
+        if (entry->key.kind != OMC_KEY_EXIF_TAG
+            || entry->key.u.exif_tag.tag != tag) {
+            continue;
+        }
+        ifd_view = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
+        if (ifd_view.size == strlen(ifd_name)
+            && memcmp(ifd_view.data, ifd_name, ifd_view.size) == 0) {
+            count += 1U;
+        }
+    }
+    return count;
+}
+
+static const omc_entry*
+find_irb_entry(const omc_store* store, omc_u16 resource_id)
+{
+    omc_size i;
+
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+
+        entry = &store->entries[i];
+        if (entry->key.kind == OMC_KEY_PHOTOSHOP_IRB
+            && entry->key.u.photoshop_irb.resource_id == resource_id) {
+            return entry;
+        }
+    }
+    return (const omc_entry*)0;
+}
+
+static const omc_entry*
+find_irb_field(const omc_store* store, omc_u16 resource_id, const char* field,
+               omc_u32 ordinal)
+{
+    omc_size i;
+    omc_u32 seen;
+    omc_size field_len;
+
+    seen = 0U;
+    field_len = strlen(field);
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes field_view;
+
+        entry = &store->entries[i];
+        if (entry->key.kind != OMC_KEY_PHOTOSHOP_IRB_FIELD
+            || entry->key.u.photoshop_irb_field.resource_id != resource_id) {
+            continue;
+        }
+        field_view = omc_arena_view(&store->arena,
+                                    entry->key.u.photoshop_irb_field.field);
+        if (field_view.size != field_len
+            || memcmp(field_view.data, field, field_len) != 0) {
+            continue;
+        }
+        if (seen == ordinal) {
+            return entry;
+        }
+        seen += 1U;
+    }
+    return (const omc_entry*)0;
+}
+
+static const omc_entry*
+find_iptc_entry(const omc_store* store, omc_u16 record, omc_u16 dataset,
+                omc_u32 ordinal)
+{
+    omc_size i;
+    omc_u32 seen;
+
+    seen = 0U;
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+
+        entry = &store->entries[i];
+        if (entry->key.kind != OMC_KEY_IPTC_DATASET
+            || entry->key.u.iptc_dataset.record != record
+            || entry->key.u.iptc_dataset.dataset != dataset) {
+            continue;
+        }
+        if (seen == ordinal) {
+            return entry;
+        }
+        seen += 1U;
+    }
+    return (const omc_entry*)0;
+}
+
+static const omc_entry*
+find_icc_header_entry(const omc_store* store, omc_u32 offset)
+{
+    omc_size i;
+
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+
+        entry = &store->entries[i];
+        if (entry->key.kind == OMC_KEY_ICC_HEADER_FIELD
+            && entry->key.u.icc_header_field.offset == offset) {
+            return entry;
+        }
+    }
+    return (const omc_entry*)0;
+}
+
+static const omc_entry*
+find_icc_tag_entry(const omc_store* store, omc_u32 signature)
+{
+    omc_size i;
+
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+
+        entry = &store->entries[i];
+        if (entry->key.kind == OMC_KEY_ICC_TAG
+            && entry->key.u.icc_tag.signature == signature) {
+            return entry;
+        }
+    }
+    return (const omc_entry*)0;
+}
+
 static const omc_entry*
 find_comment_entry(const omc_store* store)
 {
@@ -359,6 +592,31 @@ assert_urational_array_value(const omc_store* store, const omc_entry* entry,
 }
 
 static void
+assert_icc_profile_state(const omc_store* store)
+{
+    static const omc_u8 k_desc[16] = {
+        0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U,
+        8U, 9U, 10U, 11U, 12U, 13U, 14U, 15U
+    };
+    const omc_entry* entry;
+
+    entry = find_icc_header_entry(store, 0U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 160U);
+
+    entry = find_icc_header_entry(store, 56U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U64);
+    assert(entry->value.u.u64 == 1U);
+
+    entry = find_icc_tag_entry(store, fourcc('d', 'e', 's', 'c'));
+    assert_u8_blob_value(store, entry, k_desc, 16U);
+}
+
+static void
 build_store_with_creator_tool(omc_store* store, const char* tool)
 {
     omc_entry entry;
@@ -371,6 +629,85 @@ build_store_with_creator_tool(omc_store* store, const char* tool)
         append_store_bytes(&store->arena, "CreatorTool"));
     omc_val_make_text(&entry.value, append_store_bytes(&store->arena, tool),
                       OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+build_test_icc_blob(omc_u8* out, omc_size size)
+{
+    omc_u32 i;
+
+    memset(out, 0, size);
+    write_u32be_at(out, 0U, (omc_u32)size);
+    write_u32be_at(out, 4U, fourcc('a', 'p', 'p', 'l'));
+    write_u32be_at(out, 8U, 0x04300000U);
+    write_u32be_at(out, 12U, fourcc('m', 'n', 't', 'r'));
+    write_u32be_at(out, 16U, fourcc('R', 'G', 'B', ' '));
+    write_u32be_at(out, 20U, fourcc('X', 'Y', 'Z', ' '));
+    write_u16be_at(out, 24U, 2026U);
+    write_u16be_at(out, 26U, 1U);
+    write_u16be_at(out, 28U, 28U);
+    out[36U] = (omc_u8)'a';
+    out[37U] = (omc_u8)'c';
+    out[38U] = (omc_u8)'s';
+    out[39U] = (omc_u8)'p';
+    write_u32be_at(out, 40U, fourcc('M', 'S', 'F', 'T'));
+    write_u32be_at(out, 44U, 1U);
+    write_u32be_at(out, 48U, fourcc('A', 'P', 'P', 'L'));
+    write_u32be_at(out, 52U, fourcc('M', '1', '2', '3'));
+    write_u64be_at(out, 56U, 1U);
+    write_u32be_at(out, 64U, 1U);
+    write_u32be_at(out, 68U, 63189U);
+    write_u32be_at(out, 72U, 65536U);
+    write_u32be_at(out, 76U, 54061U);
+    write_u32be_at(out, 80U, fourcc('o', 'p', 'n', 'm'));
+    write_u32be_at(out, 128U, 1U);
+    write_u32be_at(out, 132U, fourcc('d', 'e', 's', 'c'));
+    write_u32be_at(out, 136U, 144U);
+    write_u32be_at(out, 140U, 16U);
+    for (i = 0U; i < 16U; ++i) {
+        out[144U + i] = (omc_u8)i;
+    }
+}
+
+static void
+build_store_with_test_icc(omc_store* store)
+{
+    omc_u8 icc[160];
+    omc_icc_res res;
+
+    build_test_icc_blob(icc, sizeof(icc));
+    res = omc_icc_dec(icc, sizeof(icc), store, OMC_INVALID_BLOCK_ID,
+                      (const omc_icc_opts*)0);
+    assert(res.status == OMC_ICC_OK);
+}
+
+static void
+build_store_with_test_iptc(omc_store* store)
+{
+    static const omc_u8 k_city[] = {
+        (omc_u8)'T', (omc_u8)'o', (omc_u8)'k', (omc_u8)'y', (omc_u8)'o'
+    };
+    static const omc_u8 k_keyword[] = {
+        (omc_u8)'N', (omc_u8)'i', (omc_u8)'g', (omc_u8)'h', (omc_u8)'t'
+    };
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_iptc_dataset(&entry.key, 2U, 25U);
+    omc_val_make_bytes(&entry.value,
+                       append_store_raw(&store->arena, k_city,
+                                        sizeof(k_city)));
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_iptc_dataset(&entry.key, 2U, 25U);
+    omc_val_make_bytes(&entry.value,
+                       append_store_raw(&store->arena, k_keyword,
+                                        sizeof(k_keyword)));
     status = omc_store_add_entry(store, &entry, NULL);
     assert(status == OMC_STATUS_OK);
 }
@@ -942,6 +1279,55 @@ make_test_jpeg_with_old_xmp_and_comment(omc_u8* out)
 }
 
 static omc_size
+make_test_jpeg_with_old_xmp_comment_and_irb(omc_u8* out)
+{
+    static const char jfif[] = { 'J', 'F', 'I', 'F', 0x00U, 0x01U, 0x02U,
+                                 0x00U, 0x00U, 0x01U, 0x00U, 0x01U, 0x00U,
+                                 0x00U };
+    static const char comment[] = "Preserve me";
+    static const char xmp[] =
+        "<x:xmpmeta xmlns:x='adobe:ns:meta/'>"
+        "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>"
+        "<rdf:Description xmlns:xmp='http://ns.adobe.com/xap/1.0/' "
+        "xmp:CreatorTool='OldTool'/>"
+        "</rdf:RDF>"
+        "</x:xmpmeta>";
+    omc_u8 xmp_payload[512];
+    omc_u8 irb_payload[64];
+    omc_u8 angle[8];
+    omc_size xmp_size;
+    omc_size irb_size;
+    omc_size angle_size;
+    omc_size size;
+
+    xmp_size = 0U;
+    append_text(xmp_payload, &xmp_size, "http://ns.adobe.com/xap/1.0/");
+    append_u8(xmp_payload, &xmp_size, 0U);
+    append_text(xmp_payload, &xmp_size, xmp);
+
+    angle_size = 0U;
+    append_u32be(angle, &angle_size, 30U);
+    irb_size = 0U;
+    append_irb_resource(irb_payload, &irb_size, 0x040DU, angle, angle_size);
+
+    size = 0U;
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 0xD8U);
+    append_jpeg_segment(out, &size, 0xE0U, (const omc_u8*)jfif,
+                        sizeof(jfif));
+    append_jpeg_segment(out, &size, 0xE1U, xmp_payload, xmp_size);
+    append_jpeg_segment(out, &size, 0xEDU,
+                        (const omc_u8*)"Photoshop 3.0\0", 14U);
+    append_raw(out, &size, irb_payload, irb_size);
+    write_u16be_at(out, size - irb_size - 16U, (omc_u16)(irb_size + 16U));
+    append_jpeg_segment(out, &size, 0xFEU, (const omc_u8*)comment,
+                        sizeof(comment) - 1U);
+    append_u8(out, &size, 0xFFU);
+    append_u8(out, &size, 0xD9U);
+    return size;
+}
+
+static omc_size
 make_test_png_with_old_xmp_and_text(omc_u8* out)
 {
     static const char xmp[] =
@@ -1324,6 +1710,13 @@ make_test_avif_with_old_xmp_and_exif(omc_u8* out)
 }
 
 static omc_size
+make_test_cr3_with_old_xmp_and_exif(omc_u8* out)
+{
+    return make_test_bmff_with_old_xmp_and_exif(out,
+                                                fourcc('c', 'r', 'x', ' '));
+}
+
+static omc_size
 make_test_bmff_minimal(omc_u8* out, omc_u32 major_brand)
 {
     omc_u8 ftyp_payload[16];
@@ -1385,6 +1778,42 @@ make_test_jxl_with_old_xmp_and_exif(omc_u8* out)
     append_u32be(out, &size, 0x0D0A870AU);
     append_bmff_box(out, &size, fourcc('E', 'x', 'i', 'f'),
                     exif_payload, exif_size);
+    append_bmff_box(out, &size, fourcc('x', 'm', 'l', ' '),
+                    (const omc_u8*)xmp, sizeof(xmp) - 1U);
+    return size;
+}
+
+static omc_size
+make_test_jxl_with_old_xmp_and_brob_exif(omc_u8* out)
+{
+    static const char xmp[] =
+        "<x:xmpmeta xmlns:x='adobe:ns:meta/'>"
+        "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>"
+        "<rdf:Description xmlns:xmp='http://ns.adobe.com/xap/1.0/' "
+        "xmp:CreatorTool='OldTool'/>"
+        "</rdf:RDF>"
+        "</x:xmpmeta>";
+    static const omc_u8 k_brotli_tiff[] = {
+        0x8BU, 0x0FU, 0x80U, 0x49U, 0x49U, 0x2AU, 0x00U, 0x08U, 0x00U,
+        0x00U, 0x00U, 0x01U, 0x00U, 0x0FU, 0x01U, 0x02U, 0x00U, 0x06U,
+        0x00U, 0x00U, 0x00U, 0x1AU, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x43U, 0x61U, 0x6EU, 0x6FU, 0x6EU, 0x00U, 0x03U
+    };
+    omc_u8 brob_payload[64];
+    omc_size brob_size;
+    omc_size size;
+
+    brob_size = 0U;
+    append_u32be(brob_payload, &brob_size, fourcc('E', 'x', 'i', 'f'));
+    append_raw(brob_payload, &brob_size, k_brotli_tiff,
+               sizeof(k_brotli_tiff));
+
+    size = 0U;
+    append_u32be(out, &size, 12U);
+    append_u32be(out, &size, fourcc('J', 'X', 'L', ' '));
+    append_u32be(out, &size, 0x0D0A870AU);
+    append_bmff_box(out, &size, fourcc('b', 'r', 'o', 'b'),
+                    brob_payload, brob_size);
     append_bmff_box(out, &size, fourcc('x', 'm', 'l', ' '),
                     (const omc_u8*)xmp, sizeof(xmp) - 1U);
     return size;
@@ -1625,23 +2054,135 @@ read_file_bytes(const char* path, omc_arena* out)
 }
 
 static void
-build_temp_path(char* out, const char* ext)
+assert_read_file_bytes(const char* path, omc_arena* out)
 {
-    char temp_buf[L_tmpnam];
+    int ok;
 
-    assert(tmpnam(temp_buf) != (char*)0);
-    strcpy(out, temp_buf);
-    strcat(out, ext);
+    ok = read_file_bytes(path, out);
+    assert(ok);
 }
 
 static void
-derive_sidecar_path(const char* path, char* out)
+assert_no_file_bytes(const char* path, omc_arena* out)
+{
+    int ok;
+
+    ok = read_file_bytes(path, out);
+    assert(!ok);
+}
+
+static void
+build_temp_pattern(char* out, omc_size out_cap)
+{
+    const char* tmp_dir;
+    omc_size dir_len;
+    omc_size pos;
+
+    assert(out != (char*)0);
+
+#if defined(_WIN32)
+    tmp_dir = getenv("TEMP");
+    if (tmp_dir == (const char*)0 || tmp_dir[0] == '\0') {
+        tmp_dir = getenv("TMP");
+    }
+    if (tmp_dir == (const char*)0 || tmp_dir[0] == '\0') {
+        tmp_dir = ".";
+    }
+#else
+    tmp_dir = getenv("TMPDIR");
+    if (tmp_dir == (const char*)0 || tmp_dir[0] == '\0') {
+        tmp_dir = "/tmp";
+    }
+#endif
+
+    dir_len = (omc_size)strlen(tmp_dir);
+    assert(dir_len + sizeof("/omc_test_XXXXXX") <= out_cap);
+
+    memcpy(out, tmp_dir, dir_len);
+    pos = dir_len;
+#if defined(_WIN32)
+    if (pos != 0U && out[pos - 1U] != '\\' && out[pos - 1U] != '/') {
+        out[pos++] = '\\';
+    }
+#else
+    if (pos != 0U && out[pos - 1U] != '/') {
+        out[pos++] = '/';
+    }
+#endif
+    memcpy(out + pos, "omc_test_XXXXXX", sizeof("omc_test_XXXXXX"));
+}
+
+static int
+path_exists(const char* path)
+{
+    FILE* fp;
+
+    fp = fopen(path, "rb");
+    if (fp == (FILE*)0) {
+        return 0;
+    }
+    fclose(fp);
+    return 1;
+}
+
+static void
+build_temp_path(char* out, omc_size out_cap, const char* ext)
+{
+    unsigned attempt;
+    omc_size ext_len;
+
+    assert(out != (char*)0);
+    assert(ext != (const char*)0);
+
+    ext_len = (omc_size)strlen(ext);
+    for (attempt = 0U; attempt < 64U; ++attempt) {
+        int fd;
+        char pattern[OMC_TEST_TEMP_PATH_CAP];
+        omc_size base_len;
+
+        build_temp_pattern(pattern, sizeof(pattern));
+#if defined(_WIN32)
+        assert(_mktemp_s(pattern, sizeof(pattern)) == 0);
+        fd = _open(pattern, _O_CREAT | _O_EXCL | _O_BINARY | _O_RDWR,
+                   _S_IREAD | _S_IWRITE);
+        assert(fd >= 0);
+        assert(_close(fd) == 0);
+#else
+        fd = mkstemp(pattern);
+        assert(fd >= 0);
+        assert(close(fd) == 0);
+#endif
+        assert(remove(pattern) == 0);
+
+        base_len = (omc_size)strlen(pattern);
+        assert(base_len + ext_len + 1U <= out_cap);
+        memcpy(out, pattern, base_len);
+        memcpy(out + base_len, ext, ext_len + 1U);
+        if (!path_exists(out)) {
+            return;
+        }
+    }
+
+    assert(0);
+}
+
+static void
+derive_sidecar_path(const char* path, char* out, omc_size out_cap)
 {
     const char* dot;
     const char* slash;
+    const char* backslash;
     omc_size stem_len;
 
+    assert(path != (const char*)0);
+    assert(out != (char*)0);
+
     slash = strrchr(path, '/');
+    backslash = strrchr(path, '\\');
+    if (backslash != (const char*)0
+        && (slash == (const char*)0 || backslash > slash)) {
+        slash = backslash;
+    }
     dot = strrchr(path, '.');
     if (dot != (const char*)0
         && (slash == (const char*)0 || dot > slash + 0)) {
@@ -1650,6 +2191,7 @@ derive_sidecar_path(const char* path, char* out)
         stem_len = (omc_size)strlen(path);
     }
 
+    assert(stem_len + 5U <= out_cap);
     memcpy(out, path, stem_len);
     memcpy(out + stem_len, ".xmp", 5U);
 }
@@ -1701,14 +2243,14 @@ exercise_transfer_persist_case(
     omc_arena sidecar_out;
     omc_arena meta_out;
     omc_arena file_read;
-    char output_path[L_tmpnam + 16];
-    char sidecar_path[L_tmpnam + 16];
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    char sidecar_path[OMC_TEST_TEMP_PATH_CAP];
     FILE* fp;
     omc_status status;
 
     file_size = builder(file_bytes);
-    build_temp_path(output_path, output_ext);
-    derive_sidecar_path(output_path, sidecar_path);
+    build_temp_path(output_path, sizeof(output_path), output_ext);
+    derive_sidecar_path(output_path, sidecar_path, sizeof(sidecar_path));
 
     if (strip_destination_sidecar) {
         fp = fopen(sidecar_path, "wb");
@@ -1754,14 +2296,14 @@ exercise_transfer_persist_case(
         assert(persist_res.xmp_sidecar_cleanup_removed);
     }
 
-    assert(read_file_bytes(output_path, &file_read));
+    assert_read_file_bytes(output_path, &file_read);
     read_store_from_bytes(file_read.data, file_read.size, &output_store);
     assert_persist_xmp_state(&output_store, output_xmp_expect);
     assert_persist_preserved_metadata(&output_store, preserve_kind);
 
     if (writeback_mode != OMC_XMP_WRITEBACK_EMBEDDED_ONLY) {
         omc_arena_reset(&file_read);
-        assert(read_file_bytes(sidecar_path, &file_read));
+        assert_read_file_bytes(sidecar_path, &file_read);
         read_store_from_bytes(file_read.data, file_read.size, &sidecar_store);
         assert_text_value(&sidecar_store,
                           find_xmp_entry(&sidecar_store,
@@ -1770,7 +2312,7 @@ exercise_transfer_persist_case(
                           "NewTool");
     } else {
         omc_arena_reset(&file_read);
-        assert(!read_file_bytes(sidecar_path, &file_read));
+        assert_no_file_bytes(sidecar_path, &file_read);
     }
 
     remove(output_path);
@@ -1808,14 +2350,14 @@ exercise_transfer_persist_source_exif_case(
     omc_arena sidecar_out;
     omc_arena meta_out;
     omc_arena file_read;
-    char output_path[L_tmpnam + 16];
-    char sidecar_path[L_tmpnam + 16];
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    char sidecar_path[OMC_TEST_TEMP_PATH_CAP];
     FILE* fp;
     omc_status status;
 
     file_size = builder(file_bytes);
-    build_temp_path(output_path, output_ext);
-    derive_sidecar_path(output_path, sidecar_path);
+    build_temp_path(output_path, sizeof(output_path), output_ext);
+    derive_sidecar_path(output_path, sidecar_path, sizeof(sidecar_path));
 
     if (strip_destination_sidecar) {
         fp = fopen(sidecar_path, "wb");
@@ -1862,7 +2404,7 @@ exercise_transfer_persist_source_exif_case(
         assert(persist_res.xmp_sidecar_cleanup_removed);
     }
 
-    assert(read_file_bytes(output_path, &file_read));
+    assert_read_file_bytes(output_path, &file_read);
     read_store_from_bytes(file_read.data, file_read.size, &output_store);
     assert_persist_xmp_state(&output_store, output_xmp_expect);
     assert_persist_datetime_original(&output_store, k_dto);
@@ -1870,7 +2412,7 @@ exercise_transfer_persist_source_exif_case(
 
     if (writeback_mode != OMC_XMP_WRITEBACK_EMBEDDED_ONLY) {
         omc_arena_reset(&file_read);
-        assert(read_file_bytes(sidecar_path, &file_read));
+        assert_read_file_bytes(sidecar_path, &file_read);
         read_store_from_bytes(file_read.data, file_read.size, &sidecar_store);
         assert_text_value(&sidecar_store,
                           find_xmp_entry(&sidecar_store,
@@ -1879,7 +2421,7 @@ exercise_transfer_persist_source_exif_case(
                           "NewTool");
     } else {
         omc_arena_reset(&file_read);
-        assert(!read_file_bytes(sidecar_path, &file_read));
+        assert_no_file_bytes(sidecar_path, &file_read);
     }
 
     remove(output_path);
@@ -1889,6 +2431,73 @@ exercise_transfer_persist_source_exif_case(
     omc_arena_fini(&sidecar_out);
     omc_arena_fini(&edited_out);
     omc_store_fini(&sidecar_store);
+    omc_store_fini(&output_store);
+    omc_store_fini(&source_store);
+}
+
+static void
+exercise_transfer_persist_source_icc_case(
+    omc_transfer_persist_fixture_builder builder, const char* output_ext,
+    omc_scan_fmt format,
+    omc_transfer_persist_preserve_kind preserve_kind)
+{
+    omc_u8 file_bytes[4096];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store output_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_arena file_read;
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    omc_status status;
+
+    file_size = builder(file_bytes);
+    build_temp_path(output_path, sizeof(output_path), output_ext);
+
+    omc_store_init(&source_store);
+    omc_store_init(&output_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_arena_init(&file_read);
+    build_store_with_creator_tool(&source_store, "NewTool");
+    build_store_with_test_icc(&source_store);
+
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.format = format;
+    prepare_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    execute_transfer(file_bytes, file_size, &source_store, &prepare_opts,
+                     &edited_out, &sidecar_out, &exec, &transfer_res);
+    assert(transfer_res.edited_present);
+    assert(!transfer_res.sidecar_present);
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.output_path = output_path;
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    assert(status == OMC_STATUS_OK);
+    assert(persist_res.status == OMC_TRANSFER_OK);
+    assert(persist_res.output_status == OMC_TRANSFER_OK);
+
+    assert_read_file_bytes(output_path, &file_read);
+    read_store_from_bytes(file_read.data, file_read.size, &output_store);
+    assert_persist_xmp_state(&output_store, OMC_TRANSFER_PERSIST_XMP_NEW);
+    assert_persist_preserved_metadata(&output_store, preserve_kind);
+    assert_icc_profile_state(&output_store);
+
+    remove(output_path);
+    omc_arena_fini(&file_read);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
     omc_store_fini(&output_store);
     omc_store_fini(&source_store);
 }
@@ -1960,6 +2569,12 @@ test_transfer_persist_writes_embedded_and_sidecar_supported_formats(void)
         OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
         OMC_TRANSFER_PERSIST_XMP_NEW, 0);
     exercise_transfer_persist_case(
+        make_test_cr3_with_old_xmp_and_exif, ".cr3",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_case(
         make_test_jxl_with_old_xmp_and_exif, ".jxl",
         OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
@@ -2001,6 +2616,12 @@ test_transfer_persist_writes_sidecar_only_preserve_supported_formats(void)
         OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
         OMC_TRANSFER_PERSIST_XMP_OLD, 0);
     exercise_transfer_persist_case(
+        make_test_cr3_with_old_xmp_and_exif, ".cr3",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+    exercise_transfer_persist_case(
         make_test_jxl_with_old_xmp_and_exif, ".jxl",
         OMC_XMP_WRITEBACK_SIDECAR_ONLY,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
@@ -2031,6 +2652,12 @@ test_transfer_persist_writes_sidecar_only_strip_supported_formats(void)
         OMC_TRANSFER_PERSIST_XMP_NONE, 0);
     exercise_transfer_persist_case(
         make_test_avif_with_old_xmp_and_exif, ".avif",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+    exercise_transfer_persist_case(
+        make_test_cr3_with_old_xmp_and_exif, ".cr3",
         OMC_XMP_WRITEBACK_SIDECAR_ONLY,
         OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
         OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
@@ -2101,6 +2728,12 @@ test_transfer_persist_embedded_and_sidecar_source_exif_supported_formats(void)
         OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
         OMC_TRANSFER_PERSIST_XMP_NEW, 0);
     exercise_transfer_persist_source_exif_case(
+        make_test_cr3_with_old_xmp_and_exif, ".cr3",
+        OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NEW, 0);
+    exercise_transfer_persist_source_exif_case(
         make_test_jxl_with_old_xmp_and_exif, ".jxl",
         OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
@@ -2149,6 +2782,12 @@ test_transfer_persist_sidecar_only_preserve_source_exif_supported_formats(void)
         OMC_TRANSFER_PERSIST_XMP_OLD, 0);
     exercise_transfer_persist_source_exif_case(
         make_test_avif_with_old_xmp_and_exif, ".avif",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_OLD, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_cr3_with_old_xmp_and_exif, ".cr3",
         OMC_XMP_WRITEBACK_SIDECAR_ONLY,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
         OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
@@ -2229,6 +2868,12 @@ test_transfer_persist_sidecar_only_strip_source_exif_supported_formats(void)
         OMC_TRANSFER_PERSIST_XMP_NONE, 0);
     exercise_transfer_persist_source_exif_case(
         make_test_avif_with_old_xmp_and_exif, ".avif",
+        OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_XMP_NONE, 0);
+    exercise_transfer_persist_source_exif_case(
+        make_test_cr3_with_old_xmp_and_exif, ".cr3",
         OMC_XMP_WRITEBACK_SIDECAR_ONLY,
         OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
         OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
@@ -2329,13 +2974,13 @@ test_transfer_persist_writes_output_and_sidecar(void)
     omc_arena sidecar_out;
     omc_arena meta_out;
     omc_arena file_read;
-    char output_path[L_tmpnam + 8];
-    char sidecar_path[L_tmpnam + 8];
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    char sidecar_path[OMC_TEST_TEMP_PATH_CAP];
     omc_status status;
 
     file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
-    build_temp_path(output_path, ".jpg");
-    derive_sidecar_path(output_path, sidecar_path);
+    build_temp_path(output_path, sizeof(output_path), ".jpg");
+    derive_sidecar_path(output_path, sidecar_path, sizeof(sidecar_path));
 
     omc_store_init(&source_store);
     omc_store_init(&edited_store);
@@ -2362,7 +3007,7 @@ test_transfer_persist_writes_output_and_sidecar(void)
     assert(persist_res.output_status == OMC_TRANSFER_OK);
     assert(persist_res.xmp_sidecar_status == OMC_TRANSFER_OK);
 
-    assert(read_file_bytes(output_path, &file_read));
+    assert_read_file_bytes(output_path, &file_read);
     read_store_from_bytes(file_read.data, file_read.size, &edited_store);
     assert_text_value(&edited_store,
                       find_xmp_entry(&edited_store,
@@ -2373,7 +3018,7 @@ test_transfer_persist_writes_output_and_sidecar(void)
                       "Preserve me");
 
     omc_arena_reset(&file_read);
-    assert(read_file_bytes(sidecar_path, &file_read));
+    assert_read_file_bytes(sidecar_path, &file_read);
     read_store_from_bytes(file_read.data, file_read.size, &sidecar_store);
     assert_text_value(&sidecar_store,
                       find_xmp_entry(&sidecar_store,
@@ -2406,14 +3051,14 @@ test_transfer_persist_rejects_existing_sidecar_without_overwrite(void)
     omc_arena edited_out;
     omc_arena sidecar_out;
     omc_arena meta_out;
-    char output_path[L_tmpnam + 8];
-    char sidecar_path[L_tmpnam + 8];
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    char sidecar_path[OMC_TEST_TEMP_PATH_CAP];
     FILE* fp;
     omc_status status;
 
     file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
-    build_temp_path(output_path, ".jpg");
-    derive_sidecar_path(output_path, sidecar_path);
+    build_temp_path(output_path, sizeof(output_path), ".jpg");
+    derive_sidecar_path(output_path, sidecar_path, sizeof(sidecar_path));
 
     fp = fopen(sidecar_path, "wb");
     assert(fp != (FILE*)0);
@@ -2465,16 +3110,16 @@ test_transfer_persist_uses_explicit_sidecar_base_path(void)
     omc_arena sidecar_out;
     omc_arena meta_out;
     omc_arena file_read;
-    char output_path[L_tmpnam + 8];
-    char sidecar_base[L_tmpnam + 8];
-    char sidecar_path[L_tmpnam + 8];
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    char sidecar_base[OMC_TEST_TEMP_PATH_CAP];
+    char sidecar_path[OMC_TEST_TEMP_PATH_CAP];
     omc_const_bytes sidecar_path_view;
     omc_status status;
 
     file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
-    build_temp_path(output_path, ".jpg");
-    build_temp_path(sidecar_base, ".tif");
-    derive_sidecar_path(sidecar_base, sidecar_path);
+    build_temp_path(output_path, sizeof(output_path), ".jpg");
+    build_temp_path(sidecar_base, sizeof(sidecar_base), ".tif");
+    derive_sidecar_path(sidecar_base, sidecar_path, sizeof(sidecar_path));
 
     omc_store_init(&source_store);
     omc_store_init(&sidecar_store);
@@ -2503,7 +3148,7 @@ test_transfer_persist_uses_explicit_sidecar_base_path(void)
     assert(memcmp(sidecar_path_view.data, sidecar_path,
                   sidecar_path_view.size) == 0);
 
-    assert(read_file_bytes(sidecar_path, &file_read));
+    assert_read_file_bytes(sidecar_path, &file_read);
     read_store_from_bytes(file_read.data, file_read.size, &sidecar_store);
     assert_text_value(&sidecar_store,
                       find_xmp_entry(&sidecar_store,
@@ -2537,14 +3182,14 @@ test_transfer_persist_can_remove_stale_destination_sidecar(void)
     omc_arena sidecar_out;
     omc_arena meta_out;
     omc_arena file_read;
-    char output_path[L_tmpnam + 8];
-    char sidecar_path[L_tmpnam + 8];
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    char sidecar_path[OMC_TEST_TEMP_PATH_CAP];
     FILE* fp;
     omc_status status;
 
     file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
-    build_temp_path(output_path, ".jpg");
-    derive_sidecar_path(output_path, sidecar_path);
+    build_temp_path(output_path, sizeof(output_path), ".jpg");
+    derive_sidecar_path(output_path, sidecar_path, sizeof(sidecar_path));
 
     fp = fopen(sidecar_path, "wb");
     assert(fp != (FILE*)0);
@@ -2577,8 +3222,8 @@ test_transfer_persist_can_remove_stale_destination_sidecar(void)
     assert(persist_res.xmp_sidecar_cleanup_requested);
     assert(persist_res.xmp_sidecar_cleanup_removed);
 
-    assert(!read_file_bytes(sidecar_path, &file_read));
-    assert(read_file_bytes(output_path, &file_read));
+    assert_no_file_bytes(sidecar_path, &file_read);
+    assert_read_file_bytes(output_path, &file_read);
     read_store_from_bytes(file_read.data, file_read.size, &edited_store);
     assert_text_value(&edited_store,
                       find_xmp_entry(&edited_store,
@@ -2611,13 +3256,13 @@ test_transfer_persist_dng_minimal_scaffold_sidecar_only_without_output_path(
     omc_arena sidecar_out;
     omc_arena meta_out;
     omc_arena file_read;
-    char sidecar_base[L_tmpnam + 8];
-    char sidecar_path[L_tmpnam + 8];
+    char sidecar_base[OMC_TEST_TEMP_PATH_CAP];
+    char sidecar_path[OMC_TEST_TEMP_PATH_CAP];
     omc_const_bytes sidecar_path_view;
     omc_status status;
 
-    build_temp_path(sidecar_base, ".dng");
-    derive_sidecar_path(sidecar_base, sidecar_path);
+    build_temp_path(sidecar_base, sizeof(sidecar_base), ".dng");
+    derive_sidecar_path(sidecar_base, sidecar_path, sizeof(sidecar_path));
 
     omc_store_init(&source_store);
     omc_store_init(&sidecar_store);
@@ -2655,7 +3300,7 @@ test_transfer_persist_dng_minimal_scaffold_sidecar_only_without_output_path(
     assert(memcmp(sidecar_path_view.data, sidecar_path,
                   sidecar_path_view.size) == 0);
 
-    assert(read_file_bytes(sidecar_path, &file_read));
+    assert_read_file_bytes(sidecar_path, &file_read);
     read_store_from_bytes(file_read.data, file_read.size, &sidecar_store);
     assert_text_value(&sidecar_store,
                       find_xmp_entry(&sidecar_store,
@@ -2669,6 +3314,441 @@ test_transfer_persist_dng_minimal_scaffold_sidecar_only_without_output_path(
     omc_arena_fini(&sidecar_out);
     omc_arena_fini(&edited_out);
     omc_store_fini(&sidecar_store);
+    omc_store_fini(&source_store);
+}
+
+static void
+test_transfer_persist_dng_minimal_scaffold_embedded_and_sidecar_writes_output(
+    void)
+{
+    static const omc_u8 k_dng_version[4] = { 1U, 6U, 0U, 0U };
+    omc_store source_store;
+    omc_store edited_store;
+    omc_store sidecar_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_arena file_read;
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    char sidecar_path[OMC_TEST_TEMP_PATH_CAP];
+    omc_status status;
+
+    build_temp_path(output_path, sizeof(output_path), ".dng");
+    derive_sidecar_path(output_path, sidecar_path, sizeof(sidecar_path));
+
+    omc_store_init(&source_store);
+    omc_store_init(&edited_store);
+    omc_store_init(&sidecar_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_arena_init(&file_read);
+    build_store_with_creator_tool(&source_store, "NewTool");
+
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.format = OMC_SCAN_FMT_DNG;
+    prepare_opts.dng_target_mode = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
+    prepare_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+    execute_transfer((const omc_u8*)0, 0U, &source_store, &prepare_opts,
+                     &edited_out, &sidecar_out, &exec, &transfer_res);
+    assert(transfer_res.dng_target_mode
+           == OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD);
+    assert(transfer_res.edited_present);
+    assert(transfer_res.sidecar_present);
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.output_path = output_path;
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    assert(status == OMC_STATUS_OK);
+    assert(persist_res.status == OMC_TRANSFER_OK);
+    assert(persist_res.output_status == OMC_TRANSFER_OK);
+    assert(persist_res.xmp_sidecar_status == OMC_TRANSFER_OK);
+
+    assert_read_file_bytes(output_path, &file_read);
+    read_store_from_bytes(file_read.data, file_read.size, &edited_store);
+    assert_persist_xmp_state(&edited_store, OMC_TRANSFER_PERSIST_XMP_NEW);
+    assert_u8_array_value(&edited_store,
+                          find_exif_entry(&edited_store, "ifd0", 0xC612U),
+                          k_dng_version, 4U);
+
+    assert_read_file_bytes(sidecar_path, &file_read);
+    read_store_from_bytes(file_read.data, file_read.size, &sidecar_store);
+    assert_persist_xmp_state(&sidecar_store, OMC_TRANSFER_PERSIST_XMP_NEW);
+
+    remove(sidecar_path);
+    remove(output_path);
+    omc_arena_fini(&file_read);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&sidecar_store);
+    omc_store_fini(&edited_store);
+    omc_store_fini(&source_store);
+}
+
+static void
+test_transfer_persist_jpeg_embedded_only_source_iptc(void)
+{
+    static const omc_u8 k_city[] = {
+        (omc_u8)'T', (omc_u8)'o', (omc_u8)'k', (omc_u8)'y', (omc_u8)'o'
+    };
+    static const omc_u8 k_keyword[] = {
+        (omc_u8)'N', (omc_u8)'i', (omc_u8)'g', (omc_u8)'h', (omc_u8)'t'
+    };
+    omc_u8 file_bytes[4096];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store output_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_arena file_read;
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    omc_status status;
+
+    file_size = make_test_jpeg_with_old_xmp_and_comment(file_bytes);
+    build_temp_path(output_path, sizeof(output_path), ".jpg");
+
+    omc_store_init(&source_store);
+    omc_store_init(&output_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_arena_init(&file_read);
+    build_store_with_creator_tool(&source_store, "NewTool");
+    build_store_with_test_iptc(&source_store);
+
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.format = OMC_SCAN_FMT_JPEG;
+    prepare_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    execute_transfer(file_bytes, file_size, &source_store, &prepare_opts,
+                     &edited_out, &sidecar_out, &exec, &transfer_res);
+    assert(transfer_res.edited_present);
+    assert(!transfer_res.sidecar_present);
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.output_path = output_path;
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    assert(status == OMC_STATUS_OK);
+    assert(persist_res.status == OMC_TRANSFER_OK);
+    assert(persist_res.output_status == OMC_TRANSFER_OK);
+
+    assert_read_file_bytes(output_path, &file_read);
+    read_store_from_bytes(file_read.data, file_read.size, &output_store);
+    assert_persist_xmp_state(&output_store, OMC_TRANSFER_PERSIST_XMP_NEW);
+    assert_text_value(&output_store, find_comment_entry(&output_store),
+                      "Preserve me");
+    assert_u8_blob_value(&output_store,
+                         find_iptc_entry(&output_store, 2U, 25U, 0U),
+                         k_city, (omc_u32)sizeof(k_city));
+    assert_u8_blob_value(&output_store,
+                         find_iptc_entry(&output_store, 2U, 25U, 1U),
+                         k_keyword, (omc_u32)sizeof(k_keyword));
+
+    remove(output_path);
+    omc_arena_fini(&file_read);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&output_store);
+    omc_store_fini(&source_store);
+}
+
+static void
+test_transfer_persist_jpeg_embedded_only_source_iptc_preserves_irb(void)
+{
+    omc_u8 file_bytes[4096];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store output_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_arena file_read;
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    omc_status status;
+    const omc_entry* entry;
+
+    file_size = make_test_jpeg_with_old_xmp_comment_and_irb(file_bytes);
+    build_temp_path(output_path, sizeof(output_path), ".jpg");
+
+    omc_store_init(&source_store);
+    omc_store_init(&output_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_arena_init(&file_read);
+    build_store_with_creator_tool(&source_store, "NewTool");
+    build_store_with_test_iptc(&source_store);
+
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.format = OMC_SCAN_FMT_JPEG;
+    prepare_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    execute_transfer(file_bytes, file_size, &source_store, &prepare_opts,
+                     &edited_out, &sidecar_out, &exec, &transfer_res);
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.output_path = output_path;
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    assert(status == OMC_STATUS_OK);
+    assert(persist_res.status == OMC_TRANSFER_OK);
+    assert(persist_res.output_status == OMC_TRANSFER_OK);
+
+    assert_read_file_bytes(output_path, &file_read);
+    read_store_from_bytes(file_read.data, file_read.size, &output_store);
+    entry = find_irb_entry(&output_store, 0x040DU);
+    assert(entry != (const omc_entry*)0);
+    entry = find_irb_field(&output_store, 0x040DU, "GlobalAngle", 0U);
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert(entry->value.u.u64 == 30U);
+
+    remove(output_path);
+    omc_arena_fini(&file_read);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&output_store);
+    omc_store_fini(&source_store);
+}
+
+static void
+exercise_transfer_persist_tiff_family_source_iptc_case(
+    omc_transfer_persist_fixture_builder builder, const char* output_ext,
+    omc_scan_fmt format,
+    omc_transfer_persist_preserve_kind preserve_kind)
+{
+    static const omc_u8 k_city[] = {
+        (omc_u8)'T', (omc_u8)'o', (omc_u8)'k', (omc_u8)'y', (omc_u8)'o'
+    };
+    static const omc_u8 k_keyword[] = {
+        (omc_u8)'N', (omc_u8)'i', (omc_u8)'g', (omc_u8)'h', (omc_u8)'t'
+    };
+    omc_u8 file_bytes[4096];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store output_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_arena file_read;
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    omc_status status;
+
+    file_size = builder(file_bytes);
+    build_temp_path(output_path, sizeof(output_path), output_ext);
+
+    omc_store_init(&source_store);
+    omc_store_init(&output_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_arena_init(&file_read);
+    build_store_with_creator_tool(&source_store, "NewTool");
+    build_store_with_test_iptc(&source_store);
+
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.format = format;
+    prepare_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    execute_transfer(file_bytes, file_size, &source_store, &prepare_opts,
+                     &edited_out, &sidecar_out, &exec, &transfer_res);
+    assert(transfer_res.edited_present);
+    assert(!transfer_res.sidecar_present);
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.output_path = output_path;
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    assert(status == OMC_STATUS_OK);
+    assert(persist_res.status == OMC_TRANSFER_OK);
+    assert(persist_res.output_status == OMC_TRANSFER_OK);
+
+    assert_read_file_bytes(output_path, &file_read);
+    read_store_from_bytes(file_read.data, file_read.size, &output_store);
+    assert_persist_xmp_state(&output_store, OMC_TRANSFER_PERSIST_XMP_NEW);
+    assert_persist_preserved_metadata(&output_store, preserve_kind);
+    assert_u8_blob_value(&output_store,
+                         find_iptc_entry(&output_store, 2U, 25U, 0U),
+                         k_city, (omc_u32)sizeof(k_city));
+    assert_u8_blob_value(&output_store,
+                         find_iptc_entry(&output_store, 2U, 25U, 1U),
+                         k_keyword, (omc_u32)sizeof(k_keyword));
+
+    remove(output_path);
+    omc_arena_fini(&file_read);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&output_store);
+    omc_store_fini(&source_store);
+}
+
+static void
+test_transfer_persist_tiff_embedded_only_source_iptc(void)
+{
+    exercise_transfer_persist_tiff_family_source_iptc_case(
+        make_test_tiff_le_with_make_only, ".tif", OMC_SCAN_FMT_TIFF,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_bigtiff_embedded_only_source_iptc(void)
+{
+    exercise_transfer_persist_tiff_family_source_iptc_case(
+        make_test_bigtiff_le_with_make_and_old_xmp, ".tif", OMC_SCAN_FMT_TIFF,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_dng_embedded_only_source_iptc(void)
+{
+    exercise_transfer_persist_tiff_family_source_iptc_case(
+        make_test_dng_with_old_xmp_and_make, ".dng", OMC_SCAN_FMT_DNG,
+        OMC_TRANSFER_PERSIST_PRESERVE_DNG_CORE);
+}
+
+static void
+test_transfer_persist_png_embedded_only_source_icc(void)
+{
+    exercise_transfer_persist_source_icc_case(
+        make_test_png_with_old_xmp_and_text, ".png", OMC_SCAN_FMT_PNG,
+        OMC_TRANSFER_PERSIST_PRESERVE_PNG_TEXT);
+}
+
+static void
+test_transfer_persist_jpeg_embedded_only_source_icc(void)
+{
+    exercise_transfer_persist_source_icc_case(
+        make_test_jpeg_with_old_xmp_and_comment, ".jpg", OMC_SCAN_FMT_JPEG,
+        OMC_TRANSFER_PERSIST_PRESERVE_COMMENT);
+}
+
+static void
+test_transfer_persist_webp_embedded_only_source_icc(void)
+{
+    exercise_transfer_persist_source_icc_case(
+        make_test_webp_with_old_xmp_and_exif, ".webp", OMC_SCAN_FMT_WEBP,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_jp2_embedded_only_source_icc(void)
+{
+    exercise_transfer_persist_source_icc_case(
+        make_test_jp2_with_old_xmp_and_exif, ".jp2", OMC_SCAN_FMT_JP2,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_jxl_embedded_only_source_exif_replaces_brob_exif(void)
+{
+    omc_u8 file_bytes[2048];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store edited_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_arena file_read;
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    char sidecar_path[OMC_TEST_TEMP_PATH_CAP];
+    omc_status status;
+
+    file_size = make_test_jxl_with_old_xmp_and_brob_exif(file_bytes);
+    build_temp_path(output_path, sizeof(output_path), ".jxl");
+    derive_sidecar_path(output_path, sidecar_path, sizeof(sidecar_path));
+
+    omc_store_init(&source_store);
+    omc_store_init(&edited_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_arena_init(&file_read);
+    build_store_with_creator_tool_and_datetime_original(
+        &source_store, "NewTool", "2025:06:07 08:09:10");
+
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.format = OMC_SCAN_FMT_JXL;
+    prepare_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    execute_transfer(file_bytes, file_size, &source_store, &prepare_opts,
+                     &edited_out, &sidecar_out, &exec, &transfer_res);
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.output_path = output_path;
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    assert(status == OMC_STATUS_OK);
+    assert(persist_res.status == OMC_TRANSFER_OK);
+    assert(persist_res.output_status == OMC_TRANSFER_OK);
+
+    assert_read_file_bytes(output_path, &file_read);
+    assert(!has_jxl_brob_exif_box(file_read.data, file_read.size));
+    read_store_from_bytes(file_read.data, file_read.size, &edited_store);
+    assert_text_value(&edited_store,
+                      find_xmp_entry(&edited_store,
+                                     "http://ns.adobe.com/xap/1.0/",
+                                     "CreatorTool"),
+                      "NewTool");
+#if OMC_HAVE_BROTLI
+    assert_text_value(&edited_store,
+                      find_exif_entry(&edited_store, "ifd0", 0x010FU),
+                      "Canon");
+    assert(count_exif_entries(&edited_store, "ifd0", 0x010FU) == 1U);
+#else
+    assert(find_exif_entry(&edited_store, "ifd0", 0x010FU)
+           == (const omc_entry*)0);
+    assert(count_exif_entries(&edited_store, "ifd0", 0x010FU) == 0U);
+#endif
+    assert_text_value(&edited_store,
+                      find_exif_entry(&edited_store, "exififd", 0x9003U),
+                      "2025:06:07 08:09:10");
+
+    remove(output_path);
+    remove(sidecar_path);
+    omc_arena_fini(&file_read);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&edited_store);
     omc_store_fini(&source_store);
 }
 
@@ -2687,13 +3767,13 @@ test_transfer_persist_dng_template_sidecar_only_requires_output_path(void)
     omc_arena sidecar_out;
     omc_arena meta_out;
     omc_arena file_read;
-    char sidecar_base[L_tmpnam + 8];
-    char sidecar_path[L_tmpnam + 8];
+    char sidecar_base[OMC_TEST_TEMP_PATH_CAP];
+    char sidecar_path[OMC_TEST_TEMP_PATH_CAP];
     omc_status status;
 
     file_size = make_test_dng_with_old_xmp_and_make(file_bytes);
-    build_temp_path(sidecar_base, ".dng");
-    derive_sidecar_path(sidecar_base, sidecar_path);
+    build_temp_path(sidecar_base, sizeof(sidecar_base), ".dng");
+    derive_sidecar_path(sidecar_base, sidecar_path, sizeof(sidecar_path));
 
     omc_store_init(&source_store);
     omc_arena_init(&edited_out);
@@ -2722,7 +3802,7 @@ test_transfer_persist_dng_template_sidecar_only_requires_output_path(void)
     assert(status == OMC_STATUS_OK);
     assert(persist_res.status == OMC_TRANSFER_UNSUPPORTED);
     assert(persist_res.output_status == OMC_TRANSFER_UNSUPPORTED);
-    assert(!read_file_bytes(sidecar_path, &file_read));
+    assert_no_file_bytes(sidecar_path, &file_read);
 
     omc_arena_fini(&file_read);
     omc_arena_fini(&meta_out);
@@ -2758,6 +3838,17 @@ main(void)
     test_transfer_persist_uses_explicit_sidecar_base_path();
     test_transfer_persist_can_remove_stale_destination_sidecar();
     test_transfer_persist_dng_minimal_scaffold_sidecar_only_without_output_path();
+    test_transfer_persist_dng_minimal_scaffold_embedded_and_sidecar_writes_output();
+    test_transfer_persist_jpeg_embedded_only_source_iptc();
+    test_transfer_persist_jpeg_embedded_only_source_iptc_preserves_irb();
+    test_transfer_persist_tiff_embedded_only_source_iptc();
+    test_transfer_persist_bigtiff_embedded_only_source_iptc();
+    test_transfer_persist_dng_embedded_only_source_iptc();
+    test_transfer_persist_png_embedded_only_source_icc();
+    test_transfer_persist_jpeg_embedded_only_source_icc();
+    test_transfer_persist_webp_embedded_only_source_icc();
+    test_transfer_persist_jp2_embedded_only_source_icc();
+    test_transfer_persist_jxl_embedded_only_source_exif_replaces_brob_exif();
     test_transfer_persist_dng_template_sidecar_only_requires_output_path();
     return 0;
 }

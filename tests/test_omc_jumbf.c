@@ -1,6 +1,6 @@
 #include "omc/omc_jumbf.h"
 
-#include <assert.h>
+#include "omc_test_assert.h"
 #include <string.h>
 
 static const omc_u8 k_sample_jumbf_box[] = {
@@ -238,12 +238,14 @@ assert_text_entry_equals(const omc_store* store, const omc_entry* entry,
                          const char* expected)
 {
     omc_const_bytes view;
+    omc_size expected_size;
 
-    assert(entry != (const omc_entry*)0);
-    assert(entry->value.kind == OMC_VAL_TEXT);
+    OMC_TEST_REQUIRE(entry != (const omc_entry*)0);
+    OMC_TEST_REQUIRE_U64_EQ(entry->value.kind, OMC_VAL_TEXT);
     view = omc_arena_view(&store->arena, entry->value.u.ref);
-    assert(view.size == strlen(expected));
-    assert(memcmp(view.data, expected, view.size) == 0);
+    expected_size = strlen(expected);
+    OMC_TEST_CHECK_SIZE_EQ(view.size, expected_size);
+    OMC_TEST_CHECK_MEM_EQ(view.data, view.size, expected, expected_size);
 }
 
 static void
@@ -252,19 +254,14 @@ assert_text_entry_contains(const omc_store* store, const omc_entry* entry,
 {
     omc_const_bytes view;
     omc_size needle_size;
-    omc_size i;
 
-    assert(entry != (const omc_entry*)0);
-    assert(entry->value.kind == OMC_VAL_TEXT);
+    OMC_TEST_REQUIRE(entry != (const omc_entry*)0);
+    OMC_TEST_REQUIRE_U64_EQ(entry->value.kind, OMC_VAL_TEXT);
     view = omc_arena_view(&store->arena, entry->value.u.ref);
     needle_size = strlen(expected_substring);
-    assert(view.size >= needle_size);
-    for (i = 0U; i + needle_size <= view.size; ++i) {
-        if (memcmp(view.data + i, expected_substring, needle_size) == 0) {
-            return;
-        }
-    }
-    assert(0);
+    OMC_TEST_REQUIRE(view.size >= needle_size);
+    OMC_TEST_CHECK_MEM_CONTAINS(view.data, view.size,
+                                expected_substring, needle_size);
 }
 
 static void
@@ -273,40 +270,40 @@ assert_bytes_entry_equals(const omc_store* store, const omc_entry* entry,
 {
     omc_const_bytes view;
 
-    assert(entry != (const omc_entry*)0);
-    assert(entry->value.kind == OMC_VAL_BYTES);
+    OMC_TEST_REQUIRE(entry != (const omc_entry*)0);
+    OMC_TEST_REQUIRE_U64_EQ(entry->value.kind, OMC_VAL_BYTES);
     view = omc_arena_view(&store->arena, entry->value.u.ref);
-    assert(view.size == expected_size);
-    assert(memcmp(view.data, expected, expected_size) == 0);
+    OMC_TEST_CHECK_SIZE_EQ(view.size, expected_size);
+    OMC_TEST_CHECK_MEM_EQ(view.data, view.size, expected, expected_size);
 }
 
 static void
 assert_scalar_u64_equals(const omc_entry* entry, omc_u64 expected)
 {
-    assert(entry != (const omc_entry*)0);
-    assert(entry->value.kind == OMC_VAL_SCALAR);
-    assert(entry->value.u.u64 == expected);
+    OMC_TEST_REQUIRE(entry != (const omc_entry*)0);
+    OMC_TEST_REQUIRE_U64_EQ(entry->value.kind, OMC_VAL_SCALAR);
+    OMC_TEST_CHECK_U64_EQ(entry->value.u.u64, expected);
 }
 
 static void
 assert_scalar_u8_equals(const omc_entry* entry, omc_u8 expected)
 {
-    assert(entry != (const omc_entry*)0);
-    assert(entry->value.kind == OMC_VAL_SCALAR);
-    assert(entry->value.elem_type == OMC_ELEM_U8);
-    assert(entry->value.u.u64 == (omc_u64)expected);
+    OMC_TEST_REQUIRE(entry != (const omc_entry*)0);
+    OMC_TEST_REQUIRE_U64_EQ(entry->value.kind, OMC_VAL_SCALAR);
+    OMC_TEST_REQUIRE_U64_EQ(entry->value.elem_type, OMC_ELEM_U8);
+    OMC_TEST_CHECK_U64_EQ(entry->value.u.u64, (omc_u64)expected);
 }
 
 static void
 assert_scalar_i64_equals(const omc_entry* entry, omc_s64 expected)
 {
-    assert(entry != (const omc_entry*)0);
-    assert(entry->value.kind == OMC_VAL_SCALAR);
+    OMC_TEST_REQUIRE(entry != (const omc_entry*)0);
+    OMC_TEST_REQUIRE_U64_EQ(entry->value.kind, OMC_VAL_SCALAR);
     if (entry->value.elem_type == OMC_ELEM_I64) {
-        assert(entry->value.u.i64 == expected);
+        OMC_TEST_CHECK_S64_EQ(entry->value.u.i64, expected);
     } else {
-        assert(entry->value.elem_type == OMC_ELEM_U64);
-        assert((omc_s64)entry->value.u.u64 == expected);
+        OMC_TEST_REQUIRE_U64_EQ(entry->value.elem_type, OMC_ELEM_U64);
+        OMC_TEST_CHECK_S64_EQ((omc_s64)entry->value.u.u64, expected);
     }
 }
 
@@ -5975,5 +5972,5 @@ main(void)
     test_jumbf_verify_require_resolved_references_ambiguous_disabled_by_build();
     test_jumbf_verify_require_resolved_references_disabled_policy_does_not_fail();
     test_jumbf_cbor_composite_key_fallback();
-    return 0;
+    return omc_test_finish();
 }

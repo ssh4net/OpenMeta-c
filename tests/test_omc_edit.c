@@ -1,6 +1,6 @@
 #include "omc/omc_edit.h"
 
-#include <assert.h>
+#include "omc_test_assert.h"
 #include <string.h>
 
 static omc_byte_ref

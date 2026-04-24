@@ -23,8 +23,47 @@ In practice:
 - Read-path coverage is broad and regression-tested.
 - Optional parity tests compare selected shared cases against the C++ library.
 - XMP edit and writeback are real for bounded target families.
-- `EXR`, the full transfer stack, and real C2PA crypto verification are still
+- `EXR` read is implemented.
+- Bounded `DNG` / `CCM` field query and validation are now implemented.
+- Minimal-fresh-scaffold `DNG` transfer can now emit a real fresh `.dng`
+  without target bytes for embedded and embedded+sidecar flows.
+- The bounded transfer lane now has direct ICC carrier rewrite for `JPEG`
+  `APP2`, `PNG` / `WebP` `iCCP` / `ICCP`, `JP2` `colr`, and `TIFF` / `DNG`
+  tag `34675`.
+- The TIFF-family bounded transfer lane now also has direct IPTC-IIM carriage
+  via tag `33723` for `TIFF`, `BigTIFF`, and `DNG`, including the minimal
+  fresh-scaffold `DNG` path.
+- The bounded `JXL` EXIF rewrite path now replaces both direct `Exif` boxes
+  and compressed `brob(Exif)` carriers, instead of leaving duplicate EXIF in
+  place. Preserving target-only compressed EXIF fields still depends on a
+  Brotli-enabled build.
+- A stable serialized `JXL` encoder ICC handoff API now exists for bounded
+  host/encoder bridging without porting the C++ adapter layer, including a
+  zero-copy parse path for persisted handoff bytes.
+- A first serialized transfer-payload batch API now exists in C for bounded
+  `EXIF` / `XMP` / `ICC` / `IPTC` carrier bridging plus projected non-`C2PA`
+  `JUMBF` export for `JPEG`, `JXL`, and bounded BMFF targets, using the public
+  `OMTPLD01` payload-batch family on the wire while staying narrower than the
+  C++ prepared-bundle surface.
+- A first serialized transfer-package batch API now also exists in C for
+  bounded carrier-chunk handoff via the public `OMTPKG01` family, turning the
+  current payload bridge into replayable `JPEG` segments plus inline or
+  target-typed transfer blocks for the current non-`JPEG` carriers. The wire
+  format now matches the public C++ package-batch contract, but the current C
+  builder still materializes only the bounded subset it can honestly emit from
+  the current C transfer lane, so this is not full executed package-batch
+  parity yet.
+- A generic persisted-artifact inspect API now exists in C for serialized
+  transfer payload batches, transfer package batches, and `JXL` encoder
+  handoffs.
+- The `JPEG` lane now also has direct bounded `APP13` IPTC-IIM carriage via
+  Photoshop IRB `0x0404`, while preserving unrelated IRB resources.
+- Prepared transfer / persist APIs exist for bounded XMP-centric targets, but
+  they are still narrower and less stable than the C++ transfer layer.
+- Real C2PA crypto verification and the C++ host-adapter surfaces are still
   missing.
+- See [porting_plan.md](porting_plan.md) for the current public parity matrix
+  and roadmap.
 
 ## What OpenMeta-c Does
 
@@ -54,10 +93,11 @@ OpenMeta-c currently covers these major families:
 - GeoTIFF and PrintIM.
 - ISO-BMFF derived fields for primary-item, relation, and auxiliary semantics.
 - JUMBF / C2PA draft structural and semantic projection.
+- EXR header attributes.
 
-Not yet ported:
-- EXR header metadata.
+Remaining major gaps:
 - Full transfer / metadata synchronization parity with the C++ library.
+- EXR transfer / host-export parity with the C++ library.
 - Real C2PA signature verification backend.
 
 ## Naming Model
@@ -92,7 +132,7 @@ Current embedded XMP writeback targets:
 | JP2 | Real |
 | JXL | Real |
 | HEIF / AVIF | Real |
-| CR3 | Explicitly unsupported |
+| CR3 | Real |
 
 Current policy surface:
 - `embedded_only`
@@ -101,8 +141,25 @@ Current policy surface:
 - preserve existing embedded XMP
 - strip existing embedded XMP
 
-This is still narrower than the C++ transfer layer. OpenMeta-c does not yet
-provide the full prepared-transfer / file-persistence stack.
+This is still narrower than the C++ transfer layer. OpenMeta-c now has a real
+prepared-transfer / file-persistence lane for bounded XMP writeback, but it
+does not yet match the C++ target breadth, stability, or host-adapter surface.
+The bounded BMFF lane now includes direct CR3 roundtrip coverage in the C test
+suite, and the TIFF-family plus `JPEG` / `PNG` / `WebP` / `JP2` lane now
+includes direct bounded ICC carrier rewrite. `JPEG` now has a real direct
+bounded `APP13` IPTC transfer path that preserves unrelated Photoshop IRB
+resources, and the TIFF-family now has direct bounded tag `33723` IPTC
+carriage as well. For `JXL`, the first host-side bridge is now a stable
+serialized encoder ICC handoff API rather than an in-place ICC rewrite path.
+On top of that, `OpenMeta-c` now has a first serialized transfer-payload batch
+surface for bounded `EXIF` / `XMP` / `ICC` / `IPTC` carrier export across `JPEG`,
+`TIFF` / `DNG`, `PNG`, `WebP`, `JP2`, `JXL`, and bounded BMFF targets, plus
+projected non-`C2PA` `JUMBF` carrier export for `JPEG`, `JXL`, and bounded
+BMFF targets. That payload bridge now has a bounded `OMTPKG01` package-batch
+layer above it for replayable carrier chunks. The C wire layout now matches
+the public C++ package-batch family, but the current C builder still emits
+only the subset it can derive from the current bounded transfer lane rather
+than the broader executed prepared-bundle surface.
 
 ## Layout
 
@@ -163,12 +220,56 @@ For writeback:
 - use `omc_xmp_write_embedded(...)` for embedded XMP rewrite
 - use `omc_xmp_apply(...)` for higher-level embedded/sidecar policy
 
+For embedded previews:
+- use `omc_preview_scan_candidates(...)` to discover bounded preview sources
+- use `omc_preview_extract_candidate(...)` to copy one candidate out
+
+For file-level validation:
+- use `omc_validate_file(...)` for decode-health checks, file-size guards,
+  optional `.xmp` sidecar validation, and bounded `DNG` / `CCM` checks
+
+For normalized `DNG` / `CCM` fields:
+- use `omc_ccm_collect_fields(...)` to extract bounded color-matrix,
+  white-balance, and calibration fields from an `omc_store`
+
+For bounded `JXL` encoder bridging:
+- use `omc_jxl_encoder_handoff_build(...)` and
+  `omc_jxl_encoder_handoff_serialize(...)` to hand off ICC payload state to a
+  host-side encoder
+- use `omc_jxl_encoder_handoff_parse_view(...)` to inspect one persisted
+  handoff without copying the ICC payload out of the input byte buffer
+
+For bounded serialized transfer payloads:
+- use `omc_transfer_payload_batch_build(...)` to build a reusable payload
+  batch from one `omc_store`
+- use `omc_transfer_payload_batch_serialize(...)` and
+  `omc_transfer_payload_batch_deserialize(...)` to persist and reload that
+  batch
+- use `omc_transfer_payload_batch_replay(...)` to drive a host-side sink in
+  stable payload order
+
+For bounded serialized transfer package batches:
+- use `omc_transfer_package_batch_build(...)` to build replayable carrier
+  chunks from one `omc_store`
+- use `omc_transfer_package_batch_serialize(...)` and
+  `omc_transfer_package_batch_deserialize(...)` to persist and reload that
+  package batch
+- use `omc_transfer_package_batch_replay(...)` to drive a host-side sink in
+  stable chunk order
+
+For persisted transfer artifacts:
+- use `omc_transfer_artifact_inspect(...)` to identify one persisted artifact
+  and summarize its current public metadata; today that covers serialized
+  transfer payload batches, transfer package batches, and persisted `JXL`
+  encoder handoffs
+
 ## Current Gaps
 
 The largest remaining gaps relative to the C++ library are:
 
-- `EXR` read support
-- the full transfer / write pipeline beyond bounded XMP writeback
-- file-persistence helpers around the new writeback policy layer
+- transfer stability and parity coverage across the newer bounded targets
+- `EXR` transfer / host-export parity
+- full validation parity beyond the current decode-summary + bounded `CCM`
+  helper surface
 - real C2PA verification backends
 - broader parity work for newer upstream features

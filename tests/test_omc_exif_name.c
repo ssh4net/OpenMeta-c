@@ -3,7 +3,7 @@
 #include "omc/omc_store.h"
 #include "omc/omc_val.h"
 
-#include <assert.h>
+#include "omc_test_assert.h"
 #include <string.h>
 
 static void

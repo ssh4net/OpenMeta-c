@@ -34,6 +34,18 @@ add_executable(omc_test_pay test_omc_pay.c)
 target_link_libraries(omc_test_pay PRIVATE omc)
 add_test(NAME omc_test_pay COMMAND omc_test_pay)
 
+add_executable(omc_test_preview test_omc_preview.c)
+target_link_libraries(omc_test_preview PRIVATE omc)
+add_test(NAME omc_test_preview COMMAND omc_test_preview)
+
+add_executable(omc_test_ccm_query test_omc_ccm_query.c)
+target_link_libraries(omc_test_ccm_query PRIVATE omc)
+add_test(NAME omc_test_ccm_query COMMAND omc_test_ccm_query)
+
+add_executable(omc_test_validate test_omc_validate.c)
+target_link_libraries(omc_test_validate PRIVATE omc)
+add_test(NAME omc_test_validate COMMAND omc_test_validate)
+
 add_executable(omc_test_read test_omc_read.c)
 target_link_libraries(omc_test_read PRIVATE omc)
 add_test(NAME omc_test_read COMMAND omc_test_read)
@@ -45,6 +57,22 @@ add_test(NAME omc_test_irb COMMAND omc_test_irb)
 add_executable(omc_test_jumbf test_omc_jumbf.c)
 target_link_libraries(omc_test_jumbf PRIVATE omc)
 add_test(NAME omc_test_jumbf COMMAND omc_test_jumbf)
+
+add_executable(omc_test_jxl_encoder_handoff test_omc_jxl_encoder_handoff.c)
+target_link_libraries(omc_test_jxl_encoder_handoff PRIVATE omc)
+add_test(NAME omc_test_jxl_encoder_handoff COMMAND omc_test_jxl_encoder_handoff)
+
+add_executable(omc_test_transfer_artifact test_omc_transfer_artifact.c)
+target_link_libraries(omc_test_transfer_artifact PRIVATE omc)
+add_test(NAME omc_test_transfer_artifact COMMAND omc_test_transfer_artifact)
+
+add_executable(omc_test_transfer_payload test_omc_transfer_payload.c)
+target_link_libraries(omc_test_transfer_payload PRIVATE omc)
+add_test(NAME omc_test_transfer_payload COMMAND omc_test_transfer_payload)
+
+add_executable(omc_test_transfer_package test_omc_transfer_package.c)
+target_link_libraries(omc_test_transfer_package PRIVATE omc)
+add_test(NAME omc_test_transfer_package COMMAND omc_test_transfer_package)
 
 add_executable(omc_test_xmp test_omc_xmp.c)
 target_link_libraries(omc_test_xmp PRIVATE omc)

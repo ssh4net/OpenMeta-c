@@ -2067,7 +2067,8 @@ omc_xmp_write_rewrite_bmff(const omc_u8* file_bytes, omc_size file_size,
 
     format = omc_xmp_write_bmff_format_from_ftyp(file_bytes, file_size,
                                                  &ftyp_box);
-    if (format != OMC_SCAN_FMT_HEIF && format != OMC_SCAN_FMT_AVIF) {
+    if (format != OMC_SCAN_FMT_HEIF && format != OMC_SCAN_FMT_AVIF
+        && format != OMC_SCAN_FMT_CR3) {
         omc_arena_fini(&meta_payload);
         out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
         return OMC_STATUS_OK;
@@ -2860,6 +2861,7 @@ omc_xmp_write_embedded(const omc_u8* file_bytes, omc_size file_size,
         && format != OMC_SCAN_FMT_WEBP
         && format != OMC_SCAN_FMT_JP2 && format != OMC_SCAN_FMT_JXL
         && format != OMC_SCAN_FMT_HEIF
+        && format != OMC_SCAN_FMT_CR3
         && format != OMC_SCAN_FMT_AVIF) {
         out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
         return OMC_STATUS_OK;

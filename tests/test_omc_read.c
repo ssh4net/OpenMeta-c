@@ -1,6 +1,6 @@
 #include "omc/omc_read.h"
 
-#include <assert.h>
+#include "omc_test_assert.h"
 #include <string.h>
 
 static void
@@ -5459,6 +5459,15 @@ patch_sony_makernote_value_offset_in_tiff(omc_u8* tiff, omc_size tiff_size)
     return 1;
 }
 
+static void
+prepare_sony_makernote_tiff(omc_u8* tiff, omc_size tiff_size)
+{
+    int patched;
+
+    patched = patch_sony_makernote_value_offset_in_tiff(tiff, tiff_size);
+    assert(patched);
+}
+
 static omc_size
 make_sony_makernote(omc_u8* out)
 {
@@ -8361,7 +8370,7 @@ test_read_tiff_sony_makernote_and_postpass(void)
     makernote_size = make_sony_makernote(makernote);
     tiff_size = make_test_tiff_with_make_and_makernote_count(
         tiff, "Sony", makernote, makernote_size, (omc_u32)makernote_size);
-    assert(patch_sony_makernote_value_offset_in_tiff(tiff, tiff_size));
+    prepare_sony_makernote_tiff(tiff, tiff_size);
     omc_store_init(&store);
     omc_read_opts_init(&opts);
     opts.exif.decode_makernote = 1;
@@ -8385,7 +8394,7 @@ test_read_tiff_sony_makernote_and_postpass(void)
     makernote_size = make_sony_makernote_tag9050b_ciphered(makernote);
     tiff_size = make_test_tiff_with_make_and_makernote_count(
         tiff, "Sony", makernote, makernote_size, (omc_u32)makernote_size);
-    assert(patch_sony_makernote_value_offset_in_tiff(tiff, tiff_size));
+    prepare_sony_makernote_tiff(tiff, tiff_size);
     omc_store_init(&store);
     omc_read_opts_init(&opts);
     opts.exif.decode_makernote = 1;
@@ -8408,7 +8417,7 @@ test_read_tiff_sony_makernote_and_postpass(void)
     makernote_size = make_sony_makernote_tag2010i_ciphered(makernote);
     tiff_size = make_test_tiff_with_make_and_makernote_count(
         tiff, "Sony", makernote, makernote_size, (omc_u32)makernote_size);
-    assert(patch_sony_makernote_value_offset_in_tiff(tiff, tiff_size));
+    prepare_sony_makernote_tiff(tiff, tiff_size);
     omc_store_init(&store);
     omc_read_opts_init(&opts);
     opts.exif.decode_makernote = 1;
@@ -8439,7 +8448,7 @@ test_read_tiff_sony_makernote_and_postpass(void)
     tiff_size = make_test_tiff_with_make_model_and_makernote_count(
         tiff, "Sony", "Stellar", makernote, makernote_size,
         (omc_u32)makernote_size);
-    assert(patch_sony_makernote_value_offset_in_tiff(tiff, tiff_size));
+    prepare_sony_makernote_tiff(tiff, tiff_size);
     omc_store_init(&store);
     omc_read_opts_init(&opts);
     opts.exif.decode_makernote = 1;
@@ -8458,7 +8467,7 @@ test_read_tiff_sony_makernote_and_postpass(void)
     makernote_size = make_sony_makernote_tag3000_shotinfo(makernote);
     tiff_size = make_test_tiff_with_make_and_makernote_count(
         tiff, "Sony", makernote, makernote_size, (omc_u32)makernote_size);
-    assert(patch_sony_makernote_value_offset_in_tiff(tiff, tiff_size));
+    prepare_sony_makernote_tiff(tiff, tiff_size);
     omc_store_init(&store);
     omc_read_opts_init(&opts);
     opts.exif.decode_makernote = 1;

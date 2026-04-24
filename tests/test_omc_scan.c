@@ -1,6 +1,6 @@
 #include "omc/omc_scan.h"
 
-#include <assert.h>
+#include "omc_test_assert.h"
 #include <string.h>
 
 static void

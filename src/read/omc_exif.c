@@ -1,5 +1,6 @@
 #include "omc/omc_exif.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #define OMC_EXIF_TASK_CAP 256U
@@ -716,6 +717,36 @@ omc_exif_entry_raw_view(const omc_store* store, const omc_entry* entry,
     return 0;
 }
 
+static omc_exif_status
+omc_exif_entry_raw_copy_view(const omc_store* store, const omc_entry* entry,
+                             omc_u8** out_copy, omc_const_bytes* out_view)
+{
+    omc_const_bytes view;
+    omc_u8* copy;
+
+    if (out_copy == (omc_u8**)0 || out_view == (omc_const_bytes*)0) {
+        return OMC_EXIF_MALFORMED;
+    }
+
+    *out_copy = (omc_u8*)0;
+    out_view->data = (const omc_u8*)0;
+    out_view->size = 0U;
+    if (!omc_exif_entry_raw_view(store, entry, &view) || view.size == 0U) {
+        return OMC_EXIF_OK;
+    }
+
+    copy = (omc_u8*)malloc(view.size);
+    if (copy == (omc_u8*)0) {
+        return OMC_EXIF_NOMEM;
+    }
+
+    memcpy(copy, view.data, view.size);
+    *out_copy = copy;
+    out_view->data = copy;
+    out_view->size = view.size;
+    return OMC_EXIF_OK;
+}
+
 static omc_u32
 omc_exif_write_u32_decimal(char* out, omc_u32 value)
 {
@@ -1072,11 +1103,11 @@ omc_exif_emit_derived_exif_text(omc_exif_ctx* ctx, const char* ifd_name,
                                           text_size);
     }
 
-    status = omc_exif_store_cstr_len(ctx, ifd_name, strlen(ifd_name), &ifd_ref);
+    status = omc_exif_store_ref(ctx, text, text_size, &text_ref);
     if (status != OMC_EXIF_OK) {
         return status;
     }
-    status = omc_exif_store_ref(ctx, text, text_size, &text_ref);
+    status = omc_exif_store_cstr_len(ctx, ifd_name, strlen(ifd_name), &ifd_ref);
     if (status != OMC_EXIF_OK) {
         return status;
     }
@@ -1150,11 +1181,11 @@ omc_exif_emit_derived_exif_bytes(omc_exif_ctx* ctx, const char* ifd_name,
                                           raw_size);
     }
 
-    status = omc_exif_store_cstr_len(ctx, ifd_name, strlen(ifd_name), &ifd_ref);
+    status = omc_exif_store_ref(ctx, raw, raw_size, &raw_ref);
     if (status != OMC_EXIF_OK) {
         return status;
     }
-    status = omc_exif_store_ref(ctx, raw, raw_size, &raw_ref);
+    status = omc_exif_store_cstr_len(ctx, ifd_name, strlen(ifd_name), &ifd_ref);
     if (status != OMC_EXIF_OK) {
         return status;
     }
@@ -1219,11 +1250,11 @@ omc_exif_emit_derived_exif_array_copy(omc_exif_ctx* ctx, const char* ifd_name,
                                           count);
     }
 
-    status = omc_exif_store_cstr_len(ctx, ifd_name, strlen(ifd_name), &ifd_ref);
+    status = omc_exif_store_ref(ctx, raw, raw_size, &raw_ref);
     if (status != OMC_EXIF_OK) {
         return status;
     }
-    status = omc_exif_store_ref(ctx, raw, raw_size, &raw_ref);
+    status = omc_exif_store_cstr_len(ctx, ifd_name, strlen(ifd_name), &ifd_ref);
     if (status != OMC_EXIF_OK) {
         return status;
     }
@@ -3501,12 +3532,12 @@ omc_exif_decode_panasonic_facedetinfo_ref(omc_exif_ctx* ctx,
     static const omc_u16 k_tags[5] = { 0x0001U, 0x0005U, 0x0009U, 0x000DU,
                                        0x0011U };
     char ifd_name[64];
-    omc_const_bytes raw;
     omc_exif_status status;
     omc_u16 faces;
     omc_u32 face_n;
     omc_u32 i;
     omc_u32 order;
+    omc_const_bytes raw;
 
     if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0) {
         return 1;
@@ -3533,6 +3564,7 @@ omc_exif_decode_panasonic_facedetinfo_ref(omc_exif_ctx* ctx,
         omc_u32 j;
         omc_u64 off;
 
+        raw = omc_arena_view(&ctx->store->arena, raw_ref);
         off = (omc_u64)k_tags[i] * 2U;
         if (off + 8U > raw.size) {
             continue;
@@ -3565,12 +3597,12 @@ omc_exif_decode_panasonic_facerecinfo_ref(omc_exif_ctx* ctx,
                                           int little_endian)
 {
     char ifd_name[64];
-    omc_const_bytes raw;
     omc_exif_status status;
     omc_u16 faces;
     omc_u32 face_n;
     omc_u32 i;
     omc_u32 order;
+    omc_const_bytes raw;
 
     if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0) {
         return 1;
@@ -3597,22 +3629,26 @@ omc_exif_decode_panasonic_facerecinfo_ref(omc_exif_ctx* ctx,
         omc_u64 pos_off;
         omc_u64 age_off;
         omc_u16 pos[4];
+        omc_u8 text_raw[20];
         omc_u32 j;
 
         name_off = 4U + ((omc_u64)i * 48U);
         pos_off = 24U + ((omc_u64)i * 48U);
         age_off = 32U + ((omc_u64)i * 48U);
 
+        raw = omc_arena_view(&ctx->store->arena, raw_ref);
         if (name_off + 20U <= raw.size) {
+            memcpy(text_raw, raw.data + (omc_size)name_off, sizeof(text_raw));
             status = omc_exif_panasonic_emit_trimmed_ascii(
                 ctx, ifd_name, (omc_u16)name_off, order++,
-                raw.data + (omc_size)name_off, 20U);
+                text_raw, (omc_u32)sizeof(text_raw));
             if (status != OMC_EXIF_OK) {
                 omc_exif_update_status(&ctx->res, status);
                 return 0;
             }
         }
 
+        raw = omc_arena_view(&ctx->store->arena, raw_ref);
         if (pos_off + 8U <= raw.size) {
             for (j = 0U; j < 4U; ++j) {
                 if (!omc_exif_panasonic_read_u16_endian(
@@ -3631,10 +3667,12 @@ omc_exif_decode_panasonic_facerecinfo_ref(omc_exif_ctx* ctx,
             }
         }
 
+        raw = omc_arena_view(&ctx->store->arena, raw_ref);
         if (age_off + 20U <= raw.size) {
+            memcpy(text_raw, raw.data + (omc_size)age_off, sizeof(text_raw));
             status = omc_exif_panasonic_emit_trimmed_ascii(
                 ctx, ifd_name, (omc_u16)age_off, order++,
-                raw.data + (omc_size)age_off, 20U);
+                text_raw, (omc_u32)sizeof(text_raw));
             if (status != OMC_EXIF_OK) {
                 omc_exif_update_status(&ctx->res, status);
                 return 0;
@@ -3650,10 +3688,10 @@ omc_exif_decode_panasonic_timeinfo_ref(omc_exif_ctx* ctx, omc_byte_ref raw_ref,
                                        omc_u32 index, int little_endian)
 {
     char ifd_name[64];
-    omc_const_bytes raw;
     omc_exif_status status;
     char dt_text[32];
     omc_u32 dt_size;
+    omc_const_bytes raw;
 
     if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0) {
         return 1;
@@ -3676,6 +3714,7 @@ omc_exif_decode_panasonic_timeinfo_ref(omc_exif_ctx* ctx, omc_byte_ref raw_ref,
         }
     }
 
+    raw = omc_arena_view(&ctx->store->arena, raw_ref);
     if (raw.size >= 20U) {
         omc_u32 shot;
 
@@ -3775,6 +3814,7 @@ omc_exif_decode_panasonic_binary_subdirs(omc_exif_ctx* ctx,
     omc_u32 idx_facedet;
     omc_u32 idx_facerec;
     omc_u32 idx_time;
+    omc_size entry_count;
     omc_size i;
 
     if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0
@@ -3785,8 +3825,9 @@ omc_exif_decode_panasonic_binary_subdirs(omc_exif_ctx* ctx,
     idx_facedet = 0U;
     idx_facerec = 0U;
     idx_time = 0U;
+    entry_count = ctx->store->entry_count;
 
-    for (i = entry_start; i < ctx->store->entry_count; ++i) {
+    for (i = entry_start; i < entry_count; ++i) {
         const omc_entry* entry;
 
         entry = &ctx->store->entries[i];
@@ -5451,6 +5492,7 @@ omc_exif_decode_canon_camera_settings(omc_exif_ctx* ctx)
 {
     const omc_entry* entry;
     omc_const_bytes raw;
+    omc_byte_ref raw_ref;
     omc_u32 i;
 
     if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0) {
@@ -5463,12 +5505,13 @@ omc_exif_decode_canon_camera_settings(omc_exif_ctx* ctx)
         return 1;
     }
 
-    raw = omc_arena_view(&ctx->store->arena, entry->value.u.ref);
+    raw_ref = entry->value.u.ref;
     for (i = 0U; i < entry->value.count; ++i) {
         omc_u16 value16;
         omc_exif_status status;
         omc_u64 off;
 
+        raw = omc_arena_view(&ctx->store->arena, raw_ref);
         off = (omc_u64)i * 2U;
         if ((off + 2U) > raw.size
             || !omc_exif_read_u16le_raw(raw.data, raw.size, off, &value16)) {
@@ -5502,27 +5545,51 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
     }
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x002BU);
-    if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size >= 5U
-        && omc_exif_make_subifd_name("mk_nikon", "distortinfo", 0U, ifd_name,
-                                     sizeof(ifd_name))) {
-        status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U, 0U,
-                                                 raw.data, 4U);
+    {
+        omc_u8* raw_copy;
+
+        raw_copy = (omc_u8*)0;
+        status =
+            omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
-        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0004U, 1U,
-                                               raw.data[4U]);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
+        if (raw.size >= 5U
+            && omc_exif_make_subifd_name("mk_nikon", "distortinfo", 0U,
+                                         ifd_name, sizeof(ifd_name))) {
+            status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U,
+                                                     0U, raw.data, 4U);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0004U, 1U,
+                                                   raw.data[4U]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
         }
+        free(raw_copy);
     }
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x00A8U);
-    if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size >= 4U) {
+    {
+        omc_u8* raw_copy;
+
+        raw_copy = (omc_u8*)0;
+        status =
+            omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
+            return 0;
+        }
+        if (raw.size >= 4U) {
         enum {
             OMC_EXIF_NIKON_FLASHINFO_0100 = 0,
             OMC_EXIF_NIKON_FLASHINFO_0102 = 1,
@@ -5915,52 +5982,79 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
                                                    variant);
             }
         }
+        }
+        free(raw_copy);
     }
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x00B0U);
-    if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size >= 16U
-        && omc_exif_make_subifd_name("mk_nikon", "multiexposure", 0U, ifd_name,
-                                     sizeof(ifd_name))) {
-        status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U, 0U,
-                                                 raw.data, 4U);
+    {
+        omc_u8* raw_copy;
+
+        raw_copy = (omc_u8*)0;
+        status =
+            omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
-        if (omc_exif_read_u32le_raw(raw.data, raw.size, 4U, &u32v)) {
-            status = omc_exif_emit_derived_exif_u32(ctx, ifd_name, 0x0001U, 1U,
-                                                    u32v);
+        if (raw.size >= 16U
+            && omc_exif_make_subifd_name("mk_nikon", "multiexposure", 0U,
+                                         ifd_name, sizeof(ifd_name))) {
+            status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U,
+                                                     0U, raw.data, 4U);
             if (status != OMC_EXIF_OK) {
                 omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
                 return 0;
             }
-        }
-        if (omc_exif_read_u32le_raw(raw.data, raw.size, 8U, &u32v)) {
-            status = omc_exif_emit_derived_exif_u32(ctx, ifd_name, 0x0002U, 2U,
-                                                    u32v);
-            if (status != OMC_EXIF_OK) {
-                omc_exif_update_status(&ctx->res, status);
-                return 0;
+            if (omc_exif_read_u32le_raw(raw.data, raw.size, 4U, &u32v)) {
+                status = omc_exif_emit_derived_exif_u32(ctx, ifd_name, 0x0001U,
+                                                        1U, u32v);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    free(raw_copy);
+                    return 0;
+                }
+            }
+            if (omc_exif_read_u32le_raw(raw.data, raw.size, 8U, &u32v)) {
+                status = omc_exif_emit_derived_exif_u32(ctx, ifd_name, 0x0002U,
+                                                        2U, u32v);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    free(raw_copy);
+                    return 0;
+                }
+            }
+            if (omc_exif_read_u32le_raw(raw.data, raw.size, 12U, &u32v)) {
+                status = omc_exif_emit_derived_exif_u32(ctx, ifd_name, 0x0003U,
+                                                        3U, u32v);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    free(raw_copy);
+                    return 0;
+                }
             }
         }
-        if (omc_exif_read_u32le_raw(raw.data, raw.size, 12U, &u32v)) {
-            status = omc_exif_emit_derived_exif_u32(ctx, ifd_name, 0x0003U, 3U,
-                                                    u32v);
-            if (status != OMC_EXIF_OK) {
-                omc_exif_update_status(&ctx->res, status);
-                return 0;
-            }
-        }
+        free(raw_copy);
     }
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x00B7U);
-    if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size >= 4U) {
+    {
+        omc_u8* raw_copy;
         omc_u32 order;
         omc_u32 i;
 
-        if (memcmp(raw.data, "0100", 4U) == 0
+        raw_copy = (omc_u8*)0;
+        status =
+            omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
+            return 0;
+        }
+        if (raw.size >= 4U
+            && memcmp(raw.data, "0100", 4U) == 0
             && raw.size >= 29U
             && omc_exif_make_subifd_name("mk_nikon", "afinfo2v0100", 0U,
                                          ifd_name, sizeof(ifd_name))) {
@@ -6018,7 +6112,8 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
                 omc_exif_update_status(&ctx->res, status);
                 return 0;
             }
-        } else if (memcmp(raw.data, "0101", 4U) == 0
+        } else if (raw.size >= 4U
+                   && memcmp(raw.data, "0101", 4U) == 0
                    && raw.size >= 0x53U
                    && omc_exif_make_subifd_name("mk_nikon", "afinfo2v0101",
                                                 0U, ifd_name,
@@ -6084,8 +6179,9 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
                 omc_exif_update_status(&ctx->res, status);
                 return 0;
             }
-        } else if ((memcmp(raw.data, "0300", 4U) == 0
-                    || memcmp(raw.data, "0301", 4U) == 0)
+        } else if (raw.size >= 4U
+                   && (memcmp(raw.data, "0300", 4U) == 0
+                       || memcmp(raw.data, "0301", 4U) == 0)
                    && raw.size >= 0x34U
                    && omc_exif_make_subifd_name("mk_nikon", "afinfo2v0300",
                                                 0U, ifd_name,
@@ -6134,72 +6230,113 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
                 }
             }
         }
+        free(raw_copy);
     }
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x00B8U);
-    if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size >= 8U
-        && omc_exif_make_subifd_name("mk_nikon", "fileinfo", 0U, ifd_name,
-                                     sizeof(ifd_name))) {
-        status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U, 0U,
-                                                 raw.data, 4U);
+    {
+        omc_u8* raw_copy;
+
+        raw_copy = (omc_u8*)0;
+        status =
+            omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
-        if (omc_exif_read_u16le_raw(raw.data, raw.size, 4U, &u16v)) {
-            status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x0002U, 1U,
-                                                    u16v);
+        if (raw.size >= 8U
+            && omc_exif_make_subifd_name("mk_nikon", "fileinfo", 0U, ifd_name,
+                                         sizeof(ifd_name))) {
+            status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U,
+                                                     0U, raw.data, 4U);
             if (status != OMC_EXIF_OK) {
                 omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
                 return 0;
             }
-        }
-        if (omc_exif_read_u16le_raw(raw.data, raw.size, 6U, &u16v)) {
-            status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x0003U, 2U,
-                                                    u16v);
-            if (status != OMC_EXIF_OK) {
-                omc_exif_update_status(&ctx->res, status);
-                return 0;
+            if (omc_exif_read_u16le_raw(raw.data, raw.size, 4U, &u16v)) {
+                status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x0002U,
+                                                        1U, u16v);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    free(raw_copy);
+                    return 0;
+                }
+            }
+            if (omc_exif_read_u16le_raw(raw.data, raw.size, 6U, &u16v)) {
+                status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x0003U,
+                                                        2U, u16v);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    free(raw_copy);
+                    return 0;
+                }
+            }
+            if (omc_exif_read_u16le_raw(raw.data, raw.size, 8U, &u16v)) {
+                status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x0004U,
+                                                        3U, u16v);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    free(raw_copy);
+                    return 0;
+                }
             }
         }
-        if (omc_exif_read_u16le_raw(raw.data, raw.size, 8U, &u16v)) {
-            status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x0004U, 3U,
-                                                    u16v);
-            if (status != OMC_EXIF_OK) {
-                omc_exif_update_status(&ctx->res, status);
-                return 0;
-            }
-        }
+        free(raw_copy);
     }
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x00BBU);
-    if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size >= 6U
-        && omc_exif_make_subifd_name("mk_nikon", "retouchinfo", 0U, ifd_name,
-                                     sizeof(ifd_name))) {
-        status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U, 0U,
-                                                 raw.data, 4U);
+    {
+        omc_u8* raw_copy;
+
+        raw_copy = (omc_u8*)0;
+        status =
+            omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
-        status = omc_exif_emit_derived_exif_i8(ctx, ifd_name, 0x0005U, 1U,
-                                               (omc_s8)raw.data[5U]);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
+        if (raw.size >= 6U
+            && omc_exif_make_subifd_name("mk_nikon", "retouchinfo", 0U,
+                                         ifd_name, sizeof(ifd_name))) {
+            status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U,
+                                                     0U, raw.data, 4U);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_i8(ctx, ifd_name, 0x0005U, 1U,
+                                                   (omc_s8)raw.data[5U]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
         }
+        free(raw_copy);
     }
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x0023U);
     if (entry == (const omc_entry*)0) {
         entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x00BDU);
     }
-    if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size > 0x41U
-        && omc_exif_make_subifd_name("mk_nikon", "picturecontrol2", 0U,
-                                     ifd_name, sizeof(ifd_name))) {
+    {
+        omc_u8* raw_copy;
+
+        raw_copy = (omc_u8*)0;
+        status =
+            omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
+            return 0;
+        }
+        if (raw.size > 0x41U
+            && omc_exif_make_subifd_name("mk_nikon", "picturecontrol2", 0U,
+                                         ifd_name, sizeof(ifd_name))) {
         static const omc_u16 extra_u8_tags[] = { 0x0033U, 0x0035U, 0x0037U,
                                                  0x0039U, 0x003BU, 0x003DU,
                                                  0x003FU, 0x0040U, 0x0041U };
@@ -6254,146 +6391,214 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
                 return 0;
             }
         }
+        }
+        free(raw_copy);
     }
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x0024U);
-    if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size >= 4U
-        && omc_exif_make_subifd_name("mk_nikon", "worldtime", 0U, ifd_name,
-                                     sizeof(ifd_name))) {
-        if (omc_exif_read_u16(ctx->cfg, raw.data, (omc_size)raw.size, 0U,
-                              &u16v)) {
-            i16v = (omc_s16)u16v;
-            status = omc_exif_emit_derived_exif_i16(ctx, ifd_name, 0x0000U, 0U,
-                                                    i16v);
+    {
+        omc_u8* raw_copy;
+
+        raw_copy = (omc_u8*)0;
+        status =
+            omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
+            return 0;
+        }
+        if (raw.size >= 4U
+            && omc_exif_make_subifd_name("mk_nikon", "worldtime", 0U,
+                                         ifd_name, sizeof(ifd_name))) {
+            if (omc_exif_read_u16(ctx->cfg, raw.data, (omc_size)raw.size, 0U,
+                                  &u16v)) {
+                i16v = (omc_s16)u16v;
+                status = omc_exif_emit_derived_exif_i16(ctx, ifd_name, 0x0000U,
+                                                        0U, i16v);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    free(raw_copy);
+                    return 0;
+                }
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0002U, 1U,
+                                                   raw.data[2U]);
             if (status != OMC_EXIF_OK) {
                 omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0003U, 2U,
+                                                   raw.data[3U]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
                 return 0;
             }
         }
-        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0002U, 1U,
-                                               raw.data[2U]);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
-        }
-        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0003U, 2U,
-                                               raw.data[3U]);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
-        }
+        free(raw_copy);
     }
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x0025U);
-    if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size >= 12U
-        && omc_exif_make_subifd_name("mk_nikon", "isoinfo", 0U, ifd_name,
-                                     sizeof(ifd_name))) {
-        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0000U, 0U,
-                                               raw.data[0U]);
+    {
+        omc_u8* raw_copy;
+
+        raw_copy = (omc_u8*)0;
+        status =
+            omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
-        if (omc_exif_read_u16(ctx->cfg, raw.data, (omc_size)raw.size, 4U,
-                              &u16v)) {
-            status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x0004U, 1U,
-                                                    u16v);
+        if (raw.size >= 12U
+            && omc_exif_make_subifd_name("mk_nikon", "isoinfo", 0U, ifd_name,
+                                         sizeof(ifd_name))) {
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0000U, 0U,
+                                                   raw.data[0U]);
             if (status != OMC_EXIF_OK) {
                 omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
                 return 0;
             }
-        }
-        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0006U, 2U,
-                                               raw.data[6U]);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
-        }
-        if (omc_exif_read_u16(ctx->cfg, raw.data, (omc_size)raw.size, 10U,
-                              &u16v)) {
-            status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x000AU, 3U,
-                                                    u16v);
+            if (omc_exif_read_u16(ctx->cfg, raw.data, (omc_size)raw.size, 4U,
+                                  &u16v)) {
+                status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x0004U,
+                                                        1U, u16v);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    free(raw_copy);
+                    return 0;
+                }
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0006U, 2U,
+                                                   raw.data[6U]);
             if (status != OMC_EXIF_OK) {
                 omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
                 return 0;
             }
+            if (omc_exif_read_u16(ctx->cfg, raw.data, (omc_size)raw.size, 10U,
+                                  &u16v)) {
+                status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x000AU,
+                                                        3U, u16v);
+                if (status != OMC_EXIF_OK) {
+                    omc_exif_update_status(&ctx->res, status);
+                    free(raw_copy);
+                    return 0;
+                }
+            }
         }
+        free(raw_copy);
     }
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x0035U);
-    if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size >= 8U
-        && omc_exif_make_subifd_name("mk_nikon", "hdrinfo", 0U, ifd_name,
-                                     sizeof(ifd_name))) {
-        status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U, 0U,
-                                                 raw.data, 4U);
+    {
+        omc_u8* raw_copy;
+
+        raw_copy = (omc_u8*)0;
+        status =
+            omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
-        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0004U, 1U,
-                                               raw.data[4U]);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
+        if (raw.size >= 8U
+            && omc_exif_make_subifd_name("mk_nikon", "hdrinfo", 0U, ifd_name,
+                                         sizeof(ifd_name))) {
+            status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U,
+                                                     0U, raw.data, 4U);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0004U, 1U,
+                                                   raw.data[4U]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0005U, 2U,
+                                                   raw.data[5U]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0006U, 3U,
+                                                   raw.data[6U]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0007U, 4U,
+                                                   raw.data[7U]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
         }
-        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0005U, 2U,
-                                               raw.data[5U]);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
-        }
-        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0006U, 3U,
-                                               raw.data[6U]);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
-        }
-        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0007U, 4U,
-                                               raw.data[7U]);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
-        }
+        free(raw_copy);
     }
 
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x0039U);
-    if (omc_exif_entry_raw_view(ctx->store, entry, &raw)
-        && raw.size > 9U
-        && omc_exif_make_subifd_name("mk_nikon", "locationinfo", 0U, ifd_name,
-                                     sizeof(ifd_name))) {
-        status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U, 0U,
-                                                 raw.data, 4U);
+    {
+        omc_u8* raw_copy;
+
+        raw_copy = (omc_u8*)0;
+        status =
+            omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
-        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0004U, 1U,
-                                               raw.data[4U]);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
+        if (raw.size > 9U
+            && omc_exif_make_subifd_name("mk_nikon", "locationinfo", 0U,
+                                         ifd_name, sizeof(ifd_name))) {
+            status = omc_exif_emit_derived_exif_text(ctx, ifd_name, 0x0000U,
+                                                     0U, raw.data, 4U);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0004U, 1U,
+                                                   raw.data[4U]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_bytes(ctx, ifd_name, 0x0005U,
+                                                      2U, raw.data + 5U, 3U);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0008U, 3U,
+                                                   raw.data[8U]);
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
+            status = omc_exif_emit_derived_exif_bytes(
+                ctx, ifd_name, 0x0009U, 4U, raw.data + 9U,
+                (omc_u32)(raw.size - 9U));
+            if (status != OMC_EXIF_OK) {
+                omc_exif_update_status(&ctx->res, status);
+                free(raw_copy);
+                return 0;
+            }
         }
-        status = omc_exif_emit_derived_exif_bytes(ctx, ifd_name, 0x0005U, 2U,
-                                                  raw.data + 5U, 3U);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
-        }
-        status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0008U, 3U,
-                                               raw.data[8U]);
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
-        }
-        status = omc_exif_emit_derived_exif_bytes(
-            ctx, ifd_name, 0x0009U, 4U, raw.data + 9U, (omc_u32)(raw.size - 9U));
-        if (status != OMC_EXIF_OK) {
-            omc_exif_update_status(&ctx->res, status);
-            return 0;
-        }
+        free(raw_copy);
     }
 
     return 1;
@@ -6405,6 +6610,7 @@ omc_exif_decode_nikon_settings(omc_exif_ctx* ctx)
     const omc_entry* entry;
     omc_const_bytes raw;
     char ifd_name[64];
+    omc_u8* raw_copy;
     omc_u16 tag16;
     omc_u16 type_be;
     omc_u32 rec_count;
@@ -6416,8 +6622,16 @@ omc_exif_decode_nikon_settings(omc_exif_ctx* ctx)
         return 1;
     }
 
+    raw_copy = (omc_u8*)0;
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x004EU);
-    if (!omc_exif_entry_raw_view(ctx->store, entry, &raw) || raw.size < 24U) {
+    status = omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
+        return 0;
+    }
+    if (raw.size < 24U) {
+        free(raw_copy);
         return 1;
     }
     if ((raw.size % 8U) != 0U
@@ -6425,6 +6639,7 @@ omc_exif_decode_nikon_settings(omc_exif_ctx* ctx)
         || rec_count == 0U || (24U + ((omc_u64)rec_count * 8U)) != raw.size
         || !omc_exif_make_subifd_name("mk_nikonsettings", "main", 0U, ifd_name,
                                       sizeof(ifd_name))) {
+        free(raw_copy);
         return 1;
     }
 
@@ -6458,10 +6673,12 @@ omc_exif_decode_nikon_settings(omc_exif_ctx* ctx)
         }
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
     }
 
+    free(raw_copy);
     return 1;
 }
 
@@ -6472,15 +6689,24 @@ omc_exif_decode_nikon_aftune(omc_exif_ctx* ctx)
     omc_const_bytes raw;
     char ifd_name[64];
     omc_exif_status status;
+    omc_u8* raw_copy;
 
     if (ctx == (omc_exif_ctx*)0 || ctx->store == (omc_store*)0) {
         return 1;
     }
 
+    raw_copy = (omc_u8*)0;
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x00B9U);
-    if (!omc_exif_entry_raw_view(ctx->store, entry, &raw) || raw.size < 4U
+    status = omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
+        return 0;
+    }
+    if (raw.size < 4U
         || !omc_exif_make_subifd_name("mk_nikon", "aftune", 0U, ifd_name,
                                       sizeof(ifd_name))) {
+        free(raw_copy);
         return 1;
     }
 
@@ -6488,26 +6714,31 @@ omc_exif_decode_nikon_aftune(omc_exif_ctx* ctx)
                                            raw.data[0U]);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
     status = omc_exif_emit_derived_exif_u8(ctx, ifd_name, 0x0001U, 1U,
                                            raw.data[1U]);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
     status = omc_exif_emit_derived_exif_i8(ctx, ifd_name, 0x0002U, 2U,
                                            (omc_s8)raw.data[2U]);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
     status = omc_exif_emit_derived_exif_i8(ctx, ifd_name, 0x0003U, 3U,
                                            (omc_s8)raw.data[3U]);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
+    free(raw_copy);
     return 1;
 }
 
@@ -6519,6 +6750,7 @@ omc_exif_decode_nikon_lensdata(omc_exif_ctx* ctx)
     const char* suffix;
     char ifd_name[64];
     omc_exif_status status;
+    omc_u8* raw_copy;
     const omc_u16* want;
     omc_u32 want_count;
     omc_u32 wi;
@@ -6536,8 +6768,16 @@ omc_exif_decode_nikon_lensdata(omc_exif_ctx* ctx)
         return 1;
     }
 
+    raw_copy = (omc_u8*)0;
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x0098U);
-    if (!omc_exif_entry_raw_view(ctx->store, entry, &raw) || raw.size < 4U) {
+    status = omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
+        return 0;
+    }
+    if (raw.size < 4U) {
+        free(raw_copy);
         return 1;
     }
 
@@ -6555,11 +6795,13 @@ omc_exif_decode_nikon_lensdata(omc_exif_ctx* ctx)
         want_count = (omc_u32)(sizeof(k_lens0101_tags)
                                / sizeof(k_lens0101_tags[0]));
     } else {
+        free(raw_copy);
         return 1;
     }
 
     if (!omc_exif_make_subifd_name("mk_nikon", suffix, 0U, ifd_name,
                                    sizeof(ifd_name))) {
+        free(raw_copy);
         return 1;
     }
 
@@ -6567,6 +6809,7 @@ omc_exif_decode_nikon_lensdata(omc_exif_ctx* ctx)
                                              raw.data, 4U);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
 
@@ -6582,9 +6825,11 @@ omc_exif_decode_nikon_lensdata(omc_exif_ctx* ctx)
                                                order++, raw.data[(omc_size)tag]);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
     }
+    free(raw_copy);
     return 1;
 }
 
@@ -6595,6 +6840,7 @@ omc_exif_decode_nikon_colorbalancec(omc_exif_ctx* ctx)
     omc_const_bytes raw;
     char ifd_name[64];
     omc_exif_status status;
+    omc_u8* raw_copy;
     omc_u16 u16v;
     omc_u32 i;
     static const struct {
@@ -6611,11 +6857,19 @@ omc_exif_decode_nikon_colorbalancec(omc_exif_ctx* ctx)
         return 1;
     }
 
+    raw_copy = (omc_u8*)0;
     entry = omc_exif_find_first_entry(ctx->store, "mk_nikon0", 0x0014U);
-    if (!omc_exif_entry_raw_view(ctx->store, entry, &raw) || raw.size < 8U
+    status = omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
+        return 0;
+    }
+    if (raw.size < 8U
         || memcmp(raw.data, "NRW ", 4U) != 0
         || !omc_exif_make_subifd_name("mk_nikon", "colorbalancec", 0U,
                                       ifd_name, sizeof(ifd_name))) {
+        free(raw_copy);
         return 1;
     }
 
@@ -6623,6 +6877,7 @@ omc_exif_decode_nikon_colorbalancec(omc_exif_ctx* ctx)
                                              raw.data + 4U, 4U);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
     if (raw.size >= 0x22U
@@ -6632,6 +6887,7 @@ omc_exif_decode_nikon_colorbalancec(omc_exif_ctx* ctx)
                                                 u16v);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
     }
@@ -6674,9 +6930,11 @@ omc_exif_decode_nikon_colorbalancec(omc_exif_ctx* ctx)
             OMC_ELEM_U32, raw_out, sizeof(raw_out), 4U);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
     }
+    free(raw_copy);
     return 1;
 }
 
@@ -6778,6 +7036,7 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
     omc_const_bytes raw;
     char ifd_name[64];
     omc_exif_status status;
+    omc_u8* raw_copy;
     omc_u16 size_bytes;
     omc_u16 num_points;
     omc_u16 value16;
@@ -6789,8 +7048,16 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
         return 1;
     }
 
+    raw_copy = (omc_u8*)0;
     entry = omc_exif_find_first_entry(ctx->store, "mk_canon0", 0x0026U);
-    if (!omc_exif_entry_raw_view(ctx->store, entry, &raw) || raw.size < 16U) {
+    status = omc_exif_entry_raw_copy_view(ctx->store, entry, &raw_copy, &raw);
+    if (status != OMC_EXIF_OK) {
+        omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
+        return 0;
+    }
+    if (raw.size < 16U) {
+        free(raw_copy);
         return 1;
     }
     if (!omc_exif_read_u16le_raw(raw.data, raw.size, 0U, &size_bytes)
@@ -6799,11 +7066,13 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
         || num_points == 0U
         || !omc_exif_make_subifd_name("mk_canon", "afinfo2", 0U, ifd_name,
                                       sizeof(ifd_name))) {
+        free(raw_copy);
         return 1;
     }
 
     count = num_points;
     if (raw.size < (omc_u64)(16U + (count * 8U) + 4U)) {
+        free(raw_copy);
         return 1;
     }
 
@@ -6816,6 +7085,7 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
                                                 value16);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
         status = omc_exif_emit_derived_exif_u16(ctx, ifd_name,
@@ -6823,6 +7093,7 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
                                                 8U + i, value16);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
     }
@@ -6833,6 +7104,7 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
         count * 2U, count);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
     status = omc_exif_emit_derived_exif_array_copy(
@@ -6840,6 +7112,7 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
         raw.data + off_bytes + (count * 2U), count * 2U, count);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
     status = omc_exif_emit_derived_exif_array_copy(
@@ -6847,6 +7120,7 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
         raw.data + off_bytes + (count * 4U), count * 2U, count);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
     status = omc_exif_emit_derived_exif_array_copy(
@@ -6854,6 +7128,7 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
         raw.data + off_bytes + (count * 6U), count * 2U, count);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
     status = omc_exif_emit_derived_exif_array_copy(
@@ -6861,6 +7136,7 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
         count * 2U, count);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
     status = omc_exif_emit_derived_exif_array_copy(
@@ -6868,6 +7144,7 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
         raw.data + off_bytes + (count * 2U), count * 2U, count);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
     status = omc_exif_emit_derived_exif_array_copy(
@@ -6875,6 +7152,7 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
         raw.data + off_bytes + (count * 4U), count * 2U, count);
     if (status != OMC_EXIF_OK) {
         omc_exif_update_status(&ctx->res, status);
+        free(raw_copy);
         return 0;
     }
     status = omc_exif_emit_derived_exif_array_copy(
@@ -6891,12 +7169,14 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
                                                 value16);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
         status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x260CU, 25U,
                                                 value16);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
     }
@@ -6907,12 +7187,14 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
                                                 value16);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
         status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x260DU, 27U,
                                                 value16);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
     }
@@ -6923,16 +7205,19 @@ omc_exif_decode_canon_afinfo2(omc_exif_ctx* ctx)
                                                 value16);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
         status = omc_exif_emit_derived_exif_u16(ctx, ifd_name, 0x260EU, 29U,
                                                 value16);
         if (status != OMC_EXIF_OK) {
             omc_exif_update_status(&ctx->res, status);
+            free(raw_copy);
             return 0;
         }
     }
 
+    free(raw_copy);
     return 1;
 }
 

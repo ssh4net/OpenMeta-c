@@ -16,6 +16,7 @@ typedef struct omc_arena {
     omc_u8* data;
     omc_size size;
     omc_size capacity;
+    void* retired_blocks;
 } omc_arena;
 
 OMC_API void

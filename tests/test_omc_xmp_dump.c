@@ -1,7 +1,7 @@
 #include "omc/omc_edit.h"
 #include "omc/omc_xmp_dump.h"
 
-#include <assert.h>
+#include "omc_test_assert.h"
 #include <string.h>
 
 static omc_byte_ref
