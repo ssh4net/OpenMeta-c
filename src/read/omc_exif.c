@@ -5635,9 +5635,9 @@ omc_exif_decode_nikon_binary_subdirs(omc_exif_ctx* ctx)
                                                            0x0014U, 0x0015U,
                                                            0x001BU, 0x001DU,
                                                            0x0027U };
-        static const omc_u16 k_flashinfo0106_u8_tags[] = { 0x000CU, 0x000DU,
-                                                           0x000EU, 0x000FU,
-                                                           0x0010U };
+        static const omc_u16 k_flashinfo0106_u8_tags[] = { 0x0009U, 0x000CU,
+                                                           0x000DU, 0x000EU,
+                                                           0x000FU, 0x0010U };
         static const omc_u16 k_flashinfo0106_i8_tags[] = { 0x0027U, 0x0028U,
                                                            0x0029U, 0x002AU };
         static const omc_u16 k_flashinfo0107_u8_tags[] = { 0x000CU, 0x000DU,

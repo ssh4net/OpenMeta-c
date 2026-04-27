@@ -39,10 +39,21 @@ typedef struct omc_exif_write_u16 {
     int present;
 } omc_exif_write_u16;
 
+typedef struct omc_exif_write_u32 {
+    omc_u32 value;
+    int present;
+} omc_exif_write_u32;
+
 typedef struct omc_exif_write_u8 {
     omc_u8 value;
     int present;
 } omc_exif_write_u8;
+
+typedef struct omc_exif_write_u16_array8 {
+    omc_u16 value[8];
+    omc_u32 count;
+    int present;
+} omc_exif_write_u16_array8;
 
 typedef struct omc_exif_write_u8_array4 {
     omc_u8 value[4];
@@ -65,6 +76,15 @@ typedef struct omc_exif_write_urational_quad {
 } omc_exif_write_urational_quad;
 
 typedef struct omc_exif_write_fields {
+    omc_exif_write_u32 image_width;
+    omc_exif_write_u32 image_length;
+    omc_exif_write_u16_array8 bits_per_sample;
+    omc_exif_write_u16 compression;
+    omc_exif_write_u16 photometric_interpretation;
+    omc_exif_write_u16 orientation;
+    omc_exif_write_u16 samples_per_pixel;
+    omc_exif_write_u16 planar_configuration;
+    omc_exif_write_u16_array8 sample_format;
     omc_exif_write_text make;
     omc_exif_write_text model;
     omc_exif_write_text date_time;
@@ -77,6 +97,9 @@ typedef struct omc_exif_write_fields {
     omc_exif_write_urational exposure_time;
     omc_exif_write_urational fnumber;
     omc_exif_write_urational focal_length;
+    omc_exif_write_u16 color_space;
+    omc_exif_write_u32 pixel_x_dimension;
+    omc_exif_write_u32 pixel_y_dimension;
     omc_exif_write_urational_quad lens_specification;
     omc_exif_write_text interop_index;
     omc_exif_write_u8_array4 gps_version;
@@ -508,6 +531,72 @@ omc_exif_write_u16_from_value(const omc_val* value, omc_exif_write_u16* out)
 }
 
 static int
+omc_exif_write_u32_from_value(const omc_val* value, omc_exif_write_u32* out)
+{
+    if (value == (const omc_val*)0 || out == (omc_exif_write_u32*)0) {
+        return 0;
+    }
+    if (value->kind != OMC_VAL_SCALAR) {
+        return 0;
+    }
+
+    if ((value->elem_type == OMC_ELEM_U16
+         || value->elem_type == OMC_ELEM_U32
+         || value->elem_type == OMC_ELEM_U64)
+        && value->u.u64 <= 0xFFFFFFFFU) {
+        out->value = (omc_u32)value->u.u64;
+        out->present = 1;
+        return 1;
+    }
+    return 0;
+}
+
+static int
+omc_exif_write_u16_array8_from_value(const omc_store* store,
+                                     const omc_val* value,
+                                     omc_exif_write_u16_array8* out)
+{
+    omc_const_bytes view;
+    omc_u32 i;
+
+    if (store == (const omc_store*)0 || value == (const omc_val*)0
+        || out == (omc_exif_write_u16_array8*)0) {
+        return 0;
+    }
+    memset(out, 0, sizeof(*out));
+    if (value->kind == OMC_VAL_SCALAR) {
+        omc_exif_write_u16 scalar;
+
+        if (!omc_exif_write_u16_from_value(value, &scalar)) {
+            return 0;
+        }
+        out->value[0] = scalar.value;
+        out->count = 1U;
+        out->present = 1;
+        return 1;
+    }
+    if (value->kind != OMC_VAL_ARRAY || value->elem_type != OMC_ELEM_U16
+        || value->count == 0U || value->count > 8U) {
+        return 0;
+    }
+
+    view = omc_arena_view(&store->arena, value->u.ref);
+    if (view.data == (const omc_u8*)0
+        || view.size < (omc_size)value->count * sizeof(omc_u16)) {
+        return 0;
+    }
+    memcpy(out->value, view.data, (omc_size)value->count * sizeof(omc_u16));
+    for (i = 0U; i < value->count; ++i) {
+        if (out->value[i] == 0U) {
+            return 0;
+        }
+    }
+    out->count = value->count;
+    out->present = 1;
+    return 1;
+}
+
+static int
 omc_exif_write_u8_from_value(const omc_val* value, omc_exif_write_u8* out)
 {
     if (value == (const omc_val*)0 || out == (omc_exif_write_u8*)0) {
@@ -808,6 +897,71 @@ omc_exif_write_find_u16_tag(const omc_store* store, const char* ifd_name,
 }
 
 static int
+omc_exif_write_find_u32_tag(const omc_store* store, const char* ifd_name,
+                            omc_u16 tag, omc_exif_write_u32* out)
+{
+    omc_size i;
+
+    if (store == (const omc_store*)0 || ifd_name == (const char*)0
+        || out == (omc_exif_write_u32*)0) {
+        return 0;
+    }
+
+    memset(out, 0, sizeof(*out));
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes ifd_view;
+
+        entry = &store->entries[i];
+        if (entry->key.kind != OMC_KEY_EXIF_TAG
+            || entry->key.u.exif_tag.tag != tag) {
+            continue;
+        }
+        ifd_view = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
+        if (!omc_exif_write_ifd_equals(ifd_view, ifd_name)) {
+            continue;
+        }
+        if (omc_exif_write_u32_from_value(&entry->value, out)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
+omc_exif_write_find_u16_array8_tag(const omc_store* store,
+                                   const char* ifd_name, omc_u16 tag,
+                                   omc_exif_write_u16_array8* out)
+{
+    omc_size i;
+
+    if (store == (const omc_store*)0 || ifd_name == (const char*)0
+        || out == (omc_exif_write_u16_array8*)0) {
+        return 0;
+    }
+
+    memset(out, 0, sizeof(*out));
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes ifd_view;
+
+        entry = &store->entries[i];
+        if (entry->key.kind != OMC_KEY_EXIF_TAG
+            || entry->key.u.exif_tag.tag != tag) {
+            continue;
+        }
+        ifd_view = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
+        if (!omc_exif_write_ifd_equals(ifd_view, ifd_name)) {
+            continue;
+        }
+        if (omc_exif_write_u16_array8_from_value(store, &entry->value, out)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
 omc_exif_write_find_urational_tag(const omc_store* store, const char* ifd_name,
                                   omc_u16 tag, omc_exif_write_urational* out)
 {
@@ -918,6 +1072,24 @@ omc_exif_write_select_fields(const omc_store* source,
 
     memset(out, 0, sizeof(*out));
     if (source != (const omc_store*)0) {
+        (void)omc_exif_write_find_u32_tag(source, "ifd0", 0x0100U,
+                                          &out->image_width);
+        (void)omc_exif_write_find_u32_tag(source, "ifd0", 0x0101U,
+                                          &out->image_length);
+        (void)omc_exif_write_find_u16_array8_tag(source, "ifd0", 0x0102U,
+                                                 &out->bits_per_sample);
+        (void)omc_exif_write_find_u16_tag(source, "ifd0", 0x0103U,
+                                          &out->compression);
+        (void)omc_exif_write_find_u16_tag(
+            source, "ifd0", 0x0106U, &out->photometric_interpretation);
+        (void)omc_exif_write_find_u16_tag(source, "ifd0", 0x0112U,
+                                          &out->orientation);
+        (void)omc_exif_write_find_u16_tag(source, "ifd0", 0x0115U,
+                                          &out->samples_per_pixel);
+        (void)omc_exif_write_find_u16_tag(source, "ifd0", 0x011CU,
+                                          &out->planar_configuration);
+        (void)omc_exif_write_find_u16_array8_tag(source, "ifd0", 0x0153U,
+                                                 &out->sample_format);
         (void)omc_exif_write_find_text_tag(source, "ifd0", 0x010FU,
                                            &out->make);
         (void)omc_exif_write_find_text_tag(source, "ifd0", 0x0110U,
@@ -942,6 +1114,12 @@ omc_exif_write_select_fields(const omc_store* source,
                                                 &out->fnumber);
         (void)omc_exif_write_find_urational_tag(source, "exififd", 0x920AU,
                                                 &out->focal_length);
+        (void)omc_exif_write_find_u16_tag(source, "exififd", 0xA001U,
+                                          &out->color_space);
+        (void)omc_exif_write_find_u32_tag(source, "exififd", 0xA002U,
+                                          &out->pixel_x_dimension);
+        (void)omc_exif_write_find_u32_tag(source, "exififd", 0xA003U,
+                                          &out->pixel_y_dimension);
         (void)omc_exif_write_find_urational_quad_tag(source, "exififd",
                                                      0xA432U,
                                                      &out->lens_specification);
@@ -1015,6 +1193,44 @@ omc_exif_write_select_fields(const omc_store* source,
         (void)omc_exif_write_find_u16_tag(source, "gpsifd", 0x001EU,
                                           &out->gps_differential);
     }
+    if (!out->image_width.present && current != (const omc_store*)0) {
+        (void)omc_exif_write_find_u32_tag(current, "ifd0", 0x0100U,
+                                          &out->image_width);
+    }
+    if (!out->image_length.present && current != (const omc_store*)0) {
+        (void)omc_exif_write_find_u32_tag(current, "ifd0", 0x0101U,
+                                          &out->image_length);
+    }
+    if (!out->bits_per_sample.present && current != (const omc_store*)0) {
+        (void)omc_exif_write_find_u16_array8_tag(
+            current, "ifd0", 0x0102U, &out->bits_per_sample);
+    }
+    if (!out->compression.present && current != (const omc_store*)0) {
+        (void)omc_exif_write_find_u16_tag(current, "ifd0", 0x0103U,
+                                          &out->compression);
+    }
+    if (!out->photometric_interpretation.present
+        && current != (const omc_store*)0) {
+        (void)omc_exif_write_find_u16_tag(
+            current, "ifd0", 0x0106U, &out->photometric_interpretation);
+    }
+    if (!out->orientation.present && current != (const omc_store*)0) {
+        (void)omc_exif_write_find_u16_tag(current, "ifd0", 0x0112U,
+                                          &out->orientation);
+    }
+    if (!out->samples_per_pixel.present && current != (const omc_store*)0) {
+        (void)omc_exif_write_find_u16_tag(current, "ifd0", 0x0115U,
+                                          &out->samples_per_pixel);
+    }
+    if (!out->planar_configuration.present
+        && current != (const omc_store*)0) {
+        (void)omc_exif_write_find_u16_tag(current, "ifd0", 0x011CU,
+                                          &out->planar_configuration);
+    }
+    if (!out->sample_format.present && current != (const omc_store*)0) {
+        (void)omc_exif_write_find_u16_array8_tag(
+            current, "ifd0", 0x0153U, &out->sample_format);
+    }
     if (!out->make.present && current != (const omc_store*)0) {
         (void)omc_exif_write_find_text_tag(current, "ifd0", 0x010FU,
                                            &out->make);
@@ -1062,6 +1278,18 @@ omc_exif_write_select_fields(const omc_store* source,
     if (!out->focal_length.present && current != (const omc_store*)0) {
         (void)omc_exif_write_find_urational_tag(current, "exififd", 0x920AU,
                                                 &out->focal_length);
+    }
+    if (!out->color_space.present && current != (const omc_store*)0) {
+        (void)omc_exif_write_find_u16_tag(current, "exififd", 0xA001U,
+                                          &out->color_space);
+    }
+    if (!out->pixel_x_dimension.present && current != (const omc_store*)0) {
+        (void)omc_exif_write_find_u32_tag(current, "exififd", 0xA002U,
+                                          &out->pixel_x_dimension);
+    }
+    if (!out->pixel_y_dimension.present && current != (const omc_store*)0) {
+        (void)omc_exif_write_find_u32_tag(current, "exififd", 0xA003U,
+                                          &out->pixel_y_dimension);
     }
     if (!out->lens_specification.present && current != (const omc_store*)0) {
         (void)omc_exif_write_find_urational_quad_tag(current, "exififd",
@@ -2742,6 +2970,8 @@ omc_exif_write_emit_tiff_payload(const omc_exif_write_fields* fields,
     omc_u32 dt_off;
     omc_u32 x_res_off;
     omc_u32 y_res_off;
+    omc_u32 bits_per_sample_off;
+    omc_u32 sample_format_off;
     omc_u32 exif_ifd_off;
     omc_u32 gps_ifd_off;
     omc_u32 interop_ifd_off;
@@ -2792,6 +3022,8 @@ omc_exif_write_emit_tiff_payload(const omc_exif_write_fields* fields,
     omc_u32 dt_count;
     omc_u32 x_res_count;
     omc_u32 y_res_count;
+    omc_u32 bits_per_sample_count;
+    omc_u32 sample_format_count;
     omc_u32 dto_count;
     omc_u32 dtd_count;
     omc_u32 exposure_count;
@@ -2837,6 +3069,33 @@ omc_exif_write_emit_tiff_payload(const omc_exif_write_fields* fields,
     ifd0_count = 0U;
     exif_count = 0U;
     gps_count = 0U;
+    if (fields->image_width.present) {
+        ifd0_count += 1U;
+    }
+    if (fields->image_length.present) {
+        ifd0_count += 1U;
+    }
+    if (fields->bits_per_sample.present) {
+        ifd0_count += 1U;
+    }
+    if (fields->compression.present) {
+        ifd0_count += 1U;
+    }
+    if (fields->photometric_interpretation.present) {
+        ifd0_count += 1U;
+    }
+    if (fields->orientation.present) {
+        ifd0_count += 1U;
+    }
+    if (fields->samples_per_pixel.present) {
+        ifd0_count += 1U;
+    }
+    if (fields->planar_configuration.present) {
+        ifd0_count += 1U;
+    }
+    if (fields->sample_format.present) {
+        ifd0_count += 1U;
+    }
     if (fields->make.present) {
         ifd0_count += 1U;
     }
@@ -2871,6 +3130,15 @@ omc_exif_write_emit_tiff_payload(const omc_exif_write_fields* fields,
         exif_count += 1U;
     }
     if (fields->focal_length.present) {
+        exif_count += 1U;
+    }
+    if (fields->color_space.present) {
+        exif_count += 1U;
+    }
+    if (fields->pixel_x_dimension.present) {
+        exif_count += 1U;
+    }
+    if (fields->pixel_y_dimension.present) {
         exif_count += 1U;
     }
     if (fields->lens_specification.present) {
@@ -2993,6 +3261,8 @@ omc_exif_write_emit_tiff_payload(const omc_exif_write_fields* fields,
     dt_off = 0U;
     x_res_off = 0U;
     y_res_off = 0U;
+    bits_per_sample_off = 0U;
+    sample_format_off = 0U;
     exif_ifd_off = 0U;
     gps_ifd_off = 0U;
     interop_ifd_off = 0U;
@@ -3081,6 +3351,28 @@ omc_exif_write_emit_tiff_payload(const omc_exif_write_fields* fields,
         }
         y_res_off = data_off;
         data_off += y_res_count;
+    }
+
+    bits_per_sample_count = fields->bits_per_sample.present
+                                ? fields->bits_per_sample.count * 2U
+                                : 0U;
+    if (fields->bits_per_sample.present && bits_per_sample_count > 4U) {
+        if (data_off > 0xFFFFFFFFU - bits_per_sample_count) {
+            return OMC_STATUS_OVERFLOW;
+        }
+        bits_per_sample_off = data_off;
+        data_off += bits_per_sample_count;
+    }
+
+    sample_format_count = fields->sample_format.present
+                              ? fields->sample_format.count * 2U
+                              : 0U;
+    if (fields->sample_format.present && sample_format_count > 4U) {
+        if (data_off > 0xFFFFFFFFU - sample_format_count) {
+            return OMC_STATUS_OVERFLOW;
+        }
+        sample_format_off = data_off;
+        data_off += sample_format_count;
     }
 
     exposure_count = fields->exposure_time.present ? 8U : 0U;
@@ -3460,6 +3752,73 @@ omc_exif_write_emit_tiff_payload(const omc_exif_write_fields* fields,
         return status;
     }
 
+    if (fields->image_width.present) {
+        memset(entry, 0, sizeof(entry));
+        omc_exif_write_store_u16le(entry + 0U, 0x0100U);
+        omc_exif_write_store_u16le(entry + 2U, 4U);
+        omc_exif_write_store_u32le(entry + 4U, 1U);
+        omc_exif_write_store_u32le(entry + 8U, fields->image_width.value);
+        status = omc_exif_write_append(out, entry, sizeof(entry));
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+    }
+    if (fields->image_length.present) {
+        memset(entry, 0, sizeof(entry));
+        omc_exif_write_store_u16le(entry + 0U, 0x0101U);
+        omc_exif_write_store_u16le(entry + 2U, 4U);
+        omc_exif_write_store_u32le(entry + 4U, 1U);
+        omc_exif_write_store_u32le(entry + 8U, fields->image_length.value);
+        status = omc_exif_write_append(out, entry, sizeof(entry));
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+    }
+    if (fields->bits_per_sample.present) {
+        omc_u32 idx;
+
+        memset(entry, 0, sizeof(entry));
+        omc_exif_write_store_u16le(entry + 0U, 0x0102U);
+        omc_exif_write_store_u16le(entry + 2U, 3U);
+        omc_exif_write_store_u32le(entry + 4U,
+                                   fields->bits_per_sample.count);
+        if (bits_per_sample_count > 4U) {
+            omc_exif_write_store_u32le(entry + 8U, bits_per_sample_off);
+        } else {
+            for (idx = 0U; idx < fields->bits_per_sample.count; ++idx) {
+                omc_exif_write_store_u16le(
+                    entry + 8U + idx * 2U,
+                    fields->bits_per_sample.value[idx]);
+            }
+        }
+        status = omc_exif_write_append(out, entry, sizeof(entry));
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+    }
+    if (fields->compression.present) {
+        memset(entry, 0, sizeof(entry));
+        omc_exif_write_store_u16le(entry + 0U, 0x0103U);
+        omc_exif_write_store_u16le(entry + 2U, 3U);
+        omc_exif_write_store_u32le(entry + 4U, 1U);
+        omc_exif_write_store_u16le(entry + 8U, fields->compression.value);
+        status = omc_exif_write_append(out, entry, sizeof(entry));
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+    }
+    if (fields->photometric_interpretation.present) {
+        memset(entry, 0, sizeof(entry));
+        omc_exif_write_store_u16le(entry + 0U, 0x0106U);
+        omc_exif_write_store_u16le(entry + 2U, 3U);
+        omc_exif_write_store_u32le(entry + 4U, 1U);
+        omc_exif_write_store_u16le(
+            entry + 8U, fields->photometric_interpretation.value);
+        status = omc_exif_write_append(out, entry, sizeof(entry));
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+    }
     if (fields->make.present) {
         memset(entry, 0, sizeof(entry));
         omc_exif_write_store_u16le(entry + 0U, 0x010FU);
@@ -3494,6 +3853,29 @@ omc_exif_write_emit_tiff_payload(const omc_exif_write_fields* fields,
             return status;
         }
     }
+    if (fields->orientation.present) {
+        memset(entry, 0, sizeof(entry));
+        omc_exif_write_store_u16le(entry + 0U, 0x0112U);
+        omc_exif_write_store_u16le(entry + 2U, 3U);
+        omc_exif_write_store_u32le(entry + 4U, 1U);
+        omc_exif_write_store_u16le(entry + 8U, fields->orientation.value);
+        status = omc_exif_write_append(out, entry, sizeof(entry));
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+    }
+    if (fields->samples_per_pixel.present) {
+        memset(entry, 0, sizeof(entry));
+        omc_exif_write_store_u16le(entry + 0U, 0x0115U);
+        omc_exif_write_store_u16le(entry + 2U, 3U);
+        omc_exif_write_store_u32le(entry + 4U, 1U);
+        omc_exif_write_store_u16le(entry + 8U,
+                                   fields->samples_per_pixel.value);
+        status = omc_exif_write_append(out, entry, sizeof(entry));
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+    }
     if (fields->x_resolution.present) {
         memset(entry, 0, sizeof(entry));
         omc_exif_write_store_u16le(entry + 0U, 0x011AU);
@@ -3516,12 +3898,46 @@ omc_exif_write_emit_tiff_payload(const omc_exif_write_fields* fields,
             return status;
         }
     }
+    if (fields->planar_configuration.present) {
+        memset(entry, 0, sizeof(entry));
+        omc_exif_write_store_u16le(entry + 0U, 0x011CU);
+        omc_exif_write_store_u16le(entry + 2U, 3U);
+        omc_exif_write_store_u32le(entry + 4U, 1U);
+        omc_exif_write_store_u16le(entry + 8U,
+                                   fields->planar_configuration.value);
+        status = omc_exif_write_append(out, entry, sizeof(entry));
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+    }
     if (fields->resolution_unit.present) {
         memset(entry, 0, sizeof(entry));
         omc_exif_write_store_u16le(entry + 0U, 0x0128U);
         omc_exif_write_store_u16le(entry + 2U, 3U);
         omc_exif_write_store_u32le(entry + 4U, 1U);
         omc_exif_write_store_u16le(entry + 8U, fields->resolution_unit.value);
+        status = omc_exif_write_append(out, entry, sizeof(entry));
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+    }
+    if (fields->sample_format.present) {
+        omc_u32 idx;
+
+        memset(entry, 0, sizeof(entry));
+        omc_exif_write_store_u16le(entry + 0U, 0x0153U);
+        omc_exif_write_store_u16le(entry + 2U, 3U);
+        omc_exif_write_store_u32le(entry + 4U,
+                                   fields->sample_format.count);
+        if (sample_format_count > 4U) {
+            omc_exif_write_store_u32le(entry + 8U, sample_format_off);
+        } else {
+            for (idx = 0U; idx < fields->sample_format.count; ++idx) {
+                omc_exif_write_store_u16le(
+                    entry + 8U + idx * 2U,
+                    fields->sample_format.value[idx]);
+            }
+        }
         status = omc_exif_write_append(out, entry, sizeof(entry));
         if (status != OMC_STATUS_OK) {
             return status;
@@ -3613,6 +4029,32 @@ omc_exif_write_emit_tiff_payload(const omc_exif_write_fields* fields,
             return status;
         }
     }
+    if (fields->bits_per_sample.present && bits_per_sample_count > 4U) {
+        omc_u8 values[16];
+        omc_u32 idx;
+
+        for (idx = 0U; idx < fields->bits_per_sample.count; ++idx) {
+            omc_exif_write_store_u16le(
+                values + idx * 2U, fields->bits_per_sample.value[idx]);
+        }
+        status = omc_exif_write_append(out, values, bits_per_sample_count);
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+    }
+    if (fields->sample_format.present && sample_format_count > 4U) {
+        omc_u8 values[16];
+        omc_u32 idx;
+
+        for (idx = 0U; idx < fields->sample_format.count; ++idx) {
+            omc_exif_write_store_u16le(
+                values + idx * 2U, fields->sample_format.value[idx]);
+        }
+        status = omc_exif_write_append(out, values, sample_format_count);
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+    }
 
     if (exif_count != 0U) {
         omc_u8 exif_count_buf[2];
@@ -3687,6 +4129,42 @@ omc_exif_write_emit_tiff_payload(const omc_exif_write_fields* fields,
             omc_exif_write_store_u16le(entry + 2U, 5U);
             omc_exif_write_store_u32le(entry + 4U, 1U);
             omc_exif_write_store_u32le(entry + 8U, focal_off);
+            status = omc_exif_write_append(out, entry, sizeof(entry));
+            if (status != OMC_STATUS_OK) {
+                return status;
+            }
+        }
+        if (fields->color_space.present) {
+            memset(entry, 0, sizeof(entry));
+            omc_exif_write_store_u16le(entry + 0U, 0xA001U);
+            omc_exif_write_store_u16le(entry + 2U, 3U);
+            omc_exif_write_store_u32le(entry + 4U, 1U);
+            omc_exif_write_store_u16le(entry + 8U,
+                                       fields->color_space.value);
+            status = omc_exif_write_append(out, entry, sizeof(entry));
+            if (status != OMC_STATUS_OK) {
+                return status;
+            }
+        }
+        if (fields->pixel_x_dimension.present) {
+            memset(entry, 0, sizeof(entry));
+            omc_exif_write_store_u16le(entry + 0U, 0xA002U);
+            omc_exif_write_store_u16le(entry + 2U, 4U);
+            omc_exif_write_store_u32le(entry + 4U, 1U);
+            omc_exif_write_store_u32le(entry + 8U,
+                                       fields->pixel_x_dimension.value);
+            status = omc_exif_write_append(out, entry, sizeof(entry));
+            if (status != OMC_STATUS_OK) {
+                return status;
+            }
+        }
+        if (fields->pixel_y_dimension.present) {
+            memset(entry, 0, sizeof(entry));
+            omc_exif_write_store_u16le(entry + 0U, 0xA003U);
+            omc_exif_write_store_u16le(entry + 2U, 4U);
+            omc_exif_write_store_u32le(entry + 4U, 1U);
+            omc_exif_write_store_u32le(entry + 8U,
+                                       fields->pixel_y_dimension.value);
             status = omc_exif_write_append(out, entry, sizeof(entry));
             if (status != OMC_STATUS_OK) {
                 return status;
@@ -8159,12 +8637,43 @@ omc_exif_write_store_has_supported_tags(const omc_store* store)
     omc_exif_write_u8 value_u8;
     omc_exif_write_u8_array4 value_u8_array4;
     omc_exif_write_u16 value_u16;
+    omc_exif_write_u16_array8 value_u16_array8;
+    omc_exif_write_u32 value_u32;
     omc_exif_write_urational value_ur;
     omc_exif_write_urational_triplet value_ur_triplet;
     omc_exif_write_urational_quad value_ur_quad;
 
     if (store == (const omc_store*)0) {
         return 0;
+    }
+    if (omc_exif_write_find_u32_tag(store, "ifd0", 0x0100U, &value_u32)) {
+        return 1;
+    }
+    if (omc_exif_write_find_u32_tag(store, "ifd0", 0x0101U, &value_u32)) {
+        return 1;
+    }
+    if (omc_exif_write_find_u16_array8_tag(store, "ifd0", 0x0102U,
+                                           &value_u16_array8)) {
+        return 1;
+    }
+    if (omc_exif_write_find_u16_tag(store, "ifd0", 0x0103U, &value_u16)) {
+        return 1;
+    }
+    if (omc_exif_write_find_u16_tag(store, "ifd0", 0x0106U, &value_u16)) {
+        return 1;
+    }
+    if (omc_exif_write_find_u16_tag(store, "ifd0", 0x0112U, &value_u16)) {
+        return 1;
+    }
+    if (omc_exif_write_find_u16_tag(store, "ifd0", 0x0115U, &value_u16)) {
+        return 1;
+    }
+    if (omc_exif_write_find_u16_tag(store, "ifd0", 0x011CU, &value_u16)) {
+        return 1;
+    }
+    if (omc_exif_write_find_u16_array8_tag(store, "ifd0", 0x0153U,
+                                           &value_u16_array8)) {
+        return 1;
     }
     if (omc_exif_write_find_text_tag(store, "ifd0", 0x010FU, &value)) {
         return 1;
@@ -8203,6 +8712,18 @@ omc_exif_write_store_has_supported_tags(const omc_store* store)
     }
     if (omc_exif_write_find_urational_tag(store, "exififd", 0x920AU,
                                           &value_ur)) {
+        return 1;
+    }
+    if (omc_exif_write_find_u16_tag(store, "exififd", 0xA001U,
+                                    &value_u16)) {
+        return 1;
+    }
+    if (omc_exif_write_find_u32_tag(store, "exififd", 0xA002U,
+                                    &value_u32)) {
+        return 1;
+    }
+    if (omc_exif_write_find_u32_tag(store, "exififd", 0xA003U,
+                                    &value_u32)) {
         return 1;
     }
     if (omc_exif_write_find_urational_quad_tag(store, "exififd", 0xA432U,

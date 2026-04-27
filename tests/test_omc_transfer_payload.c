@@ -36,6 +36,145 @@ write_u64be_at(omc_u8* out, omc_size off, omc_u64 value)
     out[off + 7U] = (omc_u8)(value & 0xFFU);
 }
 
+static omc_u16
+read_u16le(const omc_u8* data)
+{
+    return (omc_u16)(((omc_u16)data[1] << 8) | (omc_u16)data[0]);
+}
+
+static omc_u32
+read_u32le(const omc_u8* data)
+{
+    return ((omc_u32)data[3] << 24) | ((omc_u32)data[2] << 16)
+           | ((omc_u32)data[1] << 8) | (omc_u32)data[0];
+}
+
+static int
+find_tiff_tag_entry_le(omc_const_bytes exif_payload, omc_u32 ifd_off,
+                       omc_u16 tag, omc_u16* out_type,
+                       omc_u32* out_count, omc_u32* out_value)
+{
+    omc_size tiff_off;
+    omc_size count_off;
+    omc_size entry_off;
+    omc_u16 count;
+    omc_u16 i;
+
+    if (exif_payload.data == (const omc_u8*)0 || exif_payload.size < 14U
+        || memcmp(exif_payload.data, "Exif\0\0", 6U) != 0) {
+        return 0;
+    }
+    tiff_off = 6U;
+    if (exif_payload.data[tiff_off + 0U] != (omc_u8)'I'
+        || exif_payload.data[tiff_off + 1U] != (omc_u8)'I'
+        || read_u16le(exif_payload.data + tiff_off + 2U) != 42U) {
+        return 0;
+    }
+    if ((omc_u64)tiff_off + (omc_u64)ifd_off + 2U
+        > (omc_u64)exif_payload.size) {
+        return 0;
+    }
+    count_off = tiff_off + ifd_off;
+    count = read_u16le(exif_payload.data + count_off);
+    entry_off = count_off + 2U;
+    if ((omc_u64)entry_off + (omc_u64)count * 12U + 4U
+        > (omc_u64)exif_payload.size) {
+        return 0;
+    }
+    for (i = 0U; i < count; ++i) {
+        omc_size off;
+
+        off = entry_off + (omc_size)i * 12U;
+        if (read_u16le(exif_payload.data + off) != tag) {
+            continue;
+        }
+        if (out_type != (omc_u16*)0) {
+            *out_type = read_u16le(exif_payload.data + off + 2U);
+        }
+        if (out_count != (omc_u32*)0) {
+            *out_count = read_u32le(exif_payload.data + off + 4U);
+        }
+        if (out_value != (omc_u32*)0) {
+            *out_value = read_u32le(exif_payload.data + off + 8U);
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static int
+find_ifd0_tag_entry_le(omc_const_bytes exif_payload, omc_u16 tag,
+                       omc_u16* out_type, omc_u32* out_count,
+                       omc_u32* out_value)
+{
+    omc_u32 ifd0_off;
+
+    if (exif_payload.size < 14U) {
+        return 0;
+    }
+    ifd0_off = read_u32le(exif_payload.data + 10U);
+    return find_tiff_tag_entry_le(exif_payload, ifd0_off, tag, out_type,
+                                  out_count, out_value);
+}
+
+static int
+find_exif_ifd_tag_entry_le(omc_const_bytes exif_payload, omc_u16 tag,
+                           omc_u16* out_type, omc_u32* out_count,
+                           omc_u32* out_value)
+{
+    omc_u16 type;
+    omc_u32 count;
+    omc_u32 exif_ifd_off;
+
+    if (!find_ifd0_tag_entry_le(exif_payload, 0x8769U, &type, &count,
+                                &exif_ifd_off)) {
+        return 0;
+    }
+    if (type != 4U || count != 1U) {
+        return 0;
+    }
+    return find_tiff_tag_entry_le(exif_payload, exif_ifd_off, tag, out_type,
+                                  out_count, out_value);
+}
+
+static int
+read_u16_array_tag_le(omc_const_bytes exif_payload, omc_u16 tag,
+                      omc_u16* out_values, omc_u32 value_cap,
+                      omc_u32* out_count)
+{
+    omc_u16 type;
+    omc_u32 count;
+    omc_u32 value_or_offset;
+    omc_size tiff_off;
+    omc_size data_off;
+    omc_u32 i;
+
+    if (out_values == (omc_u16*)0 || out_count == (omc_u32*)0
+        || !find_ifd0_tag_entry_le(exif_payload, tag, &type, &count,
+                                   &value_or_offset)
+        || type != 3U || count > value_cap) {
+        return 0;
+    }
+    *out_count = count;
+    if (count <= 2U) {
+        for (i = 0U; i < count; ++i) {
+            out_values[i] = (omc_u16)((value_or_offset >> (i * 16U))
+                                      & 0xFFFFU);
+        }
+        return 1;
+    }
+    tiff_off = 6U;
+    data_off = tiff_off + (omc_size)value_or_offset;
+    if ((omc_u64)data_off + (omc_u64)count * 2U
+        > (omc_u64)exif_payload.size) {
+        return 0;
+    }
+    for (i = 0U; i < count; ++i) {
+        out_values[i] = read_u16le(exif_payload.data + data_off + i * 2U);
+    }
+    return 1;
+}
+
 static void
 build_test_icc_blob(omc_u8* out, omc_size size)
 {
@@ -150,6 +289,35 @@ add_test_exif_entry(omc_store* store, const char* value_text)
                           0x010FU);
     omc_val_make_text(&entry.value, append_cstr(&store->arena, value_text),
                       OMC_TEXT_ASCII);
+    status = omc_store_add_entry(store, &entry, NULL);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+}
+
+static void
+add_exif_u32_entry(omc_store* store, const char* ifd, omc_u16 tag,
+                   omc_u32 value)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_exif_tag(&entry.key, append_cstr(&store->arena, ifd), tag);
+    omc_val_make_u32(&entry.value, value);
+    status = omc_store_add_entry(store, &entry, NULL);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+}
+
+static void
+add_xmp_u32_entry(omc_store* store, const char* ns, const char* path,
+                  omc_u32 value)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(&entry.key, append_cstr(&store->arena, ns),
+                              append_cstr(&store->arena, path));
+    omc_val_make_u32(&entry.value, value);
     status = omc_store_add_entry(store, &entry, NULL);
     OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
 }
@@ -481,6 +649,155 @@ test_transfer_payload_build_jpeg_roundtrip_and_replay(void)
 }
 
 static void
+test_transfer_payload_target_image_spec_filters_stale_layout(void)
+{
+    static const char k_ns_tiff[] = "http://ns.adobe.com/tiff/1.0/";
+    static const char k_ns_exif[] = "http://ns.adobe.com/exif/1.0/";
+    omc_store store;
+    omc_arena storage;
+    omc_transfer_payload_build_opts opts;
+    omc_transfer_payload_batch batch;
+    omc_transfer_payload_io_res io_res;
+    omc_const_bytes exif_payload;
+    omc_const_bytes xmp_payload;
+    omc_u16 type;
+    omc_u32 count;
+    omc_u32 value;
+    omc_u16 values[3];
+    omc_u32 values_count;
+    omc_status status;
+
+    omc_store_init(&store);
+    omc_arena_init(&storage);
+
+    add_test_exif_entry(&store, "Target Camera");
+    add_exif_u32_entry(&store, "ifd0", 0x0100U, 999U);
+    add_exif_u32_entry(&store, "ifd0", 0x0101U, 999U);
+    add_exif_u32_entry(&store, "exififd", 0xA002U, 999U);
+    add_xmp_u32_entry(&store, k_ns_tiff, "ImageWidth", 999U);
+    add_xmp_u32_entry(&store, k_ns_exif, "ExifImageWidth", 999U);
+
+    omc_transfer_payload_build_opts_init(&opts);
+    opts.format = OMC_SCAN_FMT_JPEG;
+    opts.include_icc = 0;
+    opts.include_iptc = 0;
+    opts.include_jumbf = 0;
+    opts.target_image_spec.has_dimensions = 1;
+    opts.target_image_spec.width = 640U;
+    opts.target_image_spec.height = 480U;
+    opts.target_image_spec.has_orientation = 1;
+    opts.target_image_spec.orientation = 1U;
+    opts.target_image_spec.has_samples_per_pixel = 1;
+    opts.target_image_spec.samples_per_pixel = 3U;
+    opts.target_image_spec.bits_per_sample_count = 1U;
+    opts.target_image_spec.bits_per_sample[0] = 8U;
+    opts.target_image_spec.sample_format_count = 1U;
+    opts.target_image_spec.sample_format[0] = 1U;
+    opts.target_image_spec.has_photometric_interpretation = 1;
+    opts.target_image_spec.photometric_interpretation = 2U;
+    opts.target_image_spec.has_planar_configuration = 1;
+    opts.target_image_spec.planar_configuration = 1U;
+    opts.target_image_spec.has_exif_color_space = 1;
+    opts.target_image_spec.exif_color_space = 1U;
+
+    status = omc_transfer_payload_batch_build(&store, &opts, &storage, &batch,
+                                              &io_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
+    OMC_TEST_REQUIRE_U64_EQ(batch.payload_count, 2U);
+    OMC_TEST_REQUIRE_U64_EQ(batch.payloads[0].semantic_kind,
+                            OMC_TRANSFER_SEMANTIC_EXIF);
+    OMC_TEST_REQUIRE_U64_EQ(batch.payloads[1].semantic_kind,
+                            OMC_TRANSFER_SEMANTIC_XMP);
+
+    exif_payload = batch.payloads[0].payload;
+    xmp_payload = batch.payloads[1].payload;
+
+    OMC_TEST_REQUIRE(find_ifd0_tag_entry_le(exif_payload, 0x0100U, &type,
+                                            &count, &value));
+    OMC_TEST_CHECK_U64_EQ(type, 4U);
+    OMC_TEST_CHECK_U64_EQ(count, 1U);
+    OMC_TEST_CHECK_U64_EQ(value, 640U);
+    OMC_TEST_REQUIRE(find_ifd0_tag_entry_le(exif_payload, 0x0101U, &type,
+                                            &count, &value));
+    OMC_TEST_CHECK_U64_EQ(value, 480U);
+    OMC_TEST_REQUIRE(find_ifd0_tag_entry_le(exif_payload, 0x0112U, &type,
+                                            &count, &value));
+    OMC_TEST_CHECK_U64_EQ((omc_u16)(value & 0xFFFFU), 1U);
+    OMC_TEST_REQUIRE(find_ifd0_tag_entry_le(exif_payload, 0x0115U, &type,
+                                            &count, &value));
+    OMC_TEST_CHECK_U64_EQ((omc_u16)(value & 0xFFFFU), 3U);
+    OMC_TEST_REQUIRE(read_u16_array_tag_le(exif_payload, 0x0102U, values, 3U,
+                                           &values_count));
+    OMC_TEST_CHECK_U64_EQ(values_count, 3U);
+    OMC_TEST_CHECK_U64_EQ(values[0], 8U);
+    OMC_TEST_CHECK_U64_EQ(values[1], 8U);
+    OMC_TEST_CHECK_U64_EQ(values[2], 8U);
+    OMC_TEST_REQUIRE(read_u16_array_tag_le(exif_payload, 0x0153U, values, 3U,
+                                           &values_count));
+    OMC_TEST_CHECK_U64_EQ(values_count, 3U);
+    OMC_TEST_CHECK_U64_EQ(values[0], 1U);
+    OMC_TEST_CHECK_U64_EQ(values[1], 1U);
+    OMC_TEST_CHECK_U64_EQ(values[2], 1U);
+    OMC_TEST_REQUIRE(find_ifd0_tag_entry_le(exif_payload, 0x0106U, &type,
+                                            &count, &value));
+    OMC_TEST_CHECK_U64_EQ((omc_u16)(value & 0xFFFFU), 2U);
+    OMC_TEST_REQUIRE(find_ifd0_tag_entry_le(exif_payload, 0x011CU, &type,
+                                            &count, &value));
+    OMC_TEST_CHECK_U64_EQ((omc_u16)(value & 0xFFFFU), 1U);
+    OMC_TEST_REQUIRE(find_exif_ifd_tag_entry_le(exif_payload, 0xA002U, &type,
+                                                &count, &value));
+    OMC_TEST_CHECK_U64_EQ(value, 640U);
+    OMC_TEST_REQUIRE(find_exif_ifd_tag_entry_le(exif_payload, 0xA003U, &type,
+                                                &count, &value));
+    OMC_TEST_CHECK_U64_EQ(value, 480U);
+    OMC_TEST_REQUIRE(find_exif_ifd_tag_entry_le(exif_payload, 0xA001U, &type,
+                                                &count, &value));
+    OMC_TEST_CHECK_U64_EQ((omc_u16)(value & 0xFFFFU), 1U);
+
+    OMC_TEST_CHECK(bytes_contains(xmp_payload,
+                                  "<tiff:ImageWidth>640</tiff:ImageWidth>"));
+    OMC_TEST_CHECK(bytes_contains(xmp_payload,
+                                  "<tiff:ImageHeight>480</tiff:ImageHeight>"));
+    OMC_TEST_CHECK(bytes_contains(xmp_payload,
+                                  "<exif:ExifImageWidth>640</exif:ExifImageWidth>"));
+    OMC_TEST_CHECK(bytes_contains(xmp_payload,
+                                  "<exif:ExifImageHeight>480</exif:ExifImageHeight>"));
+    OMC_TEST_CHECK(bytes_contains(xmp_payload,
+                                  "<exif:ColorSpace>sRGB</exif:ColorSpace>"));
+    OMC_TEST_CHECK(!bytes_contains(xmp_payload, ">999<"));
+
+    omc_arena_fini(&storage);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_payload_target_image_spec_rejects_invalid(void)
+{
+    omc_store store;
+    omc_arena storage;
+    omc_transfer_payload_build_opts opts;
+    omc_transfer_payload_batch batch;
+    omc_transfer_payload_io_res io_res;
+    omc_status status;
+
+    omc_store_init(&store);
+    omc_arena_init(&storage);
+
+    omc_transfer_payload_build_opts_init(&opts);
+    opts.target_image_spec.has_dimensions = 1;
+    opts.target_image_spec.width = 0U;
+    opts.target_image_spec.height = 480U;
+    status = omc_transfer_payload_batch_build(&store, &opts, &storage, &batch,
+                                              &io_res);
+    OMC_TEST_CHECK_U64_EQ(status, OMC_STATUS_INVALID_ARGUMENT);
+    OMC_TEST_CHECK_SIZE_EQ(storage.size, 0U);
+
+    omc_arena_fini(&storage);
+    omc_store_fini(&store);
+}
+
+static void
 test_transfer_payload_build_bmff_xmp_and_icc(void)
 {
     omc_store store;
@@ -756,6 +1073,8 @@ int
 main(void)
 {
     test_transfer_payload_build_jpeg_roundtrip_and_replay();
+    test_transfer_payload_target_image_spec_filters_stale_layout();
+    test_transfer_payload_target_image_spec_rejects_invalid();
     test_transfer_payload_build_bmff_xmp_and_icc();
     test_transfer_payload_build_jpeg_projected_jumbf();
     test_transfer_payload_build_jxl_projected_jumbf();

@@ -45,14 +45,24 @@ In practice:
   `JUMBF` export for `JPEG`, `JXL`, and bounded BMFF targets, using the public
   `OMTPLD01` payload-batch family on the wire while staying narrower than the
   C++ prepared-bundle surface.
+  Transfer prepare/payload/package options now also carry a target image spec
+  for target-owned dimensions, orientation, sample layout, compression, and
+  EXIF color space. The C transfer path filters stale source image-layout
+  EXIF/XMP fields before emitting target metadata, matching the C++ transfer
+  contract for this bounded EXIF/XMP lane.
 - A first serialized transfer-package batch API now also exists in C for
   bounded carrier-chunk handoff via the public `OMTPKG01` family, turning the
   current payload bridge into replayable `JPEG` segments plus inline or
-  target-typed transfer blocks for the current non-`JPEG` carriers. The wire
-  format now matches the public C++ package-batch contract, but the current C
-  builder still materializes only the bounded subset it can honestly emit from
-  the current C transfer lane, so this is not full executed package-batch
-  parity yet.
+  target-typed transfer blocks for the current non-`JPEG` carriers. The C
+  package layer can also materialize an executed output as `OMTPKG01` using
+  source-range chunks for unchanged bytes, JPEG segment chunks for changed
+  leading JPEG metadata segments, TIFF-family pointer/tail chunks for
+  append-style TIFF/DNG rewrites, PNG/WebP carrier chunks, top-level box
+  chunks for bounded JP2/JXL/HEIF/AVIF/CR3 edits, and inline chunks for
+  generic changed bytes.
+  Replay now emits zero-copy semantic package views, matching the public C++
+  package-view contract. This is still narrower than the full C++ edit-plan
+  package builder.
 - A generic persisted-artifact inspect API now exists in C for serialized
   transfer payload batches, transfer package batches, and `JXL` encoder
   handoffs.
@@ -145,21 +155,35 @@ This is still narrower than the C++ transfer layer. OpenMeta-c now has a real
 prepared-transfer / file-persistence lane for bounded XMP writeback, but it
 does not yet match the C++ target breadth, stability, or host-adapter surface.
 The bounded BMFF lane now includes direct CR3 roundtrip coverage in the C test
-suite, and the TIFF-family plus `JPEG` / `PNG` / `WebP` / `JP2` lane now
-includes direct bounded ICC carrier rewrite. `JPEG` now has a real direct
-bounded `APP13` IPTC transfer path that preserves unrelated Photoshop IRB
-resources, and the TIFF-family now has direct bounded tag `33723` IPTC
-carriage as well. For `JXL`, the first host-side bridge is now a stable
-serialized encoder ICC handoff API rather than an in-place ICC rewrite path.
+suite, and the TIFF-family plus `JPEG` / `PNG` / `WebP` / `JP2` /
+`HEIF` / `AVIF` / `CR3` lane now includes direct bounded ICC carrier rewrite.
+Direct BMFF XMP/EXIF writeback also now emits bounded `iref/cdsc` metadata
+item references when the target exposes a primary item through `pitm`, with
+direct C coverage for both replacing existing metadata items and extending a
+primary-only `meta` item graph through `iinf`, `iloc`, and `idat`.
+`JPEG` now has a real direct bounded `APP13` IPTC transfer path that preserves
+unrelated Photoshop IRB resources, and the TIFF-family now has direct bounded
+tag `33723` IPTC carriage as well. For `JXL`, the first host-side bridge is now
+a stable serialized encoder ICC handoff API rather than an in-place ICC rewrite
+path.
 On top of that, `OpenMeta-c` now has a first serialized transfer-payload batch
 surface for bounded `EXIF` / `XMP` / `ICC` / `IPTC` carrier export across `JPEG`,
 `TIFF` / `DNG`, `PNG`, `WebP`, `JP2`, `JXL`, and bounded BMFF targets, plus
 projected non-`C2PA` `JUMBF` carrier export for `JPEG`, `JXL`, and bounded
-BMFF targets. That payload bridge now has a bounded `OMTPKG01` package-batch
-layer above it for replayable carrier chunks. The C wire layout now matches
-the public C++ package-batch family, but the current C builder still emits
-only the subset it can derive from the current bounded transfer lane rather
-than the broader executed prepared-bundle surface.
+BMFF targets. That bridge now accepts target-owned image properties and filters
+stale source image-layout EXIF/XMP fields before payload/package emission.
+That payload bridge now has a bounded `OMTPKG01` package-batch
+layer above it for replayable carrier chunks, plus a first executed-output
+materializer that packages final edited bytes with source-range and inline
+chunks, and now emits format-aware JPEG segment chunks for changed leading JPEG
+metadata plus TIFF-family pointer/tail chunks for append-style TIFF/DNG
+rewrites, PNG/WebP carrier chunks, and top-level box chunks for bounded
+JP2/JXL/HEIF/AVIF/CR3 edits, with direct arena and bounded-buffer helpers to
+materialize either a validated package batch or persisted `OMTPKG01` bytes back
+into final output bytes. The C wire layout and replay view now match the public
+C++ package-batch family, but the C builder still does not expose the full C++
+edit-plan package builder or the newer C++ foreign BMFF top-level `meta`
+item-graph merge.
 
 ## Layout
 
@@ -251,11 +275,21 @@ For bounded serialized transfer payloads:
 For bounded serialized transfer package batches:
 - use `omc_transfer_package_batch_build(...)` to build replayable carrier
   chunks from one `omc_store`
+- use `omc_transfer_package_batch_build_executed_output(...)` to package a
+  completed `omc_transfer_execute(...)` edited output as `OMTPKG01`
 - use `omc_transfer_package_batch_serialize(...)` and
   `omc_transfer_package_batch_deserialize(...)` to persist and reload that
   package batch
-- use `omc_transfer_package_batch_replay(...)` to drive a host-side sink in
-  stable chunk order
+- use `omc_transfer_package_batch_materialize_to_buffer(...)` when the caller
+  owns the final output buffer and wants no hidden allocation
+- use `omc_transfer_package_batch_materialize(...)` when a caller wants the
+  package bytes concatenated into one caller-owned arena
+- use `omc_transfer_package_bytes_materialize_to_buffer(...)` when the caller
+  has persisted `OMTPKG01` bytes and explicit temporary storage
+- use `omc_transfer_package_batch_collect_views(...)` to collect zero-copy
+  semantic views over package chunks into caller-owned storage
+- use `omc_transfer_package_batch_replay(...)` to drive a host-side semantic
+  package-view sink in stable chunk order
 
 For persisted transfer artifacts:
 - use `omc_transfer_artifact_inspect(...)` to identify one persisted artifact
@@ -268,6 +302,12 @@ For persisted transfer artifacts:
 The largest remaining gaps relative to the C++ library are:
 
 - transfer stability and parity coverage across the newer bounded targets
+- C++ foreign BMFF top-level `meta` merge parity for serialized package-batch
+  prepared item routes; C currently has bounded direct BMFF XMP/EXIF/ICC
+  writeback, direct `iref/cdsc` references for primary-item BMFF targets,
+  direct Exif/XMP item-graph replacement/extension coverage, and
+  executed-output package chunking. Full package-batch foreign item-graph merge
+  remains open, with JUMBF/C2PA staged behind Exif/XMP.
 - `EXR` transfer / host-export parity
 - full validation parity beyond the current decode-summary + bounded `CCM`
   helper surface

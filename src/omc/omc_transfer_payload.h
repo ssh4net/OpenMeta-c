@@ -73,6 +73,7 @@ typedef struct omc_transfer_payload_batch {
 
 typedef struct omc_transfer_payload_build_opts {
     omc_scan_fmt format;
+    omc_transfer_target_image_spec target_image_spec;
     int include_exif;
     int include_xmp;
     int include_icc;

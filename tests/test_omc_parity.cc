@@ -15190,6 +15190,45 @@ main(int argc, char** argv)
              && ok;
     }
     }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        ok = run_transfer_execute_case(
+                 "transfer_jpeg_embedded_and_sidecar",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_jpeg_fixture("OldTool", true),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        ok = run_transfer_execute_case(
+                 "transfer_png_embedded_and_sidecar",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_png_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.existing_embedded_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_execute_case(
+                 "transfer_png_existing_embedded_embedded_only_source_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_png_fixture("Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
     ok = run_case("jumbf_verify_not_requested",
                   build_jumbf_verify_scaffold_requested_fixture(), false)
          && ok;

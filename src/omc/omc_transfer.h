@@ -49,9 +49,36 @@ typedef enum omc_dng_target_mode {
     OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD = 2
 } omc_dng_target_mode;
 
+enum {
+    OMC_TRANSFER_TARGET_IMAGE_SPEC_MAX_SAMPLES = 8U
+};
+
+typedef struct omc_transfer_target_image_spec {
+    int has_dimensions;
+    omc_u32 width;
+    omc_u32 height;
+    int has_orientation;
+    omc_u16 orientation;
+    int has_samples_per_pixel;
+    omc_u16 samples_per_pixel;
+    omc_u16 bits_per_sample_count;
+    omc_u16 bits_per_sample[OMC_TRANSFER_TARGET_IMAGE_SPEC_MAX_SAMPLES];
+    omc_u16 sample_format_count;
+    omc_u16 sample_format[OMC_TRANSFER_TARGET_IMAGE_SPEC_MAX_SAMPLES];
+    int has_photometric_interpretation;
+    omc_u16 photometric_interpretation;
+    int has_planar_configuration;
+    omc_u16 planar_configuration;
+    int has_compression;
+    omc_u16 compression;
+    int has_exif_color_space;
+    omc_u16 exif_color_space;
+} omc_transfer_target_image_spec;
+
 typedef struct omc_transfer_prepare_opts {
     omc_scan_fmt format;
     omc_dng_target_mode dng_target_mode;
+    omc_transfer_target_image_spec target_image_spec;
     omc_xmp_writeback_mode writeback_mode;
     omc_xmp_destination_embedded_mode destination_embedded_mode;
     const omc_store* existing_sidecar_xmp_store;
@@ -70,6 +97,7 @@ typedef struct omc_transfer_bundle {
     omc_transfer_status status;
     omc_scan_fmt format;
     omc_dng_target_mode dng_target_mode;
+    omc_transfer_target_image_spec target_image_spec;
     omc_xmp_writeback_mode writeback_mode;
     omc_xmp_destination_embedded_mode destination_embedded_mode;
     omc_transfer_embedded_action embedded_action;
@@ -98,6 +126,7 @@ typedef struct omc_transfer_exec {
     omc_transfer_status status;
     omc_scan_fmt format;
     omc_dng_target_mode dng_target_mode;
+    omc_transfer_target_image_spec target_image_spec;
     omc_xmp_writeback_mode writeback_mode;
     omc_u32 route_count;
     omc_transfer_route routes[2];
@@ -124,6 +153,10 @@ typedef struct omc_transfer_res {
     omc_xmp_write_res embedded;
     omc_xmp_dump_res sidecar;
 } omc_transfer_res;
+
+OMC_API void
+omc_transfer_target_image_spec_init(
+    omc_transfer_target_image_spec* spec);
 
 OMC_API void
 omc_transfer_prepare_opts_init(omc_transfer_prepare_opts* opts);

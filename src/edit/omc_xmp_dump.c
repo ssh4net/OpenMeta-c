@@ -113,12 +113,16 @@ static const char k_prop_make[] = "Make";
 static const char k_prop_model[] = "Model";
 static const char k_prop_datetime[] = "DateTime";
 static const char k_prop_compression[] = "Compression";
+static const char k_prop_image_width[] = "ImageWidth";
 static const char k_prop_image_length[] = "ImageLength";
 static const char k_prop_image_height[] = "ImageHeight";
+static const char k_prop_bits_per_sample[] = "BitsPerSample";
 static const char k_prop_orientation[] = "Orientation";
 static const char k_prop_photometric_interpretation[]
     = "PhotometricInterpretation";
+static const char k_prop_samples_per_pixel[] = "SamplesPerPixel";
 static const char k_prop_planar_configuration[] = "PlanarConfiguration";
+static const char k_prop_sample_format[] = "SampleFormat";
 static const char k_prop_resolution_unit[] = "ResolutionUnit";
 static const char k_prop_ycbcr_positioning[] = "YCbCrPositioning";
 static const char k_prop_exposure_time[] = "ExposureTime";
@@ -1689,7 +1693,28 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
     tag = store->entries[index].key.u.exif_tag.tag;
     value_mode = OMC_XMP_DUMP_VALUE_NORMAL;
     if (omc_xmp_dump_view_equal_lit(ifd_name, "ifd0")) {
-        if (tag == 0x0103U) {
+        if (tag == 0x0100U) {
+            schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_tiff);
+            property_name = omc_xmp_dump_view_from_lit(k_prop_image_width);
+            if (!omc_xmp_dump_scalar_or_text_supported(
+                    &store->entries[index].value, &store->arena)) {
+                return 0;
+            }
+        } else if (tag == 0x0101U) {
+            schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_tiff);
+            property_name = omc_xmp_dump_view_from_lit(k_prop_image_height);
+            if (!omc_xmp_dump_scalar_or_text_supported(
+                    &store->entries[index].value, &store->arena)) {
+                return 0;
+            }
+        } else if (tag == 0x0102U) {
+            schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_tiff);
+            property_name = omc_xmp_dump_view_from_lit(k_prop_bits_per_sample);
+            if (!omc_xmp_dump_scalar_or_text_supported(
+                    &store->entries[index].value, &store->arena)) {
+                return 0;
+            }
+        } else if (tag == 0x0103U) {
             schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_tiff);
             property_name = omc_xmp_dump_view_from_lit(k_prop_compression);
             if (!omc_xmp_dump_scalar_or_text_supported(
@@ -1725,6 +1750,14 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
                     &store->entries[index].value, &store->arena)) {
                 return 0;
             }
+        } else if (tag == 0x0115U) {
+            schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_tiff);
+            property_name = omc_xmp_dump_view_from_lit(
+                k_prop_samples_per_pixel);
+            if (!omc_xmp_dump_scalar_or_text_supported(
+                    &store->entries[index].value, &store->arena)) {
+                return 0;
+            }
         } else if (tag == 0x011CU) {
             schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_tiff);
             property_name = omc_xmp_dump_view_from_lit(
@@ -1747,6 +1780,13 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
             value_mode = OMC_XMP_DUMP_VALUE_EXIF_DATE;
             if (!omc_xmp_dump_bytes_view_supported(&store->entries[index].value,
                                                    &store->arena)) {
+                return 0;
+            }
+        } else if (tag == 0x0153U) {
+            schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_tiff);
+            property_name = omc_xmp_dump_view_from_lit(k_prop_sample_format);
+            if (!omc_xmp_dump_scalar_or_text_supported(
+                    &store->entries[index].value, &store->arena)) {
                 return 0;
             }
         } else if (tag == 0xC71BU) {
@@ -1993,6 +2033,22 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
         } else if (tag == 0xA001U) {
             schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_exif);
             property_name = omc_xmp_dump_view_from_lit(k_prop_color_space);
+            if (!omc_xmp_dump_scalar_or_text_supported(
+                    &store->entries[index].value, &store->arena)) {
+                return 0;
+            }
+        } else if (tag == 0xA002U) {
+            schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_exif);
+            property_name = omc_xmp_dump_view_from_lit(
+                k_prop_exif_image_width);
+            if (!omc_xmp_dump_scalar_or_text_supported(
+                    &store->entries[index].value, &store->arena)) {
+                return 0;
+            }
+        } else if (tag == 0xA003U) {
+            schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_exif);
+            property_name = omc_xmp_dump_view_from_lit(
+                k_prop_exif_image_height);
             if (!omc_xmp_dump_scalar_or_text_supported(
                     &store->entries[index].value, &store->arena)) {
                 return 0;
