@@ -3204,7 +3204,6 @@ test_sidecar_portable_formats_common_exif_and_gps_values(void)
     status = omc_store_add_entry(&store, &entry, NULL);
     assert(status == OMC_STATUS_OK);
 
-    memset(&entry, 0, sizeof(entry));
     omc_key_make_exif_tag(&entry.key, append_bytes(&store.arena, "gpsifd"),
                           0x001DU);
     omc_val_make_text(&entry.value, append_bytes(&store.arena, "2024:04:19"),
@@ -3338,7 +3337,7 @@ test_sidecar_portable_skips_invalid_gps_values(void)
     assert(contains_text(full, (omc_size)res.written,
                          "<exif:GPSLatitudeRef>N</exif:GPSLatitudeRef>"));
     assert(contains_text(full, (omc_size)res.written,
-                         "<exif:GPSImgDirection>177.9626556</exif:GPSImgDirection>"));
+                         "<exif:GPSImgDirection>42889/241</exif:GPSImgDirection>"));
     assert(!contains_text(full, (omc_size)res.written, "<exif:GPSLatitude>"));
     assert(!contains_text(full, (omc_size)res.written, "<exif:GPSTimeStamp>"));
     assert(!contains_text(full, (omc_size)res.written, "<exif:GPSAltitude>"));
@@ -3360,6 +3359,13 @@ test_sidecar_portable_alias_and_gps_text_overrides(void)
     omc_u8 full[4096];
 
     omc_store_init(&store);
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_exif_tag(&entry.key, append_bytes(&store.arena, "ifd0"),
+                          0x8769U);
+    omc_val_make_u32(&entry.value, 98U);
+    status = omc_store_add_entry(&store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
 
     memset(&entry, 0, sizeof(entry));
     omc_key_make_exif_tag(&entry.key, append_bytes(&store.arena, "gpsifd"),
@@ -3524,12 +3530,14 @@ test_sidecar_portable_alias_and_gps_text_overrides(void)
     assert(status == OMC_STATUS_OK);
     assert(res.status == OMC_XMP_DUMP_OK);
     assert(contains_text(full, (omc_size)res.written,
+                         "<tiff:ExifTag>98</tiff:ExifTag>"));
+    assert(contains_text(full, (omc_size)res.written,
                          "<exif:GPSDateTime>2024-04-19T12:11:13Z</exif:GPSDateTime>"));
     assert(!contains_text(full, (omc_size)res.written, "<exif:GPSTimeStamp>"));
     assert(contains_text(full, (omc_size)res.written,
                          "<exif:GPSStatus>Measurement Active</exif:GPSStatus>"));
     assert(contains_text(full, (omc_size)res.written,
-                         "<exif:GPSDOP>1.5</exif:GPSDOP>"));
+                         "<exif:GPSDOP>3/2</exif:GPSDOP>"));
     assert(contains_text(full, (omc_size)res.written,
                          "<exif:GPSSpeedRef>km/h</exif:GPSSpeedRef>"));
     assert(contains_text(full, (omc_size)res.written,
@@ -3549,7 +3557,7 @@ test_sidecar_portable_alias_and_gps_text_overrides(void)
     assert(contains_text(full, (omc_size)res.written,
                          "<exif:GPSDifferential>Differential Corrected</exif:GPSDifferential>"));
     assert(contains_text(full, (omc_size)res.written,
-                         "<exif:GPSHPositioningError>2.5</exif:GPSHPositioningError>"));
+                         "<exif:GPSHPositioningError>5/2</exif:GPSHPositioningError>"));
     assert(contains_text(full, (omc_size)res.written,
                          "<exif:ColorSpace>sRGB</exif:ColorSpace>"));
     assert(contains_text(full, (omc_size)res.written,

@@ -158,11 +158,117 @@ test_decode_xmp_subset(void)
     omc_store_fini(&store);
 }
 
+static void
+test_decode_structured_resource_paths(void)
+{
+    static const char xmp[] =
+        "<x:xmpmeta xmlns:x='adobe:ns:meta/'>"
+        "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>"
+        "<rdf:Description "
+        "xmlns:Iptc4xmpCore='http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/' "
+        "xmlns:Iptc4xmpExt='http://iptc.org/std/Iptc4xmpExt/2008-02-29/' "
+        "xmlns:xmpMM='http://ns.adobe.com/xap/1.0/mm/' "
+        "xmlns:stRef='http://ns.adobe.com/xap/1.0/sType/ResourceRef#'>"
+        "<Iptc4xmpCore:CreatorContactInfo rdf:parseType='Resource'>"
+        "<Iptc4xmpCore:CiEmailWork> editor@example.test "
+        "</Iptc4xmpCore:CiEmailWork>"
+        "<Iptc4xmpCore:CiAdrRegion rdf:parseType='Resource'>"
+        "<Iptc4xmpCore:ProvinceName><rdf:Alt>"
+        "<rdf:li xml:lang='x-default'>Tokyo</rdf:li>"
+        "</rdf:Alt></Iptc4xmpCore:ProvinceName>"
+        "</Iptc4xmpCore:CiAdrRegion>"
+        "</Iptc4xmpCore:CreatorContactInfo>"
+        "<xmpMM:DerivedFrom rdf:parseType='Resource'>"
+        "<stRef:documentID>xmp.did:base</stRef:documentID>"
+        "<stRef:instanceID rdf:resource='xmp.iid:base'/>"
+        "</xmpMM:DerivedFrom>"
+        "<xmpMM:Ingredients><rdf:Seq>"
+        "<rdf:li rdf:parseType='Resource'>"
+        "<stRef:documentID>xmp.did:ingredient</stRef:documentID>"
+        "</rdf:li>"
+        "</rdf:Seq></xmpMM:Ingredients>"
+        "<Iptc4xmpExt:LocationShown><rdf:Seq>"
+        "<rdf:li rdf:parseType='Resource'>"
+        "<Iptc4xmpExt:LocationName><rdf:Alt>"
+        "<rdf:li xml:lang='x-default'>Kyoto</rdf:li>"
+        "<rdf:li xml:lang='fr-FR'>Kyoto FR</rdf:li>"
+        "</rdf:Alt></Iptc4xmpExt:LocationName>"
+        "<Iptc4xmpExt:LocationId><rdf:Bag>"
+        "<rdf:li>loc-001</rdf:li>"
+        "<rdf:li>loc-002</rdf:li>"
+        "</rdf:Bag></Iptc4xmpExt:LocationId>"
+        "</rdf:li>"
+        "</rdf:Seq></Iptc4xmpExt:LocationShown>"
+        "</rdf:Description>"
+        "</rdf:RDF>"
+        "</x:xmpmeta>";
+    omc_store store;
+    omc_xmp_res dec;
+    const char* schema;
+    const char* ext_schema;
+    const char* xmpmm_schema;
+
+    schema = "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/";
+    ext_schema = "http://iptc.org/std/Iptc4xmpExt/2008-02-29/";
+    xmpmm_schema = "http://ns.adobe.com/xap/1.0/mm/";
+    omc_store_init(&store);
+    dec = omc_xmp_dec((const omc_u8*)xmp, sizeof(xmp) - 1U, &store,
+                      OMC_INVALID_BLOCK_ID, OMC_ENTRY_FLAG_NONE,
+                      (const omc_xmp_opts*)0);
+
+    assert(dec.status == OMC_XMP_OK);
+    assert(dec.entries_decoded == 9U);
+    assert_text_value(
+        &store, find_xmp_entry(&store, schema,
+                               "CreatorContactInfo/CiEmailWork"),
+        "editor@example.test");
+    assert_text_value(
+        &store,
+        find_xmp_entry(&store, schema,
+                       "CreatorContactInfo/CiAdrRegion/ProvinceName"
+                       "[@xml:lang=x-default]"),
+        "Tokyo");
+    assert_text_value(&store,
+                      find_xmp_entry(&store, xmpmm_schema,
+                                     "DerivedFrom/stRef:documentID"),
+                      "xmp.did:base");
+    assert_text_value(&store,
+                      find_xmp_entry(&store, xmpmm_schema,
+                                     "DerivedFrom/stRef:instanceID"),
+                      "xmp.iid:base");
+    assert_text_value(&store,
+                      find_xmp_entry(&store, xmpmm_schema,
+                                     "Ingredients[1]/stRef:documentID"),
+                      "xmp.did:ingredient");
+    assert_text_value(
+        &store,
+        find_xmp_entry(&store, ext_schema,
+                       "LocationShown[1]/LocationName"
+                       "[@xml:lang=x-default]"),
+        "Kyoto");
+    assert_text_value(
+        &store,
+        find_xmp_entry(&store, ext_schema,
+                       "LocationShown[1]/LocationName[@xml:lang=fr-FR]"),
+        "Kyoto FR");
+    assert_text_value(&store,
+                      find_xmp_entry(&store, ext_schema,
+                                     "LocationShown[1]/LocationId[1]"),
+                      "loc-001");
+    assert_text_value(&store,
+                      find_xmp_entry(&store, ext_schema,
+                                     "LocationShown[1]/LocationId[2]"),
+                      "loc-002");
+
+    omc_store_fini(&store);
+}
+
 int
 main(void)
 {
     test_limit_on_overflowing_depth_cap();
     test_limit_on_overflowing_path_cap();
     test_decode_xmp_subset();
+    test_decode_structured_resource_paths();
     return omc_test_finish();
 }

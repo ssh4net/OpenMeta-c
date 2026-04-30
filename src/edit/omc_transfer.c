@@ -12238,7 +12238,7 @@ omc_transfer_prepare_opts_init(omc_transfer_prepare_opts* opts)
         OMC_TRANSFER_EXISTING_XMP_PREFER_SIDECAR;
     omc_xmp_embed_opts_init(&opts->embedded);
     opts->embedded.packet.include_existing_xmp = 1;
-    opts->embedded.packet.include_exif = 0;
+    opts->embedded.packet.include_exif = 1;
     opts->embedded.packet.include_iptc = 0;
     omc_xmp_sidecar_req_init(&opts->sidecar);
     opts->sidecar.format = OMC_XMP_SIDECAR_PORTABLE;

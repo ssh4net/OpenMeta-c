@@ -31,7 +31,8 @@ typedef enum omc_xmp_frame_kind {
     OMC_XMP_FRAME_DESC = 3,
     OMC_XMP_FRAME_PROPERTY = 4,
     OMC_XMP_FRAME_ARRAY = 5,
-    OMC_XMP_FRAME_LI = 6
+    OMC_XMP_FRAME_LI = 6,
+    OMC_XMP_FRAME_STRUCT_FIELD = 7
 } omc_xmp_frame_kind;
 
 typedef struct omc_xmp_frame {
@@ -44,10 +45,14 @@ typedef struct omc_xmp_frame {
     omc_u32 array_index;
     omc_u32 current_index;
     omc_u32 ns_mark;
+    omc_u32 path_off;
+    omc_u32 path_len;
     omc_u32 text_start;
     omc_u32 text_end;
     int saw_text;
     int had_child;
+    int has_path;
+    int parse_type_resource;
 } omc_xmp_frame;
 
 typedef struct omc_xmp_ctx {
@@ -67,7 +72,7 @@ typedef struct omc_xmp_ctx {
     omc_xmp_ns_decl* ns_decls;
     omc_u32 ns_count;
     omc_u32 ns_cap;
-    char* path_buf;
+    char* frame_path_buf;
     omc_u32 path_cap;
     int saw_xmp_shape;
     omc_u8* input_copy;
@@ -143,6 +148,29 @@ omc_xmp_u32_mul_add_fits(omc_u32 value, omc_u32 mul, omc_u32 add,
     }
 
     *out_value = value * mul + add;
+    return 1;
+}
+
+static int
+omc_xmp_u32_add3_fits(omc_u32 a, omc_u32 b, omc_u32 c, omc_u32* out_value)
+{
+    omc_u32 max_value;
+    omc_u32 tmp;
+
+    if (out_value == (omc_u32*)0) {
+        return 0;
+    }
+
+    max_value = (omc_u32)~(omc_u32)0;
+    if (a > max_value - b) {
+        return 0;
+    }
+    tmp = a + b;
+    if (tmp > max_value - c) {
+        return 0;
+    }
+
+    *out_value = tmp + c;
     return 1;
 }
 
@@ -405,6 +433,65 @@ omc_xmp_attr_find_resource(const omc_xmp_ctx* ctx, const omc_xmp_attr* attrs,
     return 0;
 }
 
+static int
+omc_xmp_attr_find_parse_type_resource(const omc_xmp_ctx* ctx,
+                                      const omc_xmp_attr* attrs,
+                                      omc_u32 attr_count)
+{
+    omc_u32 i;
+
+    for (i = 0U; i < attr_count; ++i) {
+        omc_xmp_span attr_ns;
+        omc_xmp_span value_trim;
+
+        if (attrs[i].is_xmlns || attrs[i].is_default_xmlns) {
+            continue;
+        }
+        if (!omc_xmp_lookup_ns(ctx, attrs[i].prefix, &attr_ns)) {
+            continue;
+        }
+        if (!omc_xmp_span_eq_lit(ctx, attr_ns, k_ns_rdf)
+            || !omc_xmp_span_eq_lit(ctx, attrs[i].local, "parseType")) {
+            continue;
+        }
+        omc_xmp_trim_value(ctx, attrs[i].value, &value_trim);
+        return omc_xmp_span_eq_lit(ctx, value_trim, "Resource");
+    }
+    return 0;
+}
+
+static int
+omc_xmp_attr_find_xml_lang(const omc_xmp_ctx* ctx, const omc_xmp_attr* attrs,
+                           omc_u32 attr_count, omc_xmp_span* out_value)
+{
+    omc_u32 i;
+
+    if (out_value == (omc_xmp_span*)0) {
+        return 0;
+    }
+
+    for (i = 0U; i < attr_count; ++i) {
+        if (attrs[i].is_xmlns || attrs[i].is_default_xmlns) {
+            continue;
+        }
+        if (attrs[i].prefix.len == 3U
+            && memcmp(ctx->bytes + attrs[i].prefix.off, "xml", 3U) == 0
+            && omc_xmp_span_eq_lit(ctx, attrs[i].local, "lang")) {
+            *out_value = attrs[i].value;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int
+omc_xmp_frame_has_value_path(omc_xmp_frame_kind kind)
+{
+    return kind == OMC_XMP_FRAME_PROPERTY || kind == OMC_XMP_FRAME_LI
+           || kind == OMC_XMP_FRAME_STRUCT_FIELD;
+}
+
 static omc_xmp_status
 omc_xmp_store_bytes(omc_xmp_ctx* ctx, const omc_u8* src, omc_u32 size,
                     omc_byte_ref* out_ref)
@@ -493,47 +580,250 @@ omc_xmp_emit_property_from_spans(omc_xmp_ctx* ctx, omc_xmp_span schema_ns,
                                 value_span);
 }
 
-static omc_xmp_status
-omc_xmp_emit_property_indexed(omc_xmp_ctx* ctx, omc_xmp_span schema_ns,
-                              omc_xmp_span prop_name, omc_u32 index,
-                              omc_xmp_span value_span)
+static char*
+omc_xmp_frame_path_slot(omc_xmp_ctx* ctx, omc_u32 depth)
+{
+    return ctx->frame_path_buf + ((omc_size)depth * (omc_size)ctx->path_cap);
+}
+
+static int
+omc_xmp_frame_set_path_from_span(omc_xmp_ctx* ctx, omc_xmp_frame* frame,
+                                 omc_u32 depth, omc_xmp_span path)
+{
+    char* dst;
+
+    if (path.len > ctx->opts.limits.max_path_bytes
+        || path.len > ctx->path_cap) {
+        ctx->res.status = OMC_XMP_LIMIT;
+        return 0;
+    }
+
+    dst = omc_xmp_frame_path_slot(ctx, depth);
+    if (path.len != 0U) {
+        memcpy(dst, ctx->bytes + path.off, path.len);
+    }
+    frame->path_off = depth * ctx->path_cap;
+    frame->path_len = path.len;
+    frame->has_path = 1;
+    return 1;
+}
+
+static int
+omc_xmp_frame_set_path_from_parent(omc_xmp_ctx* ctx, omc_xmp_frame* frame,
+                                   omc_u32 depth,
+                                   const omc_xmp_frame* parent)
+{
+    char* dst;
+    const char* src;
+
+    if (parent == (const omc_xmp_frame*)0 || !parent->has_path) {
+        return 0;
+    }
+    if (parent->path_len > ctx->path_cap) {
+        ctx->res.status = OMC_XMP_LIMIT;
+        return 0;
+    }
+
+    dst = omc_xmp_frame_path_slot(ctx, depth);
+    src = ctx->frame_path_buf + parent->path_off;
+    if (parent->path_len != 0U) {
+        memcpy(dst, src, parent->path_len);
+    }
+    frame->path_off = depth * ctx->path_cap;
+    frame->path_len = parent->path_len;
+    frame->has_path = 1;
+    return 1;
+}
+
+static omc_u32
+omc_xmp_count_u32_digits(omc_u32 value)
+{
+    omc_u32 count;
+
+    count = 0U;
+    do {
+        value /= 10U;
+        count += 1U;
+    } while (value != 0U);
+
+    return count;
+}
+
+static int
+omc_xmp_frame_set_path_indexed(omc_xmp_ctx* ctx, omc_xmp_frame* frame,
+                               omc_u32 depth, const omc_xmp_frame* parent,
+                               omc_u32 index)
 {
     char digits[16];
+    char* dst;
+    const char* src;
     omc_u32 digit_count;
+    omc_u32 path_len;
     omc_u32 value;
     omc_u32 pos;
     omc_u32 i;
 
-    if (ctx->path_cap == 0U) {
-        return OMC_XMP_LIMIT;
+    if (parent == (const omc_xmp_frame*)0 || !parent->has_path) {
+        return 0;
+    }
+
+    digit_count = omc_xmp_count_u32_digits(index);
+    if (!omc_xmp_u32_add3_fits(parent->path_len, digit_count, 2U,
+                               &path_len)
+        || path_len > ctx->opts.limits.max_path_bytes
+        || path_len > ctx->path_cap) {
+        ctx->res.status = OMC_XMP_LIMIT;
+        return 0;
     }
 
     value = index;
-    digit_count = 0U;
-    do {
-        digits[digit_count] = (char)('0' + (value % 10U));
+    for (i = 0U; i < digit_count; ++i) {
+        digits[digit_count - i - 1U] = (char)('0' + (value % 10U));
         value /= 10U;
-        digit_count += 1U;
-    } while (value != 0U && digit_count < (omc_u32)sizeof(digits));
+    }
 
-    if (prop_name.len + digit_count + 2U > ctx->opts.limits.max_path_bytes
-        || prop_name.len + digit_count + 2U > ctx->path_cap) {
+    dst = omc_xmp_frame_path_slot(ctx, depth);
+    src = ctx->frame_path_buf + parent->path_off;
+    if (parent->path_len != 0U) {
+        memcpy(dst, src, parent->path_len);
+    }
+    pos = parent->path_len;
+    dst[pos] = '[';
+    pos += 1U;
+    memcpy(dst + pos, digits, digit_count);
+    pos += digit_count;
+    dst[pos] = ']';
+    pos += 1U;
+
+    frame->path_off = depth * ctx->path_cap;
+    frame->path_len = pos;
+    frame->has_path = 1;
+    return 1;
+}
+
+static int
+omc_xmp_frame_set_path_lang(omc_xmp_ctx* ctx, omc_xmp_frame* frame,
+                            omc_u32 depth, const omc_xmp_frame* parent,
+                            omc_xmp_span lang)
+{
+    static const char prefix[] = "[@xml:lang=";
+    char* dst;
+    const char* src;
+    omc_u32 pos;
+    omc_u32 prefix_len;
+    omc_u32 path_len;
+
+    if (parent == (const omc_xmp_frame*)0 || !parent->has_path) {
+        return 0;
+    }
+
+    prefix_len = (omc_u32)(sizeof(prefix) - 1U);
+    if (!omc_xmp_u32_add3_fits(parent->path_len, prefix_len, lang.len,
+                               &path_len)
+        || path_len == (omc_u32)~(omc_u32)0) {
+        ctx->res.status = OMC_XMP_LIMIT;
+        return 0;
+    }
+    path_len += 1U;
+    if (path_len > ctx->opts.limits.max_path_bytes
+        || path_len > ctx->path_cap) {
+        ctx->res.status = OMC_XMP_LIMIT;
+        return 0;
+    }
+
+    dst = omc_xmp_frame_path_slot(ctx, depth);
+    src = ctx->frame_path_buf + parent->path_off;
+    if (parent->path_len != 0U) {
+        memcpy(dst, src, parent->path_len);
+    }
+    pos = parent->path_len;
+    memcpy(dst + pos, prefix, prefix_len);
+    pos += prefix_len;
+    if (lang.len != 0U) {
+        memcpy(dst + pos, ctx->bytes + lang.off, lang.len);
+    }
+    pos += lang.len;
+    dst[pos] = ']';
+    pos += 1U;
+
+    frame->path_off = depth * ctx->path_cap;
+    frame->path_len = pos;
+    frame->has_path = 1;
+    return 1;
+}
+
+static int
+omc_xmp_frame_set_path_child(omc_xmp_ctx* ctx, omc_xmp_frame* frame,
+                             omc_u32 depth, const omc_xmp_frame* parent,
+                             omc_xmp_span child_prefix,
+                             omc_xmp_span child_local,
+                             omc_xmp_span child_ns)
+{
+    char* dst;
+    const char* src;
+    omc_u32 component_len;
+    omc_u32 path_len;
+    omc_u32 pos;
+    int use_prefix;
+
+    if (parent == (const omc_xmp_frame*)0 || !parent->has_path) {
+        return 0;
+    }
+
+    use_prefix = child_prefix.len != 0U
+                 && !omc_xmp_spans_equal(ctx, child_ns, parent->prop_ns_uri);
+    component_len = child_local.len;
+    if (use_prefix) {
+        if (!omc_xmp_u32_add3_fits(child_prefix.len, child_local.len, 1U,
+                                   &component_len)) {
+            ctx->res.status = OMC_XMP_LIMIT;
+            return 0;
+        }
+    }
+
+    if (!omc_xmp_u32_add3_fits(parent->path_len, component_len, 1U,
+                               &path_len)
+        || path_len > ctx->opts.limits.max_path_bytes
+        || path_len > ctx->path_cap) {
+        ctx->res.status = OMC_XMP_LIMIT;
+        return 0;
+    }
+
+    dst = omc_xmp_frame_path_slot(ctx, depth);
+    src = ctx->frame_path_buf + parent->path_off;
+    if (parent->path_len != 0U) {
+        memcpy(dst, src, parent->path_len);
+    }
+    pos = parent->path_len;
+    dst[pos] = '/';
+    pos += 1U;
+    if (use_prefix) {
+        memcpy(dst + pos, ctx->bytes + child_prefix.off, child_prefix.len);
+        pos += child_prefix.len;
+        dst[pos] = ':';
+        pos += 1U;
+    }
+    memcpy(dst + pos, ctx->bytes + child_local.off, child_local.len);
+    pos += child_local.len;
+
+    frame->path_off = depth * ctx->path_cap;
+    frame->path_len = pos;
+    frame->has_path = 1;
+    return 1;
+}
+
+static omc_xmp_status
+omc_xmp_emit_property_from_frame_path(omc_xmp_ctx* ctx,
+                                      const omc_xmp_frame* frame,
+                                      omc_xmp_span value_span)
+{
+    if (frame == (const omc_xmp_frame*)0 || !frame->has_path) {
         return OMC_XMP_LIMIT;
     }
-
-    memcpy(ctx->path_buf, ctx->bytes + prop_name.off, prop_name.len);
-    pos = prop_name.len;
-    ctx->path_buf[pos] = '[';
-    pos += 1U;
-    for (i = 0U; i < digit_count; ++i) {
-        ctx->path_buf[pos + i] = digits[digit_count - i - 1U];
-    }
-    pos += digit_count;
-    ctx->path_buf[pos] = ']';
-    pos += 1U;
-
-    return omc_xmp_add_property(ctx, schema_ns, (const omc_u8*)ctx->path_buf,
-                                pos, value_span);
+    return omc_xmp_add_property(
+        ctx, frame->prop_ns_uri,
+        (const omc_u8*)(ctx->frame_path_buf + frame->path_off),
+        frame->path_len, value_span);
 }
 
 static int
@@ -761,6 +1051,8 @@ omc_xmp_parse_start_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
     frame.prefix = prefix;
     frame.local = local;
     frame.ns_mark = ns_mark;
+    frame.parse_type_resource =
+        omc_xmp_attr_find_parse_type_resource(ctx, attrs, attr_count);
     omc_xmp_frame_reset_text(&frame);
 
     elem_ns = omc_xmp_span_make(0U, 0U);
@@ -810,8 +1102,13 @@ omc_xmp_parse_start_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
         frame.kind = OMC_XMP_FRAME_PROPERTY;
         frame.prop_ns_uri = elem_ns;
         frame.prop_name = local;
+        if (!omc_xmp_frame_set_path_from_span(ctx, &frame, ctx->frame_count,
+                                              local)) {
+            return 0;
+        }
     } else if (parent != (omc_xmp_frame*)0
-               && parent->kind == OMC_XMP_FRAME_PROPERTY
+               && (parent->kind == OMC_XMP_FRAME_PROPERTY
+                   || parent->kind == OMC_XMP_FRAME_STRUCT_FIELD)
                && omc_xmp_span_eq_lit(ctx, elem_ns, k_ns_rdf)
                && (omc_xmp_span_eq_lit(ctx, local, "Seq")
                    || omc_xmp_span_eq_lit(ctx, local, "Bag")
@@ -819,23 +1116,54 @@ omc_xmp_parse_start_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
         frame.kind = OMC_XMP_FRAME_ARRAY;
         frame.prop_ns_uri = parent->prop_ns_uri;
         frame.prop_name = parent->prop_name;
+        if (!omc_xmp_frame_set_path_from_parent(ctx, &frame, ctx->frame_count,
+                                                parent)) {
+            return 0;
+        }
         parent->had_child = 1;
     } else if (parent != (omc_xmp_frame*)0
                && parent->kind == OMC_XMP_FRAME_ARRAY
                && omc_xmp_span_eq_lit(ctx, elem_ns, k_ns_rdf)
                && omc_xmp_span_eq_lit(ctx, local, "li")) {
+        omc_xmp_span lang;
+
         frame.kind = OMC_XMP_FRAME_LI;
         frame.prop_ns_uri = parent->prop_ns_uri;
         frame.prop_name = parent->prop_name;
         parent->array_index += 1U;
         frame.current_index = parent->array_index;
+        if (omc_xmp_attr_find_xml_lang(ctx, attrs, attr_count, &lang)) {
+            if (!omc_xmp_frame_set_path_lang(ctx, &frame, ctx->frame_count,
+                                             parent, lang)) {
+                return 0;
+            }
+        } else if (!omc_xmp_frame_set_path_indexed(ctx, &frame,
+                                                   ctx->frame_count, parent,
+                                                   frame.current_index)) {
+            return 0;
+        }
+        parent->had_child = 1;
+    } else if (parent != (omc_xmp_frame*)0
+               && (parent->kind == OMC_XMP_FRAME_PROPERTY
+                   || parent->kind == OMC_XMP_FRAME_STRUCT_FIELD
+                   || parent->kind == OMC_XMP_FRAME_LI)
+               && parent->parse_type_resource && elem_ns.len != 0U
+               && !omc_xmp_span_eq_lit(ctx, elem_ns, k_ns_rdf)) {
+        frame.kind = OMC_XMP_FRAME_STRUCT_FIELD;
+        frame.prop_ns_uri = parent->prop_ns_uri;
+        frame.prop_name = parent->prop_name;
+        if (!omc_xmp_frame_set_path_child(ctx, &frame, ctx->frame_count,
+                                          parent, prefix, local, elem_ns)) {
+            return 0;
+        }
         parent->had_child = 1;
     } else if (parent != (omc_xmp_frame*)0) {
         parent->had_child = 1;
     }
 
     if (empty_element) {
-        if (frame.kind == OMC_XMP_FRAME_PROPERTY || frame.kind == OMC_XMP_FRAME_LI) {
+        if (omc_xmp_frame_has_value_path(frame.kind)
+            && !frame.parse_type_resource) {
             omc_xmp_span value_span;
             omc_xmp_status status3;
 
@@ -844,24 +1172,8 @@ omc_xmp_parse_start_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
                 value_span = omc_xmp_span_make(pos, 0U);
             }
             omc_xmp_trim_value(ctx, value_span, &value_span);
-            if (!ctx->measure_only) {
-                if (frame.kind == OMC_XMP_FRAME_PROPERTY) {
-                    status3 = omc_xmp_emit_property_from_spans(
-                        ctx, frame.prop_ns_uri, frame.prop_name, value_span);
-                } else {
-                    status3 = omc_xmp_emit_property_indexed(
-                        ctx, frame.prop_ns_uri, frame.prop_name,
-                        frame.current_index, value_span);
-                }
-            } else if (frame.kind == OMC_XMP_FRAME_PROPERTY) {
-                status3 = omc_xmp_add_property(ctx, frame.prop_ns_uri,
-                                               ctx->bytes + frame.prop_name.off,
-                                               frame.prop_name.len, value_span);
-            } else {
-                status3 = omc_xmp_emit_property_indexed(
-                    ctx, frame.prop_ns_uri, frame.prop_name, frame.current_index,
-                    value_span);
-            }
+            status3 = omc_xmp_emit_property_from_frame_path(ctx, &frame,
+                                                            value_span);
             if (status3 != OMC_XMP_OK) {
                 ctx->res.status = status3;
                 return 0;
@@ -905,8 +1217,8 @@ omc_xmp_parse_end_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
     ctx->frame_count -= 1U;
     ctx->ns_count = frame.ns_mark;
 
-    if ((frame.kind == OMC_XMP_FRAME_PROPERTY || frame.kind == OMC_XMP_FRAME_LI)
-        && !frame.had_child) {
+    if (omc_xmp_frame_has_value_path(frame.kind) && !frame.had_child
+        && !frame.parse_type_resource) {
         omc_xmp_span raw_text;
         omc_xmp_span value_span;
         omc_xmp_status status;
@@ -923,16 +1235,8 @@ omc_xmp_parse_end_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
             return 0;
         }
         omc_xmp_trim_value(ctx, raw_text, &value_span);
-        if (frame.kind == OMC_XMP_FRAME_PROPERTY) {
-            status = omc_xmp_emit_property_from_spans(ctx, frame.prop_ns_uri,
-                                                      frame.prop_name,
-                                                      value_span);
-        } else {
-            status = omc_xmp_emit_property_indexed(ctx, frame.prop_ns_uri,
-                                                   frame.prop_name,
-                                                   frame.current_index,
-                                                   value_span);
-        }
+        status = omc_xmp_emit_property_from_frame_path(ctx, &frame,
+                                                       value_span);
         if (status != OMC_XMP_OK) {
             ctx->res.status = status;
             return 0;
@@ -978,8 +1282,7 @@ omc_xmp_skip_cdata(omc_xmp_ctx* ctx, omc_u32* io_pos)
     }
     top = omc_xmp_top_frame(ctx);
     if (top != (omc_xmp_frame*)0
-        && (top->kind == OMC_XMP_FRAME_PROPERTY
-            || top->kind == OMC_XMP_FRAME_LI)) {
+        && omc_xmp_frame_has_value_path(top->kind)) {
         top->text_start = *io_pos + 9U;
         top->text_end = end;
         top->saw_text = 1;
@@ -1033,8 +1336,7 @@ omc_xmp_run(omc_xmp_ctx* ctx)
             }
             top = omc_xmp_top_frame(ctx);
             if (top != (omc_xmp_frame*)0
-                && (top->kind == OMC_XMP_FRAME_PROPERTY
-                    || top->kind == OMC_XMP_FRAME_LI)) {
+                && omc_xmp_frame_has_value_path(top->kind)) {
                 top->text_start = start;
                 top->text_end = pos;
                 top->saw_text = 1;
@@ -1102,6 +1404,7 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
     omc_xmp_opts local_opts;
     omc_u32 ns_cap;
     omc_u32 path_cap;
+    omc_u32 frame_path_cap;
 
     memset(ctx, 0, sizeof(*ctx));
     ctx->store = store;
@@ -1141,7 +1444,9 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
     ctx->frame_cap = ctx->opts.limits.max_depth;
     if (!omc_xmp_u32_mul_add_fits(ctx->frame_cap, 8U, 32U, &ns_cap)
         || !omc_xmp_u32_mul_add_fits(ctx->opts.limits.max_path_bytes, 1U,
-                                     32U, &path_cap)) {
+                                     32U, &path_cap)
+        || !omc_xmp_u32_mul_add_fits(ctx->frame_cap, path_cap, 0U,
+                                     &frame_path_cap)) {
         omc_xmp_set_res(&ctx->res, OMC_XMP_LIMIT);
         omc_xmp_ctx_fini(ctx);
         return 0;
@@ -1150,8 +1455,8 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
                                  sizeof(*ctx->frames))
         || !omc_xmp_alloc_size_fits((omc_size)ns_cap,
                                     sizeof(*ctx->ns_decls))
-        || !omc_xmp_alloc_size_fits((omc_size)path_cap,
-                                    sizeof(*ctx->path_buf))) {
+        || !omc_xmp_alloc_size_fits((omc_size)frame_path_cap,
+                                    sizeof(*ctx->frame_path_buf))) {
         omc_xmp_set_res(&ctx->res, OMC_XMP_LIMIT);
         omc_xmp_ctx_fini(ctx);
         return 0;
@@ -1161,12 +1466,12 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
                                          * sizeof(*ctx->frames));
     ctx->ns_decls = (omc_xmp_ns_decl*)malloc((omc_size)ns_cap
                                              * sizeof(*ctx->ns_decls));
-    ctx->path_buf = (char*)malloc((omc_size)path_cap);
+    ctx->frame_path_buf = (char*)malloc((omc_size)frame_path_cap);
     ctx->ns_cap = ns_cap;
     ctx->path_cap = path_cap;
 
     if (ctx->frames == (omc_xmp_frame*)0 || ctx->ns_decls == (omc_xmp_ns_decl*)0
-        || ctx->path_buf == (char*)0) {
+        || ctx->frame_path_buf == (char*)0) {
         omc_xmp_set_res(&ctx->res, OMC_XMP_NOMEM);
         omc_xmp_ctx_fini(ctx);
         return 0;
@@ -1182,7 +1487,7 @@ omc_xmp_ctx_fini(omc_xmp_ctx* ctx)
     }
     free(ctx->frames);
     free(ctx->ns_decls);
-    free(ctx->path_buf);
+    free(ctx->frame_path_buf);
     free(ctx->input_copy);
 }
 

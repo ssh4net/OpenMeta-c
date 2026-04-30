@@ -57,7 +57,8 @@ typedef enum omc_xmp_dump_value_mode {
     OMC_XMP_DUMP_VALUE_EXIF_GPS_URATIONAL = 11,
     OMC_XMP_DUMP_VALUE_EXIF_FNUMBER = 12,
     OMC_XMP_DUMP_VALUE_EXIF_APEX_FNUMBER = 13,
-    OMC_XMP_DUMP_VALUE_EXIF_SRATIONAL_DECIMAL = 14
+    OMC_XMP_DUMP_VALUE_EXIF_SRATIONAL_DECIMAL = 14,
+    OMC_XMP_DUMP_VALUE_EXIF_RATIONAL_TEXT = 15
 } omc_xmp_dump_value_mode;
 
 typedef struct omc_xmp_dump_property {
@@ -125,12 +126,14 @@ static const char k_prop_planar_configuration[] = "PlanarConfiguration";
 static const char k_prop_sample_format[] = "SampleFormat";
 static const char k_prop_resolution_unit[] = "ResolutionUnit";
 static const char k_prop_ycbcr_positioning[] = "YCbCrPositioning";
+static const char k_prop_exif_tag[] = "ExifTag";
 static const char k_prop_exposure_time[] = "ExposureTime";
 static const char k_prop_fnumber[] = "FNumber";
 static const char k_prop_exposure_bias_value[] = "ExposureBiasValue";
 static const char k_prop_exposure_compensation[] = "ExposureCompensation";
 static const char k_prop_iso_speed_ratings[] = "ISOSpeedRatings";
 static const char k_prop_iso[] = "ISO";
+static const char k_prop_gps_tag[] = "GPSTag";
 static const char k_prop_pixel_x_dimension[] = "PixelXDimension";
 static const char k_prop_exif_image_width[] = "ExifImageWidth";
 static const char k_prop_pixel_y_dimension[] = "PixelYDimension";
@@ -138,6 +141,7 @@ static const char k_prop_exif_image_height[] = "ExifImageHeight";
 static const char k_prop_focal_length_35mm_film[] = "FocalLengthIn35mmFilm";
 static const char k_prop_focal_length_35mm_format[]
     = "FocalLengthIn35mmFormat";
+static const char k_prop_interoperability_tag[] = "InteroperabilityTag";
 static const char k_prop_datetime_original[] = "DateTimeOriginal";
 static const char k_prop_datetime_digitized[] = "DateTimeDigitized";
 static const char k_prop_preview_datetime[] = "PreviewDateTime";
@@ -1806,6 +1810,20 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
                     &store->entries[index].value, &store->arena)) {
                 return 0;
             }
+        } else if (tag == 0x8769U) {
+            schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_tiff);
+            property_name = omc_xmp_dump_view_from_lit(k_prop_exif_tag);
+            if (!omc_xmp_dump_scalar_or_text_supported(
+                    &store->entries[index].value, &store->arena)) {
+                return 0;
+            }
+        } else if (tag == 0x8825U) {
+            schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_tiff);
+            property_name = omc_xmp_dump_view_from_lit(k_prop_gps_tag);
+            if (!omc_xmp_dump_scalar_or_text_supported(
+                    &store->entries[index].value, &store->arena)) {
+                return 0;
+            }
         } else if (tag == 0x9C9BU) {
             schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_tiff);
             property_name = omc_xmp_dump_view_from_lit(k_prop_xp_title);
@@ -1889,6 +1907,14 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
             value_mode = OMC_XMP_DUMP_VALUE_EXIF_DATE;
             if (!omc_xmp_dump_bytes_view_supported(&store->entries[index].value,
                                                    &store->arena)) {
+                return 0;
+            }
+        } else if (tag == 0xA005U) {
+            schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_exif);
+            property_name = omc_xmp_dump_view_from_lit(
+                k_prop_interoperability_tag);
+            if (!omc_xmp_dump_scalar_or_text_supported(
+                    &store->entries[index].value, &store->arena)) {
                 return 0;
             }
         } else if (tag == 0x9201U) {
@@ -2156,7 +2182,7 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
             }
         } else if (tag == 0x000BU) {
             property_name = omc_xmp_dump_view_from_lit(k_prop_gps_dop);
-            value_mode = OMC_XMP_DUMP_VALUE_EXIF_GPS_URATIONAL;
+            value_mode = OMC_XMP_DUMP_VALUE_EXIF_RATIONAL_TEXT;
             if (!omc_xmp_dump_urational_supported(&store->entries[index].value,
                                                   &store->arena)) {
                 return 0;
@@ -2169,7 +2195,7 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
             }
         } else if (tag == 0x000DU) {
             property_name = omc_xmp_dump_view_from_lit(k_prop_gps_speed);
-            value_mode = OMC_XMP_DUMP_VALUE_EXIF_GPS_URATIONAL;
+            value_mode = OMC_XMP_DUMP_VALUE_EXIF_RATIONAL_TEXT;
             if (!omc_xmp_dump_urational_supported(&store->entries[index].value,
                                                   &store->arena)) {
                 return 0;
@@ -2182,7 +2208,7 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
             }
         } else if (tag == 0x000FU) {
             property_name = omc_xmp_dump_view_from_lit(k_prop_gps_track);
-            value_mode = OMC_XMP_DUMP_VALUE_EXIF_GPS_URATIONAL;
+            value_mode = OMC_XMP_DUMP_VALUE_EXIF_RATIONAL_TEXT;
             if (!omc_xmp_dump_urational_supported(&store->entries[index].value,
                                                   &store->arena)) {
                 return 0;
@@ -2197,7 +2223,7 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
         } else if (tag == 0x0011U) {
             property_name = omc_xmp_dump_view_from_lit(
                 k_prop_gps_img_direction);
-            value_mode = OMC_XMP_DUMP_VALUE_EXIF_GPS_URATIONAL;
+            value_mode = OMC_XMP_DUMP_VALUE_EXIF_RATIONAL_TEXT;
             if (!omc_xmp_dump_urational_supported(&store->entries[index].value,
                                                   &store->arena)) {
                 return 0;
@@ -2248,7 +2274,7 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
         } else if (tag == 0x0018U) {
             property_name = omc_xmp_dump_view_from_lit(
                 k_prop_gps_dest_bearing);
-            value_mode = OMC_XMP_DUMP_VALUE_EXIF_GPS_URATIONAL;
+            value_mode = OMC_XMP_DUMP_VALUE_EXIF_RATIONAL_TEXT;
             if (!omc_xmp_dump_urational_supported(&store->entries[index].value,
                                                   &store->arena)) {
                 return 0;
@@ -2263,7 +2289,7 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
         } else if (tag == 0x001AU) {
             property_name = omc_xmp_dump_view_from_lit(
                 k_prop_gps_dest_distance);
-            value_mode = OMC_XMP_DUMP_VALUE_EXIF_GPS_URATIONAL;
+            value_mode = OMC_XMP_DUMP_VALUE_EXIF_RATIONAL_TEXT;
             if (!omc_xmp_dump_urational_supported(&store->entries[index].value,
                                                   &store->arena)) {
                 return 0;
@@ -2284,7 +2310,7 @@ omc_xmp_dump_extract_exif_property(const omc_store* store, omc_size index,
         } else if (tag == 0x001FU) {
             property_name = omc_xmp_dump_view_from_lit(
                 k_prop_gps_h_positioning_error);
-            value_mode = OMC_XMP_DUMP_VALUE_EXIF_GPS_URATIONAL;
+            value_mode = OMC_XMP_DUMP_VALUE_EXIF_RATIONAL_TEXT;
             if (!omc_xmp_dump_urational_supported(&store->entries[index].value,
                                                   &store->arena)) {
                 return 0;
@@ -3801,6 +3827,92 @@ omc_xmp_dump_rational_to_double(omc_urational r, double* out_value)
     return 1;
 }
 
+static omc_u32
+omc_xmp_dump_gcd_u32(omc_u32 a, omc_u32 b)
+{
+    while (b != 0U) {
+        omc_u32 t;
+        t = a % b;
+        a = b;
+        b = t;
+    }
+    return a == 0U ? 1U : a;
+}
+
+static omc_u64
+omc_xmp_dump_gcd_u64(omc_u64 a, omc_u64 b)
+{
+    while (b != 0U) {
+        omc_u64 t;
+        t = a % b;
+        a = b;
+        b = t;
+    }
+    return a == 0U ? 1U : a;
+}
+
+static void
+omc_xmp_dump_write_urational_text(omc_xmp_dump_writer* writer,
+                                  omc_urational r)
+{
+    omc_u32 gcd;
+    omc_u32 numer;
+    omc_u32 denom;
+
+    if (r.denom == 0U) {
+        omc_xmp_dump_write_u32_decimal(writer, r.numer);
+        omc_xmp_dump_write_byte(writer, '/');
+        omc_xmp_dump_write_u32_decimal(writer, r.denom);
+        return;
+    }
+
+    gcd = omc_xmp_dump_gcd_u32(r.numer, r.denom);
+    numer = r.numer / gcd;
+    denom = r.denom / gcd;
+    omc_xmp_dump_write_u32_decimal(writer, numer);
+    if (denom != 1U) {
+        omc_xmp_dump_write_byte(writer, '/');
+        omc_xmp_dump_write_u32_decimal(writer, denom);
+    }
+}
+
+static void
+omc_xmp_dump_write_srational_text(omc_xmp_dump_writer* writer,
+                                  omc_srational r)
+{
+    omc_s64 numer;
+    omc_s64 denom;
+    omc_u64 abs_numer;
+    omc_u64 abs_denom;
+    omc_u64 gcd;
+
+    numer = (omc_s64)r.numer;
+    denom = (omc_s64)r.denom;
+    if (denom == 0) {
+        omc_xmp_dump_write_i64_decimal(writer, numer);
+        omc_xmp_dump_write_byte(writer, '/');
+        omc_xmp_dump_write_i64_decimal(writer, denom);
+        return;
+    }
+    if (denom < 0) {
+        numer = -numer;
+        denom = -denom;
+    }
+
+    abs_numer = numer < 0 ? (omc_u64)(-(numer + 1)) + 1U
+                          : (omc_u64)numer;
+    abs_denom = (omc_u64)denom;
+    gcd = omc_xmp_dump_gcd_u64(abs_numer, abs_denom);
+    numer /= (omc_s64)gcd;
+    denom /= (omc_s64)gcd;
+
+    omc_xmp_dump_write_i64_decimal(writer, numer);
+    if (denom != 1) {
+        omc_xmp_dump_write_byte(writer, '/');
+        omc_xmp_dump_write_i64_decimal(writer, denom);
+    }
+}
+
 static void
 omc_xmp_dump_write_c_string(omc_xmp_dump_writer* writer, const char* text)
 {
@@ -4284,11 +4396,10 @@ omc_xmp_dump_write_lens_spec_seq(omc_xmp_dump_writer* writer,
     omc_xmp_dump_write_bytes(writer, "<rdf:Seq>", 9U);
     for (i = 0U; i < prop->value->count; ++i) {
         if (!omc_xmp_dump_urational_at(prop->value, prop->arena, i, &r)
-            || !omc_xmp_dump_rational_to_double(r, &value)
-            || !omc_xmp_dump_format_double_trimmed(value, 8, buf,
-                                                   sizeof(buf))) {
+            || !omc_xmp_dump_rational_to_double(r, &value)) {
             continue;
         }
+        sprintf(buf, "%.17g", value);
         had_item = 1;
         omc_xmp_dump_write_bytes(writer, "<rdf:li>", 8U);
         omc_xmp_dump_write_c_string(writer, buf);
@@ -4362,6 +4473,8 @@ omc_xmp_dump_property_has_output(const omc_xmp_dump_property* prop)
         return omc_xmp_dump_write_gps_time((omc_xmp_dump_writer*)0, prop) != 0;
     case OMC_XMP_DUMP_VALUE_EXIF_GPS_ALTITUDE:
     case OMC_XMP_DUMP_VALUE_EXIF_GPS_URATIONAL:
+        return omc_xmp_dump_first_urational(prop->value, prop->arena, &ur);
+    case OMC_XMP_DUMP_VALUE_EXIF_RATIONAL_TEXT:
         return omc_xmp_dump_first_urational(prop->value, prop->arena, &ur);
     default: return 1;
     }
@@ -4489,12 +4602,25 @@ omc_xmp_dump_write_value(omc_xmp_dump_writer* writer,
         (void)omc_xmp_dump_write_gps_time(writer, prop);
         return;
     }
-    if (prop->value_mode == OMC_XMP_DUMP_VALUE_EXIF_GPS_ALTITUDE
-        || prop->value_mode == OMC_XMP_DUMP_VALUE_EXIF_GPS_URATIONAL) {
+    if (prop->value_mode == OMC_XMP_DUMP_VALUE_EXIF_GPS_ALTITUDE) {
         if (omc_xmp_dump_first_urational(prop->value, prop->arena, &ur)
             && omc_xmp_dump_rational_to_double(ur, &d)
             && omc_xmp_dump_format_double_trimmed(d, 8, buf, sizeof(buf))) {
             omc_xmp_dump_write_c_string(writer, buf);
+        }
+        return;
+    }
+    if (prop->value_mode == OMC_XMP_DUMP_VALUE_EXIF_GPS_URATIONAL) {
+        if (omc_xmp_dump_first_urational(prop->value, prop->arena, &ur)
+            && omc_xmp_dump_rational_to_double(ur, &d)
+            && omc_xmp_dump_format_double_trimmed(d, 15, buf, sizeof(buf))) {
+            omc_xmp_dump_write_c_string(writer, buf);
+        }
+        return;
+    }
+    if (prop->value_mode == OMC_XMP_DUMP_VALUE_EXIF_RATIONAL_TEXT) {
+        if (omc_xmp_dump_first_urational(prop->value, prop->arena, &ur)) {
+            omc_xmp_dump_write_urational_text(writer, ur);
         }
         return;
     }
@@ -4515,14 +4641,10 @@ omc_xmp_dump_write_value(omc_xmp_dump_writer* writer,
             omc_xmp_dump_write_i64_decimal(writer, prop->value->u.i64);
             return;
         case OMC_ELEM_URATIONAL:
-            omc_xmp_dump_write_u32_decimal(writer, prop->value->u.ur.numer);
-            omc_xmp_dump_write_byte(writer, '/');
-            omc_xmp_dump_write_u32_decimal(writer, prop->value->u.ur.denom);
+            omc_xmp_dump_write_urational_text(writer, prop->value->u.ur);
             return;
         case OMC_ELEM_SRATIONAL:
-            omc_xmp_dump_write_i64_decimal(writer, prop->value->u.sr.numer);
-            omc_xmp_dump_write_byte(writer, '/');
-            omc_xmp_dump_write_i64_decimal(writer, prop->value->u.sr.denom);
+            omc_xmp_dump_write_srational_text(writer, prop->value->u.sr);
             return;
         default: return;
         }
