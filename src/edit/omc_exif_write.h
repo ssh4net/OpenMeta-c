@@ -36,6 +36,13 @@ omc_exif_write_embedded(const omc_u8* file_bytes, omc_size file_size,
                         const omc_store* source_store, omc_arena* out,
                         omc_scan_fmt format, omc_exif_write_res* out_res);
 
+omc_status
+omc_exif_write_embedded_source_only(const omc_u8* file_bytes,
+                                    omc_size file_size,
+                                    const omc_store* source_store,
+                                    omc_arena* out, omc_scan_fmt format,
+                                    omc_exif_write_res* out_res);
+
 /*
  * Builds one target-shaped EXIF carrier payload from source_store without
  * rewriting a file. Empty output with OMC_EXIF_WRITE_OK means the store had no

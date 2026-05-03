@@ -9752,7 +9752,7 @@ byte_ref_text(const omc_arena& arena, omc_byte_ref ref)
 struct TransferExecuteCaseOptions final {
     omc_xmp_writeback_mode writeback_mode
         = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
-    omc_dng_target_mode omc_dng_target_mode
+    omc_dng_target_mode omc_dng_mode
         = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
     omc_xmp_destination_embedded_mode destination_embedded_mode
         = OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING;
@@ -10274,7 +10274,7 @@ run_omc_transfer_execute_case(const ByteVec& source_bytes,
     omc_arena_init(&sidecar_out);
     omc_transfer_prepare_opts_init(&prepare_opts);
     prepare_opts.writeback_mode = options.writeback_mode;
-    prepare_opts.dng_target_mode = options.omc_dng_target_mode;
+    prepare_opts.dng_target_mode = options.omc_dng_mode;
     prepare_opts.destination_embedded_mode
         = options.destination_embedded_mode;
     if (options.existing_sidecar_creator_tool != nullptr
@@ -10569,7 +10569,7 @@ run_omc_transfer_persist_case(const ByteVec& source_bytes,
     omc_arena_init(&meta_out);
     omc_transfer_prepare_opts_init(&prepare_opts);
     prepare_opts.writeback_mode = options.writeback_mode;
-    prepare_opts.dng_target_mode = options.omc_dng_target_mode;
+    prepare_opts.dng_target_mode = options.omc_dng_mode;
     prepare_opts.destination_embedded_mode
         = options.destination_embedded_mode;
     if (options.existing_sidecar_creator_tool != nullptr
@@ -14530,7 +14530,7 @@ main(int argc, char** argv)
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
-        transfer_opts.omc_dng_target_mode
+        transfer_opts.omc_dng_mode
             = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
         transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Dng;
         transfer_opts.cpp_dng_target_mode =
@@ -14547,7 +14547,7 @@ main(int argc, char** argv)
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
-        transfer_opts.omc_dng_target_mode
+        transfer_opts.omc_dng_mode
             = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
         transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Dng;
         transfer_opts.cpp_dng_target_mode =
@@ -14564,7 +14564,7 @@ main(int argc, char** argv)
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
-        transfer_opts.omc_dng_target_mode
+        transfer_opts.omc_dng_mode
             = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
         transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Dng;
         transfer_opts.cpp_dng_target_mode =
@@ -14587,7 +14587,7 @@ main(int argc, char** argv)
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
-        transfer_opts.omc_dng_target_mode
+        transfer_opts.omc_dng_mode
             = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
         transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Dng;
         transfer_opts.cpp_dng_target_mode =
@@ -14604,7 +14604,7 @@ main(int argc, char** argv)
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
-        transfer_opts.omc_dng_target_mode = OMC_DNG_TARGET_TEMPLATE;
+        transfer_opts.omc_dng_mode = OMC_DNG_TARGET_TEMPLATE;
         transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Dng;
         transfer_opts.cpp_dng_target_mode =
             openmeta::DngTargetMode::TemplateTarget;
@@ -14863,7 +14863,7 @@ main(int argc, char** argv)
                  transfer_opts)
              && ok;
     }
-    if (false) {
+    {
         TransferExecuteCaseOptions transfer_opts {};
 
         transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
@@ -14874,6 +14874,102 @@ main(int argc, char** argv)
                  build_transfer_source_jpeg_fixture(),
                  build_transfer_target_png_fixture("OldTool"), transfer_opts,
                  false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_existing_embedded_embedded_only_existing_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_png_fixture("Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.existing_embedded_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_existing_embedded_embedded_only_source_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_png_fixture("Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_existing_sidecar_sidecar_only_existing_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_png_fixture(nullptr),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.existing_sidecar_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_SOURCE;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_existing_sidecar_sidecar_only_source_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_png_fixture(nullptr),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.merge_existing_embedded = true;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_existing_sidecar_and_embedded_default",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_png_fixture("Target Embedded Existing"),
+                 transfer_opts, false)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Png;
+        transfer_opts.target_suffix = ".png";
+        transfer_opts.existing_sidecar_creator_tool =
+            "Target Sidecar Existing";
+        transfer_opts.merge_existing_embedded = true;
+        transfer_opts.carrier_precedence
+            = OMC_TRANSFER_EXISTING_XMP_PREFER_EMBEDDED;
+        ok = run_transfer_persist_case(
+                 "transfer_persist_png_existing_sidecar_and_embedded_embedded_wins",
+                 build_transfer_source_jpeg_fixture(),
+                 build_transfer_target_png_fixture("Target Embedded Existing"),
+                 transfer_opts, false)
              && ok;
     }
     {

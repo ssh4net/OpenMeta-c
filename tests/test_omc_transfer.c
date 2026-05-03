@@ -3159,10 +3159,11 @@ read_store_from_bytes(const omc_u8* bytes, omc_size size, omc_store* out)
 }
 
 typedef enum omc_transfer_preserve_kind {
-    OMC_TRANSFER_PRESERVE_COMMENT = 0,
-    OMC_TRANSFER_PRESERVE_PNG_TEXT = 1,
-    OMC_TRANSFER_PRESERVE_EXIF_MAKE = 2,
-    OMC_TRANSFER_PRESERVE_DNG_CORE = 3
+    OMC_TRANSFER_PRESERVE_NONE = 0,
+    OMC_TRANSFER_PRESERVE_COMMENT = 1,
+    OMC_TRANSFER_PRESERVE_PNG_TEXT = 2,
+    OMC_TRANSFER_PRESERVE_EXIF_MAKE = 3,
+    OMC_TRANSFER_PRESERVE_DNG_CORE = 4
 } omc_transfer_preserve_kind;
 
 typedef enum omc_transfer_embedded_xmp_expect {
@@ -3179,6 +3180,9 @@ assert_preserved_metadata(const omc_store* store,
 {
     static const omc_u8 k_dng_version[4] = { 1U, 6U, 0U, 0U };
 
+    if (preserve_kind == OMC_TRANSFER_PRESERVE_NONE) {
+        return;
+    }
     if (preserve_kind == OMC_TRANSFER_PRESERVE_COMMENT) {
         assert_text_value(store, find_comment_entry(store), "Preserve me");
     } else if (preserve_kind == OMC_TRANSFER_PRESERVE_PNG_TEXT) {
@@ -3647,7 +3651,7 @@ test_transfer_execute_embedded_and_sidecar_source_exif_supported_formats(void)
         OMC_TRANSFER_EMBEDDED_REWRITE);
     exercise_transfer_supported_source_exif_case(
         make_test_jxl_with_old_xmp_and_exif, OMC_SCAN_FMT_JXL,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PRESERVE_NONE,
         OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
         OMC_TRANSFER_EMBEDDED_XMP_NEW, 1U, 1U, 2U,
@@ -3668,7 +3672,7 @@ test_transfer_execute_sidecar_only_preserve_supported_formats(void)
         OMC_TRANSFER_PRESERVE_PNG_TEXT, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
         OMC_TRANSFER_EMBEDDED_XMP_OLD, 0U, 0U, 1U,
-        OMC_TRANSFER_EMBEDDED_NONE, 1);
+        OMC_TRANSFER_EMBEDDED_NONE, 0);
     exercise_transfer_supported_case(
         make_test_tiff_with_old_xmp_and_make, OMC_SCAN_FMT_TIFF,
         OMC_TRANSFER_PRESERVE_EXIF_MAKE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
@@ -6286,16 +6290,9 @@ test_transfer_execute_jxl_embedded_only_source_exif_replaces_brob_exif(void)
 
     read_store_from_bytes(edited_out.data, edited_out.size, &edited_store);
     assert_embedded_xmp_state(&edited_store, OMC_TRANSFER_EMBEDDED_XMP_NEW);
-#if OMC_HAVE_BROTLI
-    assert_text_value(&edited_store,
-                      find_exif_entry(&edited_store, "ifd0", 0x010FU),
-                      "Canon");
-    assert(count_exif_entries(&edited_store, "ifd0", 0x010FU) == 1U);
-#else
     assert(find_exif_entry(&edited_store, "ifd0", 0x010FU)
            == (const omc_entry*)0);
     assert(count_exif_entries(&edited_store, "ifd0", 0x010FU) == 0U);
-#endif
     assert_embedded_exif_times(&edited_store, "2025:06:07 08:09:10");
 
     omc_arena_fini(&sidecar_out);
@@ -6699,6 +6696,72 @@ test_transfer_execute_png_embedded_only_source_icc(void)
 }
 
 static void
+test_transfer_execute_png_sidecar_only_preserve_source_icc(void)
+{
+    omc_u8 file_bytes[1024];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store edited_store;
+    omc_store sidecar_store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = make_test_png_with_old_xmp_and_text(file_bytes);
+    omc_store_init(&source_store);
+    omc_store_init(&edited_store);
+    omc_store_init(&sidecar_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_creator_tool(&source_store, "NewTool");
+    build_store_with_test_icc(&source_store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.format = OMC_SCAN_FMT_PNG;
+    opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &source_store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &source_store,
+                                  &edited_out, &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(res.sidecar_present);
+    assert(contains_text(edited_out.data, edited_out.size, "iCCP"));
+
+    read_store_from_bytes(edited_out.data, edited_out.size, &edited_store);
+    assert_embedded_xmp_state(&edited_store, OMC_TRANSFER_EMBEDDED_XMP_OLD);
+    assert_text_value(&edited_store,
+                      find_png_text_entry(&edited_store, "Comment", "text"),
+                      "Preserve me");
+    assert_icc_profile_state(&edited_store);
+
+    read_store_from_bytes(sidecar_out.data, sidecar_out.size, &sidecar_store);
+    assert_text_value(&sidecar_store,
+                      find_xmp_entry(&sidecar_store,
+                                     "http://ns.adobe.com/xap/1.0/",
+                                     "CreatorTool"),
+                      "NewTool");
+
+    omc_store_fini(&sidecar_store);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&edited_store);
+    omc_store_fini(&source_store);
+}
+
+static void
 test_transfer_execute_webp_embedded_only_source_icc(void)
 {
     omc_u8 file_bytes[2048];
@@ -7061,6 +7124,7 @@ main(void)
     test_transfer_execute_dng_embedded_only_source_iptc();
     test_transfer_execute_jpeg_embedded_only_source_icc();
     test_transfer_execute_png_embedded_only_source_icc();
+    test_transfer_execute_png_sidecar_only_preserve_source_icc();
     test_transfer_execute_webp_embedded_only_source_icc();
     test_transfer_execute_jp2_embedded_only_source_icc();
     test_transfer_execute_heif_embedded_only_source_icc();

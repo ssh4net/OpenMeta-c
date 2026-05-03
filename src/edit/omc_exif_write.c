@@ -8844,16 +8844,20 @@ omc_exif_write_store_has_supported_tags(const omc_store* store)
     return 0;
 }
 
-omc_status
-omc_exif_write_embedded(const omc_u8* file_bytes, omc_size file_size,
-                        const omc_store* source_store, omc_arena* out,
-                        omc_scan_fmt format, omc_exif_write_res* out_res)
+static omc_status
+omc_exif_write_embedded_impl(const omc_u8* file_bytes, omc_size file_size,
+                             const omc_store* source_store, omc_arena* out,
+                             omc_scan_fmt format,
+                             omc_exif_write_res* out_res,
+                             int preserve_current_fields)
 {
     omc_store current_store;
+    const omc_store* current_store_ptr;
     omc_arena tiff_payload;
     omc_arena container_payload;
     omc_exif_write_fields fields;
     omc_status status;
+    int current_store_ready;
 
     if (file_bytes == (const omc_u8*)0 || source_store == (const omc_store*)0
         || out == (omc_arena*)0 || out_res == (omc_exif_write_res*)0) {
@@ -8881,17 +8885,24 @@ omc_exif_write_embedded(const omc_u8* file_bytes, omc_size file_size,
         return OMC_STATUS_OK;
     }
 
-    status = omc_exif_write_read_current_store(file_bytes, file_size,
-                                               &current_store);
-    if (status != OMC_STATUS_OK) {
-        out_res->status = OMC_EXIF_WRITE_MALFORMED;
-        return OMC_STATUS_OK;
+    current_store_ptr = (const omc_store*)0;
+    current_store_ready = 0;
+    if (preserve_current_fields) {
+        status = omc_exif_write_read_current_store(file_bytes, file_size,
+                                                   &current_store);
+        if (status != OMC_STATUS_OK) {
+            out_res->status = OMC_EXIF_WRITE_MALFORMED;
+            return OMC_STATUS_OK;
+        }
+        current_store_ptr = &current_store;
+        current_store_ready = 1;
     }
 
     omc_arena_init(&tiff_payload);
     omc_arena_init(&container_payload);
     status = OMC_STATUS_OK;
-    if (!omc_exif_write_select_fields(source_store, &current_store, &fields)) {
+    if (!omc_exif_write_select_fields(source_store, current_store_ptr,
+                                      &fields)) {
         status = omc_exif_write_copy_original(file_bytes, file_size, out, out_res);
         goto cleanup;
     }
@@ -8973,6 +8984,28 @@ omc_exif_write_embedded(const omc_u8* file_bytes, omc_size file_size,
 cleanup:
     omc_arena_fini(&container_payload);
     omc_arena_fini(&tiff_payload);
-    omc_store_fini(&current_store);
+    if (current_store_ready) {
+        omc_store_fini(&current_store);
+    }
     return status;
+}
+
+omc_status
+omc_exif_write_embedded(const omc_u8* file_bytes, omc_size file_size,
+                        const omc_store* source_store, omc_arena* out,
+                        omc_scan_fmt format, omc_exif_write_res* out_res)
+{
+    return omc_exif_write_embedded_impl(file_bytes, file_size, source_store,
+                                        out, format, out_res, 1);
+}
+
+omc_status
+omc_exif_write_embedded_source_only(const omc_u8* file_bytes,
+                                    omc_size file_size,
+                                    const omc_store* source_store,
+                                    omc_arena* out, omc_scan_fmt format,
+                                    omc_exif_write_res* out_res)
+{
+    return omc_exif_write_embedded_impl(file_bytes, file_size, source_store,
+                                        out, format, out_res, 0);
 }

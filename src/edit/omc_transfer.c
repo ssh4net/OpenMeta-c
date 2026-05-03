@@ -12101,8 +12101,13 @@ omc_transfer_apply_exif_overlay(const omc_u8* current_bytes,
 
     omc_arena_init(&exif_out);
     omc_exif_write_res_init(&exif_res);
-    status = omc_exif_write_embedded(current_bytes, current_size, store,
-                                     &exif_out, format, &exif_res);
+    if (format == OMC_SCAN_FMT_JXL) {
+        status = omc_exif_write_embedded_source_only(
+            current_bytes, current_size, store, &exif_out, format, &exif_res);
+    } else {
+        status = omc_exif_write_embedded(current_bytes, current_size, store,
+                                         &exif_out, format, &exif_res);
+    }
     if (status != OMC_STATUS_OK) {
         omc_arena_fini(&exif_out);
         return status;
@@ -12690,6 +12695,29 @@ omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
             return OMC_STATUS_INVALID_ARGUMENT;
         }
 
+        if (exec->format == OMC_SCAN_FMT_PNG && !source_has_exif
+            && !source_has_icc && !source_has_iptc) {
+            status = omc_xmp_dump_sidecar_req(effective_store, sidecar_out,
+                                              &exec->sidecar,
+                                              &out_res->sidecar);
+            if (status != OMC_STATUS_OK) {
+                omc_transfer_fini_store_if_ready(target_store_ready,
+                                                 &target_store);
+                omc_transfer_fini_store_if_ready(merged_store_ready,
+                                                 &merged_store);
+                return status;
+            }
+            out_res->sidecar_present =
+                out_res->sidecar.status == OMC_XMP_DUMP_OK;
+            out_res->status =
+                omc_transfer_status_from_dump(out_res->sidecar.status);
+            omc_transfer_fini_store_if_ready(target_store_ready,
+                                             &target_store);
+            omc_transfer_fini_store_if_ready(merged_store_ready,
+                                             &merged_store);
+            return OMC_STATUS_OK;
+        }
+
         omc_xmp_apply_opts_init(&apply_opts);
         apply_opts.format = exec->format;
         apply_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
@@ -12728,6 +12756,18 @@ omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
         out_res->status = omc_transfer_status_from_dump(out_res->sidecar.status);
         if (out_res->status == OMC_TRANSFER_OK && source_has_exif) {
             status = omc_transfer_apply_exif_overlay(
+                edited_out->data, edited_out->size, effective_store,
+                exec->format, edited_out, out_res);
+            if (status != OMC_STATUS_OK || out_res->status != OMC_TRANSFER_OK) {
+                omc_transfer_fini_store_if_ready(target_store_ready,
+                                                 &target_store);
+                omc_transfer_fini_store_if_ready(merged_store_ready,
+                                                 &merged_store);
+                return status;
+            }
+        }
+        if (out_res->status == OMC_TRANSFER_OK && source_has_icc) {
+            status = omc_transfer_apply_icc_overlay(
                 edited_out->data, edited_out->size, effective_store,
                 exec->format, edited_out, out_res);
             if (status != OMC_STATUS_OK || out_res->status != OMC_TRANSFER_OK) {

@@ -2737,7 +2737,7 @@ test_transfer_persist_embedded_and_sidecar_source_exif_supported_formats(void)
         make_test_jxl_with_old_xmp_and_exif, ".jxl",
         OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
-        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE,
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE,
         OMC_TRANSFER_PERSIST_XMP_NEW, 0);
 }
 
@@ -3728,16 +3728,9 @@ test_transfer_persist_jxl_embedded_only_source_exif_replaces_brob_exif(void)
                                      "http://ns.adobe.com/xap/1.0/",
                                      "CreatorTool"),
                       "NewTool");
-#if OMC_HAVE_BROTLI
-    assert_text_value(&edited_store,
-                      find_exif_entry(&edited_store, "ifd0", 0x010FU),
-                      "Canon");
-    assert(count_exif_entries(&edited_store, "ifd0", 0x010FU) == 1U);
-#else
     assert(find_exif_entry(&edited_store, "ifd0", 0x010FU)
            == (const omc_entry*)0);
     assert(count_exif_entries(&edited_store, "ifd0", 0x010FU) == 0U);
-#endif
     assert_text_value(&edited_store,
                       find_exif_entry(&edited_store, "exififd", 0x9003U),
                       "2025:06:07 08:09:10");
