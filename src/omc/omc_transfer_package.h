@@ -12,15 +12,13 @@
 
 OMC_EXTERN_C_BEGIN
 
-enum {
-    OMC_TRANSFER_PACKAGE_BATCH_VERSION = 2U
-};
+enum { OMC_TRANSFER_PACKAGE_BATCH_VERSION = 2U };
 
 typedef enum omc_transfer_package_chunk_kind {
-    OMC_TRANSFER_PACKAGE_CHUNK_SOURCE_RANGE = 0,
+    OMC_TRANSFER_PACKAGE_CHUNK_SOURCE_RANGE   = 0,
     OMC_TRANSFER_PACKAGE_CHUNK_TRANSFER_BLOCK = 1,
-    OMC_TRANSFER_PACKAGE_CHUNK_JPEG_SEGMENT = 2,
-    OMC_TRANSFER_PACKAGE_CHUNK_INLINE_BYTES = 3
+    OMC_TRANSFER_PACKAGE_CHUNK_JPEG_SEGMENT   = 2,
+    OMC_TRANSFER_PACKAGE_CHUNK_INLINE_BYTES   = 3
 } omc_transfer_package_chunk_kind;
 
 typedef struct omc_transfer_package_chunk {
@@ -53,6 +51,7 @@ typedef struct omc_transfer_package_view {
 
 typedef struct omc_transfer_package_build_opts {
     omc_scan_fmt format;
+    omc_transfer_safety_mode safety;
     omc_transfer_target_image_spec target_image_spec;
     int include_exif;
     int include_xmp;
@@ -117,22 +116,21 @@ omc_transfer_package_batch_build(const omc_store* store,
 
 OMC_API omc_status
 omc_transfer_package_batch_build_executed_output(
-    const omc_u8* input_bytes, omc_size input_size,
-    const omc_u8* output_bytes, omc_size output_size,
-    const omc_transfer_res* execute, omc_arena* out_storage,
-    omc_transfer_package_batch* out_batch,
+    const omc_u8* input_bytes, omc_size input_size, const omc_u8* output_bytes,
+    omc_size output_size, const omc_transfer_res* execute,
+    omc_arena* out_storage, omc_transfer_package_batch* out_batch,
     omc_transfer_package_io_res* out_res);
 
 OMC_API omc_status
-omc_transfer_package_batch_serialize(
-    const omc_transfer_package_batch* batch, omc_arena* out_bytes,
-    omc_transfer_package_io_res* out_res);
+omc_transfer_package_batch_serialize(const omc_transfer_package_batch* batch,
+                                     omc_arena* out_bytes,
+                                     omc_transfer_package_io_res* out_res);
 
 OMC_API omc_status
-omc_transfer_package_batch_deserialize(
-    const omc_u8* bytes, omc_size size, omc_arena* out_storage,
-    omc_transfer_package_batch* out_batch,
-    omc_transfer_package_io_res* out_res);
+omc_transfer_package_batch_deserialize(const omc_u8* bytes, omc_size size,
+                                       omc_arena* out_storage,
+                                       omc_transfer_package_batch* out_batch,
+                                       omc_transfer_package_io_res* out_res);
 
 /*
  * Concatenates validated package chunk bytes into a caller-owned buffer.
@@ -153,8 +151,7 @@ omc_transfer_package_batch_materialize_to_buffer(
 OMC_API omc_status
 omc_transfer_package_bytes_materialize_to_buffer(
     const omc_u8* bytes, omc_size size, omc_arena* temp_storage,
-    omc_u8* out_bytes, omc_size out_cap,
-    omc_transfer_package_io_res* out_res);
+    omc_u8* out_bytes, omc_size out_cap, omc_transfer_package_io_res* out_res);
 
 /*
  * Collects zero-copy semantic views over validated package chunks into a
@@ -163,19 +160,19 @@ omc_transfer_package_bytes_materialize_to_buffer(
  * view count and no partial views are written.
  */
 OMC_API omc_status
-omc_transfer_package_batch_collect_views(
-    const omc_transfer_package_batch* batch,
-    omc_transfer_package_view* out_views, omc_u32 out_cap,
-    omc_transfer_package_io_res* out_res);
+omc_transfer_package_batch_collect_views(const omc_transfer_package_batch* batch,
+                                         omc_transfer_package_view* out_views,
+                                         omc_u32 out_cap,
+                                         omc_transfer_package_io_res* out_res);
 
 /*
  * Concatenates validated package chunk bytes into out_bytes. The output arena
  * is reset before writing and must not be the storage backing batch chunks.
  */
 OMC_API omc_status
-omc_transfer_package_batch_materialize(
-    const omc_transfer_package_batch* batch, omc_arena* out_bytes,
-    omc_transfer_package_io_res* out_res);
+omc_transfer_package_batch_materialize(const omc_transfer_package_batch* batch,
+                                       omc_arena* out_bytes,
+                                       omc_transfer_package_io_res* out_res);
 
 OMC_API omc_status
 omc_transfer_package_batch_replay(

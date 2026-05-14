@@ -12,31 +12,29 @@
 
 OMC_EXTERN_C_BEGIN
 
-enum {
-    OMC_TRANSFER_PAYLOAD_BATCH_VERSION = 1U
-};
+enum { OMC_TRANSFER_PAYLOAD_BATCH_VERSION = 1U };
 
 typedef enum omc_transfer_semantic_kind {
     OMC_TRANSFER_SEMANTIC_UNKNOWN = 0,
-    OMC_TRANSFER_SEMANTIC_EXIF = 1,
-    OMC_TRANSFER_SEMANTIC_XMP = 2,
-    OMC_TRANSFER_SEMANTIC_ICC = 3,
-    OMC_TRANSFER_SEMANTIC_IPTC = 4,
-    OMC_TRANSFER_SEMANTIC_JUMBF = 5,
-    OMC_TRANSFER_SEMANTIC_C2PA = 6
+    OMC_TRANSFER_SEMANTIC_EXIF    = 1,
+    OMC_TRANSFER_SEMANTIC_XMP     = 2,
+    OMC_TRANSFER_SEMANTIC_ICC     = 3,
+    OMC_TRANSFER_SEMANTIC_IPTC    = 4,
+    OMC_TRANSFER_SEMANTIC_JUMBF   = 5,
+    OMC_TRANSFER_SEMANTIC_C2PA    = 6
 } omc_transfer_semantic_kind;
 
 typedef enum omc_transfer_payload_op_kind {
-    OMC_TRANSFER_PAYLOAD_OP_JPEG_MARKER = 0,
-    OMC_TRANSFER_PAYLOAD_OP_TIFF_TAG_BYTES = 1,
-    OMC_TRANSFER_PAYLOAD_OP_JXL_BOX = 2,
+    OMC_TRANSFER_PAYLOAD_OP_JPEG_MARKER     = 0,
+    OMC_TRANSFER_PAYLOAD_OP_TIFF_TAG_BYTES  = 1,
+    OMC_TRANSFER_PAYLOAD_OP_JXL_BOX         = 2,
     OMC_TRANSFER_PAYLOAD_OP_JXL_ICC_PROFILE = 3,
-    OMC_TRANSFER_PAYLOAD_OP_WEBP_CHUNK = 4,
-    OMC_TRANSFER_PAYLOAD_OP_PNG_CHUNK = 5,
-    OMC_TRANSFER_PAYLOAD_OP_JP2_BOX = 6,
-    OMC_TRANSFER_PAYLOAD_OP_EXR_ATTRIBUTE = 7,
-    OMC_TRANSFER_PAYLOAD_OP_BMFF_ITEM = 8,
-    OMC_TRANSFER_PAYLOAD_OP_BMFF_PROPERTY = 9
+    OMC_TRANSFER_PAYLOAD_OP_WEBP_CHUNK      = 4,
+    OMC_TRANSFER_PAYLOAD_OP_PNG_CHUNK       = 5,
+    OMC_TRANSFER_PAYLOAD_OP_JP2_BOX         = 6,
+    OMC_TRANSFER_PAYLOAD_OP_EXR_ATTRIBUTE   = 7,
+    OMC_TRANSFER_PAYLOAD_OP_BMFF_ITEM       = 8,
+    OMC_TRANSFER_PAYLOAD_OP_BMFF_PROPERTY   = 9
 } omc_transfer_payload_op_kind;
 
 typedef struct omc_transfer_payload_op {
@@ -73,6 +71,7 @@ typedef struct omc_transfer_payload_batch {
 
 typedef struct omc_transfer_payload_build_opts {
     omc_scan_fmt format;
+    omc_transfer_safety_mode safety;
     omc_transfer_target_image_spec target_image_spec;
     int include_exif;
     int include_xmp;
@@ -143,15 +142,15 @@ omc_transfer_payload_batch_build(const omc_store* store,
                                  omc_transfer_payload_io_res* out_res);
 
 OMC_API omc_status
-omc_transfer_payload_batch_serialize(
-    const omc_transfer_payload_batch* batch, omc_arena* out_bytes,
-    omc_transfer_payload_io_res* out_res);
+omc_transfer_payload_batch_serialize(const omc_transfer_payload_batch* batch,
+                                     omc_arena* out_bytes,
+                                     omc_transfer_payload_io_res* out_res);
 
 OMC_API omc_status
-omc_transfer_payload_batch_deserialize(
-    const omc_u8* bytes, omc_size size, omc_arena* out_storage,
-    omc_transfer_payload_batch* out_batch,
-    omc_transfer_payload_io_res* out_res);
+omc_transfer_payload_batch_deserialize(const omc_u8* bytes, omc_size size,
+                                       omc_arena* out_storage,
+                                       omc_transfer_payload_batch* out_batch,
+                                       omc_transfer_payload_io_res* out_res);
 
 OMC_API omc_status
 omc_transfer_payload_batch_replay(
