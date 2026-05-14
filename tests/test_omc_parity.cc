@@ -10116,8 +10116,6 @@ run_omc_transfer_execute_case(const ByteVec& source_bytes,
     prepare_opts.writeback_mode            = options.writeback_mode;
     prepare_opts.dng_target_mode           = options.omc_dng_mode;
     prepare_opts.destination_embedded_mode = options.destination_embedded_mode;
-    prepare_opts.embedded.packet.format    = OMC_XMP_SIDECAR_LOSSLESS;
-    prepare_opts.sidecar.format            = OMC_XMP_SIDECAR_LOSSLESS;
     if (options.existing_sidecar_creator_tool != nullptr
         || options.existing_sidecar_xmp_builder != nullptr) {
         const ByteVec sidecar_bytes
@@ -10416,8 +10414,6 @@ run_omc_transfer_persist_case(const ByteVec& source_bytes,
     prepare_opts.writeback_mode            = options.writeback_mode;
     prepare_opts.dng_target_mode           = options.omc_dng_mode;
     prepare_opts.destination_embedded_mode = options.destination_embedded_mode;
-    prepare_opts.embedded.packet.format    = OMC_XMP_SIDECAR_LOSSLESS;
-    prepare_opts.sidecar.format            = OMC_XMP_SIDECAR_LOSSLESS;
     if (options.existing_sidecar_creator_tool != nullptr
         || options.existing_sidecar_xmp_builder != nullptr) {
         existing_sidecar_bytes
@@ -15893,6 +15889,88 @@ main(int argc, char** argv)
                                        build_transfer_target_bigtiff_fixture(
                                            "OldTool"),
                                        transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Webp;
+        transfer_opts.target_suffix     = ".webp";
+        ok                              = run_transfer_execute_case(
+                 "transfer_webp_exif_embedded_and_sidecar",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_webp_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Jp2;
+        transfer_opts.target_suffix     = ".jp2";
+        ok                              = run_transfer_execute_case(
+                 "transfer_jp2_exif_embedded_and_sidecar",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_jp2_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode    = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix     = ".tif";
+        ok                              = run_transfer_execute_case(
+                 "transfer_tiff_exif_sidecar_only_preserve",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_tiff_fixture("Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode    = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix     = ".tif";
+        ok                              = run_transfer_execute_case(
+                 "transfer_bigtiff_exif_sidecar_only_preserve",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_bigtiff_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode
+            = OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix     = ".tif";
+        ok                              = run_transfer_execute_case(
+                 "transfer_tiff_exif_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_tiff_fixture("Target Embedded Existing"),
+                 transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_SIDECAR_ONLY;
+        transfer_opts.destination_embedded_mode
+            = OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Tiff;
+        transfer_opts.target_suffix     = ".tif";
+        ok                              = run_transfer_execute_case(
+                 "transfer_bigtiff_exif_sidecar_only_strip",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_bigtiff_fixture(
+                     "Target Embedded Existing"),
+                 transfer_opts)
              && ok;
     }
     {

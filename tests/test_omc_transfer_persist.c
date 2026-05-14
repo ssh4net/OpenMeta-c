@@ -2425,6 +2425,75 @@ exercise_transfer_persist_source_icc_case(
 }
 
 static void
+exercise_transfer_persist_rendered_safety_drops_source_icc_case(
+    omc_transfer_persist_fixture_builder builder, const char* output_ext,
+    omc_scan_fmt format, omc_transfer_persist_preserve_kind preserve_kind)
+{
+    omc_u8 file_bytes[4096];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store output_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_arena file_read;
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    omc_status status;
+
+    file_size = builder(file_bytes);
+    build_temp_path(output_path, sizeof(output_path), output_ext);
+
+    omc_store_init(&source_store);
+    omc_store_init(&output_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_arena_init(&file_read);
+    build_store_with_creator_tool(&source_store, "NewTool");
+    build_store_with_test_icc(&source_store);
+
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.format         = format;
+    prepare_opts.safety         = OMC_TRANSFER_SAFETY_RENDERED_IMAGE;
+    prepare_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    execute_transfer(file_bytes, file_size, &source_store, &prepare_opts,
+                     &edited_out, &sidecar_out, &exec, &transfer_res);
+    assert(transfer_res.edited_present);
+    assert(!transfer_res.sidecar_present);
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.output_path = output_path;
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    assert(status == OMC_STATUS_OK);
+    assert(persist_res.status == OMC_TRANSFER_OK);
+    assert(persist_res.output_status == OMC_TRANSFER_OK);
+
+    assert_read_file_bytes(output_path, &file_read);
+    read_store_from_bytes(file_read.data, file_read.size, &output_store);
+    assert_persist_xmp_state(&output_store, OMC_TRANSFER_PERSIST_XMP_NEW);
+    assert_persist_preserved_metadata(&output_store, preserve_kind);
+    assert(find_icc_header_entry(&output_store, 0U) == (const omc_entry*)0);
+    assert(find_icc_tag_entry(&output_store, fourcc('d', 'e', 's', 'c'))
+           == (const omc_entry*)0);
+
+    remove(output_path);
+    omc_arena_fini(&file_read);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&output_store);
+    omc_store_fini(&source_store);
+}
+
+static void
 test_transfer_persist_writes_png_output_and_sidecar(void)
 {
     exercise_transfer_persist_case(make_test_png_with_old_xmp_and_text, ".png",
@@ -3593,6 +3662,30 @@ test_transfer_persist_jpeg_rendered_safety_drops_source_icc(void)
 }
 
 static void
+test_transfer_persist_tiff_rendered_safety_drops_source_icc(void)
+{
+    exercise_transfer_persist_rendered_safety_drops_source_icc_case(
+        make_test_tiff_le_with_make_only, ".tif", OMC_SCAN_FMT_TIFF,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_bigtiff_rendered_safety_drops_source_icc(void)
+{
+    exercise_transfer_persist_rendered_safety_drops_source_icc_case(
+        make_test_bigtiff_le_with_make_and_old_xmp, ".tif", OMC_SCAN_FMT_TIFF,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_dng_rendered_safety_drops_source_icc(void)
+{
+    exercise_transfer_persist_rendered_safety_drops_source_icc_case(
+        make_test_dng_with_old_xmp_and_make, ".dng", OMC_SCAN_FMT_DNG,
+        OMC_TRANSFER_PERSIST_PRESERVE_DNG_CORE);
+}
+
+static void
 test_transfer_persist_jpeg_target_image_spec_output_metadata(void)
 {
     omc_u8 file_bytes[4096];
@@ -3686,6 +3779,30 @@ test_transfer_persist_jp2_embedded_only_source_icc(void)
 {
     exercise_transfer_persist_source_icc_case(
         make_test_jp2_with_old_xmp_and_exif, ".jp2", OMC_SCAN_FMT_JP2,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_heif_rendered_safety_drops_source_icc(void)
+{
+    exercise_transfer_persist_rendered_safety_drops_source_icc_case(
+        make_test_heif_with_old_xmp_and_exif, ".heic", OMC_SCAN_FMT_HEIF,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_avif_rendered_safety_drops_source_icc(void)
+{
+    exercise_transfer_persist_rendered_safety_drops_source_icc_case(
+        make_test_avif_with_old_xmp_and_exif, ".avif", OMC_SCAN_FMT_AVIF,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_cr3_rendered_safety_drops_source_icc(void)
+{
+    exercise_transfer_persist_rendered_safety_drops_source_icc_case(
+        make_test_cr3_with_old_xmp_and_exif, ".cr3", OMC_SCAN_FMT_CR3,
         OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
 }
 
@@ -3859,9 +3976,15 @@ main(void)
     test_transfer_persist_png_embedded_only_source_icc();
     test_transfer_persist_jpeg_embedded_only_source_icc();
     test_transfer_persist_jpeg_rendered_safety_drops_source_icc();
+    test_transfer_persist_tiff_rendered_safety_drops_source_icc();
+    test_transfer_persist_bigtiff_rendered_safety_drops_source_icc();
+    test_transfer_persist_dng_rendered_safety_drops_source_icc();
     test_transfer_persist_jpeg_target_image_spec_output_metadata();
     test_transfer_persist_webp_embedded_only_source_icc();
     test_transfer_persist_jp2_embedded_only_source_icc();
+    test_transfer_persist_heif_rendered_safety_drops_source_icc();
+    test_transfer_persist_avif_rendered_safety_drops_source_icc();
+    test_transfer_persist_cr3_rendered_safety_drops_source_icc();
     test_transfer_persist_jxl_embedded_only_source_exif_replaces_brob_exif();
     test_transfer_persist_dng_template_sidecar_only_requires_output_path();
     return 0;

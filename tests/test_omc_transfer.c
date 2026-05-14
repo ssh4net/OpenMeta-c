@@ -1,6 +1,7 @@
 #include "omc/omc_icc.h"
 #include "omc/omc_read.h"
 #include "omc/omc_transfer.h"
+#include "omc/omc_transfer_package.h"
 
 #include "omc_test_assert.h"
 #include <string.h>
@@ -49,6 +50,75 @@ contains_text(const omc_u8* bytes, omc_size size, const char* text)
         }
     }
     return 0;
+}
+
+static void
+assert_executed_output_package_materializes(const omc_u8* input_bytes,
+                                            omc_size input_size,
+                                            const omc_u8* output_bytes,
+                                            omc_size output_size,
+                                            const omc_transfer_res* execute,
+                                            omc_scan_fmt expected_format)
+{
+    omc_transfer_package_batch batch;
+    omc_transfer_package_batch parsed;
+    omc_transfer_package_io_res io_res;
+    omc_arena storage;
+    omc_arena materialized;
+    omc_arena serialized;
+    omc_arena parsed_storage;
+    omc_status status;
+
+    omc_transfer_package_batch_init(&batch);
+    omc_transfer_package_batch_init(&parsed);
+    omc_arena_init(&storage);
+    omc_arena_init(&materialized);
+    omc_arena_init(&serialized);
+    omc_arena_init(&parsed_storage);
+
+    status = omc_transfer_package_batch_build_executed_output(
+        input_bytes, input_size, output_bytes, output_size, execute, &storage,
+        &batch, &io_res);
+    assert(status == OMC_STATUS_OK);
+    assert(io_res.status == OMC_TRANSFER_OK);
+    assert(batch.target_format == expected_format);
+    assert(batch.input_size == (omc_u64)input_size);
+    assert(batch.output_size == (omc_u64)output_size);
+    assert(batch.chunk_count > 0U);
+
+    status = omc_transfer_package_batch_materialize(&batch, &materialized,
+                                                    &io_res);
+    assert(status == OMC_STATUS_OK);
+    assert(io_res.status == OMC_TRANSFER_OK);
+    assert(io_res.bytes == (omc_u64)output_size);
+    assert(materialized.size == output_size);
+    assert(memcmp(materialized.data, output_bytes, output_size) == 0);
+
+    status = omc_transfer_package_batch_serialize(&batch, &serialized, &io_res);
+    assert(status == OMC_STATUS_OK);
+    assert(io_res.status == OMC_TRANSFER_OK);
+    assert(serialized.size >= 8U);
+    assert(memcmp(serialized.data, "OMTPKG01", 8U) == 0);
+
+    status = omc_transfer_package_batch_deserialize(serialized.data,
+                                                    serialized.size,
+                                                    &parsed_storage, &parsed,
+                                                    &io_res);
+    assert(status == OMC_STATUS_OK);
+    assert(io_res.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_package_batch_materialize(&parsed, &materialized,
+                                                    &io_res);
+    assert(status == OMC_STATUS_OK);
+    assert(io_res.status == OMC_TRANSFER_OK);
+    assert(io_res.bytes == (omc_u64)output_size);
+    assert(materialized.size == output_size);
+    assert(memcmp(materialized.data, output_bytes, output_size) == 0);
+
+    omc_arena_fini(&parsed_storage);
+    omc_arena_fini(&serialized);
+    omc_arena_fini(&materialized);
+    omc_arena_fini(&storage);
 }
 
 static omc_u32
@@ -952,6 +1022,15 @@ assert_u16_value(const omc_entry* entry, omc_u16 expect)
     OMC_TEST_REQUIRE_U64_EQ(entry->value.kind, OMC_VAL_SCALAR);
     OMC_TEST_REQUIRE_U64_EQ(entry->value.elem_type, OMC_ELEM_U16);
     OMC_TEST_CHECK_U64_EQ((omc_u16)entry->value.u.u64, expect);
+}
+
+static void
+assert_u32_value(const omc_entry* entry, omc_u32 expect)
+{
+    OMC_TEST_REQUIRE(entry != (const omc_entry*)0);
+    OMC_TEST_REQUIRE_U64_EQ(entry->value.kind, OMC_VAL_SCALAR);
+    OMC_TEST_REQUIRE_U64_EQ(entry->value.elem_type, OMC_ELEM_U32);
+    OMC_TEST_CHECK_U64_EQ((omc_u32)entry->value.u.u64, expect);
 }
 
 static void
@@ -3897,6 +3976,10 @@ test_transfer_execute_heif_primary_metadata_cdsc_refs(void)
     assert(!contains_text(edited_out.data, edited_out.size, "OldTool"));
     assert_bmff_primary_metadata_item_graph(edited_out.data, edited_out.size,
                                             3U);
+    assert_executed_output_package_materializes(file_bytes, file_size,
+                                                edited_out.data,
+                                                edited_out.size, &res,
+                                                OMC_SCAN_FMT_HEIF);
 
     read_store_from_bytes(edited_out.data, edited_out.size, &edited_store);
     assert_text_value(&edited_store,
@@ -6619,6 +6702,266 @@ test_transfer_execute_jpeg_rendered_safety_drops_source_icc(void)
 }
 
 static void
+exercise_transfer_execute_rendered_safety_drops_source_icc_case(
+    omc_transfer_fixture_builder builder, omc_scan_fmt format,
+    omc_transfer_preserve_kind preserve_kind)
+{
+    omc_u8 file_bytes[4096];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store edited_store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = builder(file_bytes);
+    omc_store_init(&source_store);
+    omc_store_init(&edited_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_creator_tool(&source_store, "NewTool");
+    build_store_with_test_icc(&source_store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.format         = format;
+    opts.safety         = OMC_TRANSFER_SAFETY_RENDERED_IMAGE;
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &source_store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &source_store,
+                                  &edited_out, &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(!res.sidecar_present);
+
+    read_store_from_bytes(edited_out.data, edited_out.size, &edited_store);
+    assert_embedded_xmp_state(&edited_store, OMC_TRANSFER_EMBEDDED_XMP_NEW);
+    assert_preserved_metadata(&edited_store, preserve_kind);
+    assert(find_icc_header_entry(&edited_store, 0U) == (const omc_entry*)0);
+    assert(find_icc_tag_entry(&edited_store, fourcc('d', 'e', 's', 'c'))
+           == (const omc_entry*)0);
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&edited_store);
+    omc_store_fini(&source_store);
+}
+
+static void
+build_store_with_rendered_safety_source_specific(omc_store* store)
+{
+    static const char k_ns_camera_raw[]
+        = "http://ns.adobe.com/camera-raw-settings/1.0/";
+
+    build_store_with_creator_tool(store, "NewTool");
+    add_exif_u16_entry(store, "ifd0", 0xC621U, 1U);
+    add_exif_u16_entry(store, "exififd", 0x927CU, 1U);
+    add_xmp_text_entry(store, k_ns_camera_raw, "WhiteBalance", "As Shot");
+}
+
+static void
+assert_rendered_safety_source_specific_filtered(const omc_store* store)
+{
+    static const char k_ns_camera_raw[]
+        = "http://ns.adobe.com/camera-raw-settings/1.0/";
+
+    assert(find_exif_entry(store, "ifd0", 0xC621U) == (const omc_entry*)0);
+    assert(find_exif_entry(store, "exififd", 0x927CU) == (const omc_entry*)0);
+    assert(find_xmp_entry(store, k_ns_camera_raw, "WhiteBalance")
+           == (const omc_entry*)0);
+}
+
+static void
+exercise_transfer_execute_rendered_safety_drops_source_specific_case(
+    omc_transfer_fixture_builder builder, omc_scan_fmt format,
+    omc_transfer_preserve_kind preserve_kind)
+{
+    omc_u8 file_bytes[4096];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store edited_store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = builder(file_bytes);
+    omc_store_init(&source_store);
+    omc_store_init(&edited_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_rendered_safety_source_specific(&source_store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.format         = format;
+    opts.safety         = OMC_TRANSFER_SAFETY_RENDERED_IMAGE;
+    opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &source_store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &source_store,
+                                  &edited_out, &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(!res.sidecar_present);
+
+    read_store_from_bytes(edited_out.data, edited_out.size, &edited_store);
+    assert_embedded_xmp_state(&edited_store, OMC_TRANSFER_EMBEDDED_XMP_NEW);
+    assert_preserved_metadata(&edited_store, preserve_kind);
+    assert_rendered_safety_source_specific_filtered(&edited_store);
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&edited_store);
+    omc_store_fini(&source_store);
+}
+
+static void
+build_store_with_stale_target_image_layout(omc_store* store)
+{
+    static const char k_ns_tiff[] = "http://ns.adobe.com/tiff/1.0/";
+    static const char k_ns_exif[] = "http://ns.adobe.com/exif/1.0/";
+
+    build_store_with_creator_tool(store, "NewTool");
+    add_exif_u16_entry(store, "ifd0", 0x0100U, 999U);
+    add_exif_u16_entry(store, "ifd0", 0x0101U, 999U);
+    add_exif_u16_entry(store, "exififd", 0xA002U, 999U);
+    add_exif_u16_entry(store, "exififd", 0xA003U, 999U);
+    add_xmp_text_entry(store, k_ns_tiff, "ImageWidth", "999");
+    add_xmp_text_entry(store, k_ns_tiff, "ImageHeight", "999");
+    add_xmp_text_entry(store, k_ns_exif, "ExifImageWidth", "999");
+    add_xmp_text_entry(store, k_ns_exif, "ExifImageHeight", "999");
+}
+
+static void
+assert_target_image_spec_output_metadata(const omc_store* store)
+{
+    static const char k_ns_tiff[] = "http://ns.adobe.com/tiff/1.0/";
+    static const char k_ns_exif[] = "http://ns.adobe.com/exif/1.0/";
+
+    assert_text_value(store, find_xmp_entry(store, k_ns_tiff, "ImageWidth"),
+                      "320");
+    assert_text_value(store, find_xmp_entry(store, k_ns_tiff, "ImageHeight"),
+                      "240");
+    assert_text_value(store, find_xmp_entry(store, k_ns_exif, "ExifImageWidth"),
+                      "320");
+    assert_text_value(store,
+                      find_xmp_entry(store, k_ns_exif, "ExifImageHeight"),
+                      "240");
+    assert(count_xmp_entries(store, k_ns_tiff, "ImageWidth") == 1U);
+    assert(count_xmp_entries(store, k_ns_tiff, "ImageHeight") == 1U);
+    assert(count_xmp_entries(store, k_ns_exif, "ExifImageWidth") == 1U);
+    assert(count_xmp_entries(store, k_ns_exif, "ExifImageHeight") == 1U);
+    assert_u32_value(find_exif_entry(store, "ifd0", 0x0100U), 320U);
+    assert_u32_value(find_exif_entry(store, "ifd0", 0x0101U), 240U);
+    assert_u32_value(find_exif_entry(store, "exififd", 0xA002U), 320U);
+    assert_u32_value(find_exif_entry(store, "exififd", 0xA003U), 240U);
+}
+
+static void
+exercise_transfer_execute_target_image_spec_filters_case(
+    omc_transfer_fixture_builder builder, omc_scan_fmt format,
+    omc_transfer_preserve_kind preserve_kind)
+{
+    omc_u8 file_bytes[4096];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store edited_store;
+    omc_transfer_prepare_opts opts;
+    omc_transfer_bundle bundle;
+    omc_transfer_exec exec;
+    omc_transfer_res res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_status status;
+
+    file_size = builder(file_bytes);
+    omc_store_init(&source_store);
+    omc_store_init(&edited_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    build_store_with_stale_target_image_layout(&source_store);
+
+    omc_transfer_prepare_opts_init(&opts);
+    opts.format                           = format;
+    opts.writeback_mode                   = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    opts.target_image_spec.has_dimensions = 1;
+    opts.target_image_spec.width          = 320U;
+    opts.target_image_spec.height         = 240U;
+
+    status = omc_transfer_prepare(file_bytes, file_size, &source_store, &opts,
+                                  &bundle);
+    assert(status == OMC_STATUS_OK);
+    assert(bundle.status == OMC_TRANSFER_OK);
+
+    status = omc_transfer_compile(&bundle, &exec);
+    assert(status == OMC_STATUS_OK);
+
+    status = omc_transfer_execute(file_bytes, file_size, &source_store,
+                                  &edited_out, &sidecar_out, &exec, &res);
+    assert(status == OMC_STATUS_OK);
+    assert(res.status == OMC_TRANSFER_OK);
+    assert(res.edited_present);
+    assert(!res.sidecar_present);
+
+    read_store_from_bytes(edited_out.data, edited_out.size, &edited_store);
+    assert_embedded_xmp_state(&edited_store, OMC_TRANSFER_EMBEDDED_XMP_NEW);
+    assert_preserved_metadata(&edited_store, preserve_kind);
+    assert_target_image_spec_output_metadata(&edited_store);
+
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&edited_store);
+    omc_store_fini(&source_store);
+}
+
+static void
+test_transfer_execute_tiff_rendered_safety_drops_source_icc(void)
+{
+    exercise_transfer_execute_rendered_safety_drops_source_icc_case(
+        make_test_tiff_with_old_xmp_and_make, OMC_SCAN_FMT_TIFF,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_bigtiff_rendered_safety_drops_source_icc(void)
+{
+    exercise_transfer_execute_rendered_safety_drops_source_icc_case(
+        make_test_bigtiff_le_with_make_and_old_xmp, OMC_SCAN_FMT_TIFF,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_dng_rendered_safety_drops_source_icc(void)
+{
+    exercise_transfer_execute_rendered_safety_drops_source_icc_case(
+        make_test_dng_with_old_xmp_and_make, OMC_SCAN_FMT_DNG,
+        OMC_TRANSFER_PRESERVE_DNG_CORE);
+}
+
+static void
 test_transfer_execute_png_embedded_only_source_icc(void)
 {
     omc_u8 file_bytes[1024];
@@ -6925,6 +7268,118 @@ test_transfer_execute_cr3_embedded_only_source_icc(void)
 }
 
 static void
+test_transfer_execute_heif_rendered_safety_drops_source_icc(void)
+{
+    exercise_transfer_execute_rendered_safety_drops_source_icc_case(
+        make_test_heif_with_old_xmp_and_exif, OMC_SCAN_FMT_HEIF,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_avif_rendered_safety_drops_source_icc(void)
+{
+    exercise_transfer_execute_rendered_safety_drops_source_icc_case(
+        make_test_avif_with_old_xmp_and_exif, OMC_SCAN_FMT_AVIF,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_cr3_rendered_safety_drops_source_icc(void)
+{
+    exercise_transfer_execute_rendered_safety_drops_source_icc_case(
+        make_test_cr3_with_old_xmp_and_exif, OMC_SCAN_FMT_CR3,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_tiff_rendered_safety_drops_source_specific(void)
+{
+    exercise_transfer_execute_rendered_safety_drops_source_specific_case(
+        make_test_tiff_with_old_xmp_and_make, OMC_SCAN_FMT_TIFF,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_bigtiff_rendered_safety_drops_source_specific(void)
+{
+    exercise_transfer_execute_rendered_safety_drops_source_specific_case(
+        make_test_bigtiff_le_with_make_and_old_xmp, OMC_SCAN_FMT_TIFF,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_dng_rendered_safety_drops_source_specific(void)
+{
+    exercise_transfer_execute_rendered_safety_drops_source_specific_case(
+        make_test_dng_with_old_xmp_and_make, OMC_SCAN_FMT_DNG,
+        OMC_TRANSFER_PRESERVE_DNG_CORE);
+}
+
+static void
+test_transfer_execute_heif_rendered_safety_drops_source_specific(void)
+{
+    exercise_transfer_execute_rendered_safety_drops_source_specific_case(
+        make_test_heif_with_old_xmp_and_exif, OMC_SCAN_FMT_HEIF,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_avif_rendered_safety_drops_source_specific(void)
+{
+    exercise_transfer_execute_rendered_safety_drops_source_specific_case(
+        make_test_avif_with_old_xmp_and_exif, OMC_SCAN_FMT_AVIF,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_cr3_rendered_safety_drops_source_specific(void)
+{
+    exercise_transfer_execute_rendered_safety_drops_source_specific_case(
+        make_test_cr3_with_old_xmp_and_exif, OMC_SCAN_FMT_CR3,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_webp_target_image_spec_filters_stale_layout(void)
+{
+    exercise_transfer_execute_target_image_spec_filters_case(
+        make_test_webp_with_old_xmp_and_exif, OMC_SCAN_FMT_WEBP,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_jp2_target_image_spec_filters_stale_layout(void)
+{
+    exercise_transfer_execute_target_image_spec_filters_case(
+        make_test_jp2_with_old_xmp_and_exif, OMC_SCAN_FMT_JP2,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_heif_target_image_spec_filters_stale_layout(void)
+{
+    exercise_transfer_execute_target_image_spec_filters_case(
+        make_test_heif_with_old_xmp_and_exif, OMC_SCAN_FMT_HEIF,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_avif_target_image_spec_filters_stale_layout(void)
+{
+    exercise_transfer_execute_target_image_spec_filters_case(
+        make_test_avif_with_old_xmp_and_exif, OMC_SCAN_FMT_AVIF,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_execute_cr3_target_image_spec_filters_stale_layout(void)
+{
+    exercise_transfer_execute_target_image_spec_filters_case(
+        make_test_cr3_with_old_xmp_and_exif, OMC_SCAN_FMT_CR3,
+        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+}
+
+static void
 test_transfer_execute_dng_minimal_fresh_scaffold_embedded_only_with_icc(void)
 {
     static const omc_u8 k_dng_version[4] = { 1U, 6U, 0U, 0U };
@@ -7103,6 +7558,9 @@ main(void)
     test_transfer_execute_dng_embedded_only_source_iptc();
     test_transfer_execute_jpeg_embedded_only_source_icc();
     test_transfer_execute_jpeg_rendered_safety_drops_source_icc();
+    test_transfer_execute_tiff_rendered_safety_drops_source_icc();
+    test_transfer_execute_bigtiff_rendered_safety_drops_source_icc();
+    test_transfer_execute_dng_rendered_safety_drops_source_icc();
     test_transfer_execute_png_embedded_only_source_icc();
     test_transfer_execute_png_sidecar_only_preserve_source_icc();
     test_transfer_execute_webp_embedded_only_source_icc();
@@ -7110,6 +7568,20 @@ main(void)
     test_transfer_execute_heif_embedded_only_source_icc();
     test_transfer_execute_avif_embedded_only_source_icc();
     test_transfer_execute_cr3_embedded_only_source_icc();
+    test_transfer_execute_heif_rendered_safety_drops_source_icc();
+    test_transfer_execute_avif_rendered_safety_drops_source_icc();
+    test_transfer_execute_cr3_rendered_safety_drops_source_icc();
+    test_transfer_execute_tiff_rendered_safety_drops_source_specific();
+    test_transfer_execute_bigtiff_rendered_safety_drops_source_specific();
+    test_transfer_execute_dng_rendered_safety_drops_source_specific();
+    test_transfer_execute_heif_rendered_safety_drops_source_specific();
+    test_transfer_execute_avif_rendered_safety_drops_source_specific();
+    test_transfer_execute_cr3_rendered_safety_drops_source_specific();
+    test_transfer_execute_webp_target_image_spec_filters_stale_layout();
+    test_transfer_execute_jp2_target_image_spec_filters_stale_layout();
+    test_transfer_execute_heif_target_image_spec_filters_stale_layout();
+    test_transfer_execute_avif_target_image_spec_filters_stale_layout();
+    test_transfer_execute_cr3_target_image_spec_filters_stale_layout();
     test_transfer_execute_dng_minimal_fresh_scaffold_embedded_only_with_iptc();
     test_transfer_execute_dng_minimal_fresh_scaffold_embedded_only_with_icc();
     test_transfer_execute_dng_existing_and_template_modes_with_target_bytes();
