@@ -298,6 +298,37 @@ find_xmp_entry(const omc_store* store, const char* schema_ns,
     return (const omc_entry*)0;
 }
 
+static omc_size
+count_xmp_entries(const omc_store* store, const char* schema_ns,
+                  const char* property_path)
+{
+    omc_size i;
+    omc_size count;
+
+    count = 0U;
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+        omc_const_bytes ns_view;
+        omc_const_bytes path_view;
+
+        entry = &store->entries[i];
+        if (entry->key.kind != OMC_KEY_XMP_PROPERTY) {
+            continue;
+        }
+        ns_view   = omc_arena_view(&store->arena,
+                                   entry->key.u.xmp_property.schema_ns);
+        path_view = omc_arena_view(&store->arena,
+                                   entry->key.u.xmp_property.property_path);
+        if (ns_view.size == strlen(schema_ns)
+            && path_view.size == strlen(property_path)
+            && memcmp(ns_view.data, schema_ns, ns_view.size) == 0
+            && memcmp(path_view.data, property_path, path_view.size) == 0) {
+            count += 1U;
+        }
+    }
+    return count;
+}
+
 static const omc_entry*
 find_png_text_entry(const omc_store* store, const char* keyword,
                     const char* field)
@@ -561,6 +592,15 @@ assert_u16_value(const omc_entry* entry, omc_u16 expect)
 }
 
 static void
+assert_u32_value(const omc_entry* entry, omc_u32 expect)
+{
+    assert(entry != (const omc_entry*)0);
+    assert(entry->value.kind == OMC_VAL_SCALAR);
+    assert(entry->value.elem_type == OMC_ELEM_U32);
+    assert((omc_u32)entry->value.u.u64 == expect);
+}
+
+static void
 assert_urational_scalar_value(const omc_entry* entry, omc_u32 numer,
                               omc_u32 denom)
 {
@@ -622,6 +662,38 @@ build_store_with_creator_tool(omc_store* store, const char* tool)
                               append_store_bytes(&store->arena, "CreatorTool"));
     omc_val_make_text(&entry.value, append_store_bytes(&store->arena, tool),
                       OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+add_xmp_text_entry(omc_store* store, const char* schema_ns,
+                   const char* property_path, const char* text)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(&entry.key,
+                              append_store_bytes(&store->arena, schema_ns),
+                              append_store_bytes(&store->arena, property_path));
+    omc_val_make_text(&entry.value, append_store_bytes(&store->arena, text),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    assert(status == OMC_STATUS_OK);
+}
+
+static void
+add_exif_u16_entry(omc_store* store, const char* ifd_name, omc_u16 tag,
+                   omc_u16 value)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_exif_tag(&entry.key,
+                          append_store_bytes(&store->arena, ifd_name), tag);
+    omc_val_make_u16(&entry.value, value);
     status = omc_store_add_entry(store, &entry, NULL);
     assert(status == OMC_STATUS_OK);
 }
@@ -2494,6 +2566,206 @@ exercise_transfer_persist_rendered_safety_drops_source_icc_case(
 }
 
 static void
+build_store_with_rendered_safety_source_specific(omc_store* store)
+{
+    static const char k_ns_camera_raw[]
+        = "http://ns.adobe.com/camera-raw-settings/1.0/";
+
+    build_store_with_creator_tool(store, "NewTool");
+    add_exif_u16_entry(store, "ifd0", 0xC621U, 1U);
+    add_exif_u16_entry(store, "exififd", 0x927CU, 1U);
+    add_xmp_text_entry(store, k_ns_camera_raw, "WhiteBalance", "As Shot");
+}
+
+static void
+assert_rendered_safety_source_specific_filtered(const omc_store* store)
+{
+    static const char k_ns_camera_raw[]
+        = "http://ns.adobe.com/camera-raw-settings/1.0/";
+
+    assert(find_exif_entry(store, "ifd0", 0xC621U) == (const omc_entry*)0);
+    assert(find_exif_entry(store, "exififd", 0x927CU) == (const omc_entry*)0);
+    assert(find_xmp_entry(store, k_ns_camera_raw, "WhiteBalance")
+           == (const omc_entry*)0);
+}
+
+static void
+exercise_transfer_persist_rendered_safety_drops_source_specific_case(
+    omc_transfer_persist_fixture_builder builder, const char* output_ext,
+    omc_scan_fmt format, omc_transfer_persist_preserve_kind preserve_kind)
+{
+    omc_u8 file_bytes[4096];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store output_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_arena file_read;
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    omc_status status;
+
+    file_size = builder(file_bytes);
+    build_temp_path(output_path, sizeof(output_path), output_ext);
+
+    omc_store_init(&source_store);
+    omc_store_init(&output_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_arena_init(&file_read);
+    build_store_with_rendered_safety_source_specific(&source_store);
+
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.format         = format;
+    prepare_opts.safety         = OMC_TRANSFER_SAFETY_RENDERED_IMAGE;
+    prepare_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    execute_transfer(file_bytes, file_size, &source_store, &prepare_opts,
+                     &edited_out, &sidecar_out, &exec, &transfer_res);
+    assert(transfer_res.edited_present);
+    assert(!transfer_res.sidecar_present);
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.output_path = output_path;
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    assert(status == OMC_STATUS_OK);
+    assert(persist_res.status == OMC_TRANSFER_OK);
+    assert(persist_res.output_status == OMC_TRANSFER_OK);
+
+    assert_read_file_bytes(output_path, &file_read);
+    read_store_from_bytes(file_read.data, file_read.size, &output_store);
+    assert_persist_xmp_state(&output_store, OMC_TRANSFER_PERSIST_XMP_NEW);
+    assert_persist_preserved_metadata(&output_store, preserve_kind);
+    assert_rendered_safety_source_specific_filtered(&output_store);
+
+    remove(output_path);
+    omc_arena_fini(&file_read);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&output_store);
+    omc_store_fini(&source_store);
+}
+
+static void
+build_store_with_stale_target_image_layout(omc_store* store)
+{
+    static const char k_ns_tiff[] = "http://ns.adobe.com/tiff/1.0/";
+    static const char k_ns_exif[] = "http://ns.adobe.com/exif/1.0/";
+
+    build_store_with_creator_tool(store, "NewTool");
+    add_exif_u16_entry(store, "ifd0", 0x0100U, 999U);
+    add_exif_u16_entry(store, "ifd0", 0x0101U, 999U);
+    add_exif_u16_entry(store, "exififd", 0xA002U, 999U);
+    add_exif_u16_entry(store, "exififd", 0xA003U, 999U);
+    add_xmp_text_entry(store, k_ns_tiff, "ImageWidth", "999");
+    add_xmp_text_entry(store, k_ns_tiff, "ImageHeight", "999");
+    add_xmp_text_entry(store, k_ns_exif, "ExifImageWidth", "999");
+    add_xmp_text_entry(store, k_ns_exif, "ExifImageHeight", "999");
+}
+
+static void
+assert_target_image_spec_output_metadata(const omc_store* store)
+{
+    static const char k_ns_tiff[] = "http://ns.adobe.com/tiff/1.0/";
+    static const char k_ns_exif[] = "http://ns.adobe.com/exif/1.0/";
+
+    assert_text_value(store, find_xmp_entry(store, k_ns_tiff, "ImageWidth"),
+                      "320");
+    assert_text_value(store, find_xmp_entry(store, k_ns_tiff, "ImageHeight"),
+                      "240");
+    assert_text_value(store, find_xmp_entry(store, k_ns_exif, "ExifImageWidth"),
+                      "320");
+    assert_text_value(store,
+                      find_xmp_entry(store, k_ns_exif, "ExifImageHeight"),
+                      "240");
+    assert(count_xmp_entries(store, k_ns_tiff, "ImageWidth") == 1U);
+    assert(count_xmp_entries(store, k_ns_tiff, "ImageHeight") == 1U);
+    assert(count_xmp_entries(store, k_ns_exif, "ExifImageWidth") == 1U);
+    assert(count_xmp_entries(store, k_ns_exif, "ExifImageHeight") == 1U);
+    assert_u32_value(find_exif_entry(store, "ifd0", 0x0100U), 320U);
+    assert_u32_value(find_exif_entry(store, "ifd0", 0x0101U), 240U);
+    assert_u32_value(find_exif_entry(store, "exififd", 0xA002U), 320U);
+    assert_u32_value(find_exif_entry(store, "exififd", 0xA003U), 240U);
+}
+
+static void
+exercise_transfer_persist_target_image_spec_filters_case(
+    omc_transfer_persist_fixture_builder builder, const char* output_ext,
+    omc_scan_fmt format, omc_transfer_persist_preserve_kind preserve_kind)
+{
+    omc_u8 file_bytes[4096];
+    omc_size file_size;
+    omc_store source_store;
+    omc_store output_store;
+    omc_transfer_prepare_opts prepare_opts;
+    omc_transfer_exec exec;
+    omc_transfer_res transfer_res;
+    omc_transfer_persist_opts persist_opts;
+    omc_transfer_persist_res persist_res;
+    omc_arena edited_out;
+    omc_arena sidecar_out;
+    omc_arena meta_out;
+    omc_arena file_read;
+    char output_path[OMC_TEST_TEMP_PATH_CAP];
+    omc_status status;
+
+    file_size = builder(file_bytes);
+    build_temp_path(output_path, sizeof(output_path), output_ext);
+
+    omc_store_init(&source_store);
+    omc_store_init(&output_store);
+    omc_arena_init(&edited_out);
+    omc_arena_init(&sidecar_out);
+    omc_arena_init(&meta_out);
+    omc_arena_init(&file_read);
+    build_store_with_stale_target_image_layout(&source_store);
+
+    omc_transfer_prepare_opts_init(&prepare_opts);
+    prepare_opts.format         = format;
+    prepare_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    prepare_opts.target_image_spec.has_dimensions = 1;
+    prepare_opts.target_image_spec.width          = 320U;
+    prepare_opts.target_image_spec.height         = 240U;
+    execute_transfer(file_bytes, file_size, &source_store, &prepare_opts,
+                     &edited_out, &sidecar_out, &exec, &transfer_res);
+    assert(transfer_res.edited_present);
+    assert(!transfer_res.sidecar_present);
+
+    omc_transfer_persist_opts_init(&persist_opts);
+    persist_opts.output_path = output_path;
+    status = omc_transfer_persist(edited_out.data, edited_out.size,
+                                  sidecar_out.data, sidecar_out.size,
+                                  &transfer_res, &persist_opts, &meta_out,
+                                  &persist_res);
+    assert(status == OMC_STATUS_OK);
+    assert(persist_res.status == OMC_TRANSFER_OK);
+    assert(persist_res.output_status == OMC_TRANSFER_OK);
+
+    assert_read_file_bytes(output_path, &file_read);
+    read_store_from_bytes(file_read.data, file_read.size, &output_store);
+    assert_persist_xmp_state(&output_store, OMC_TRANSFER_PERSIST_XMP_NEW);
+    assert_persist_preserved_metadata(&output_store, preserve_kind);
+    assert_target_image_spec_output_metadata(&output_store);
+
+    remove(output_path);
+    omc_arena_fini(&file_read);
+    omc_arena_fini(&meta_out);
+    omc_arena_fini(&sidecar_out);
+    omc_arena_fini(&edited_out);
+    omc_store_fini(&output_store);
+    omc_store_fini(&source_store);
+}
+
+static void
 test_transfer_persist_writes_png_output_and_sidecar(void)
 {
     exercise_transfer_persist_case(make_test_png_with_old_xmp_and_text, ".png",
@@ -2689,20 +2961,17 @@ test_transfer_persist_embedded_and_sidecar_source_exif_supported_formats(void)
         make_test_heif_with_old_xmp_and_exif, ".heic",
         OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
-        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE, OMC_TRANSFER_PERSIST_XMP_NEW,
-        0);
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE, OMC_TRANSFER_PERSIST_XMP_NEW, 0);
     exercise_transfer_persist_source_exif_case(
         make_test_avif_with_old_xmp_and_exif, ".avif",
         OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
-        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE, OMC_TRANSFER_PERSIST_XMP_NEW,
-        0);
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE, OMC_TRANSFER_PERSIST_XMP_NEW, 0);
     exercise_transfer_persist_source_exif_case(
         make_test_cr3_with_old_xmp_and_exif, ".cr3",
         OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
-        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE, OMC_TRANSFER_PERSIST_XMP_NEW,
-        0);
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE, OMC_TRANSFER_PERSIST_XMP_NEW, 0);
     exercise_transfer_persist_source_exif_case(
         make_test_jxl_with_old_xmp_and_exif, ".jxl",
         OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
@@ -2741,18 +3010,15 @@ test_transfer_persist_sidecar_only_preserve_source_exif_supported_formats(void)
     exercise_transfer_persist_source_exif_case(
         make_test_heif_with_old_xmp_and_exif, ".heic",
         OMC_XMP_WRITEBACK_SIDECAR_ONLY, OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
-        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE, OMC_TRANSFER_PERSIST_XMP_OLD,
-        0);
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE, OMC_TRANSFER_PERSIST_XMP_OLD, 0);
     exercise_transfer_persist_source_exif_case(
         make_test_avif_with_old_xmp_and_exif, ".avif",
         OMC_XMP_WRITEBACK_SIDECAR_ONLY, OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
-        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE, OMC_TRANSFER_PERSIST_XMP_OLD,
-        0);
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE, OMC_TRANSFER_PERSIST_XMP_OLD, 0);
     exercise_transfer_persist_source_exif_case(
         make_test_cr3_with_old_xmp_and_exif, ".cr3",
         OMC_XMP_WRITEBACK_SIDECAR_ONLY, OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
-        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE, OMC_TRANSFER_PERSIST_XMP_OLD,
-        0);
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE, OMC_TRANSFER_PERSIST_XMP_OLD, 0);
 }
 
 static void
@@ -2815,18 +3081,15 @@ test_transfer_persist_sidecar_only_strip_source_exif_supported_formats(void)
     exercise_transfer_persist_source_exif_case(
         make_test_heif_with_old_xmp_and_exif, ".heic",
         OMC_XMP_WRITEBACK_SIDECAR_ONLY, OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
-        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE, OMC_TRANSFER_PERSIST_XMP_NONE,
-        0);
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE, OMC_TRANSFER_PERSIST_XMP_NONE, 0);
     exercise_transfer_persist_source_exif_case(
         make_test_avif_with_old_xmp_and_exif, ".avif",
         OMC_XMP_WRITEBACK_SIDECAR_ONLY, OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
-        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE, OMC_TRANSFER_PERSIST_XMP_NONE,
-        0);
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE, OMC_TRANSFER_PERSIST_XMP_NONE, 0);
     exercise_transfer_persist_source_exif_case(
         make_test_cr3_with_old_xmp_and_exif, ".cr3",
         OMC_XMP_WRITEBACK_SIDECAR_ONLY, OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING,
-        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE, OMC_TRANSFER_PERSIST_XMP_NONE,
-        0);
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE, OMC_TRANSFER_PERSIST_XMP_NONE, 0);
 }
 
 static void
@@ -2858,8 +3121,7 @@ test_transfer_persist_heif_embedded_only_source_exif(void)
         make_test_heif_with_old_xmp_and_exif, ".heic",
         OMC_XMP_WRITEBACK_EMBEDDED_ONLY,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
-        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE, OMC_TRANSFER_PERSIST_XMP_NEW,
-        1);
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE, OMC_TRANSFER_PERSIST_XMP_NEW, 1);
 }
 
 static void
@@ -2869,8 +3131,7 @@ test_transfer_persist_avif_embedded_only_source_exif(void)
         make_test_avif_with_old_xmp_and_exif, ".avif",
         OMC_XMP_WRITEBACK_EMBEDDED_ONLY,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING,
-        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE, OMC_TRANSFER_PERSIST_XMP_NEW,
-        1);
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE, OMC_TRANSFER_PERSIST_XMP_NEW, 1);
 }
 
 static void
@@ -3686,6 +3947,30 @@ test_transfer_persist_dng_rendered_safety_drops_source_icc(void)
 }
 
 static void
+test_transfer_persist_tiff_rendered_safety_drops_source_specific(void)
+{
+    exercise_transfer_persist_rendered_safety_drops_source_specific_case(
+        make_test_tiff_le_with_make_only, ".tif", OMC_SCAN_FMT_TIFF,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_bigtiff_rendered_safety_drops_source_specific(void)
+{
+    exercise_transfer_persist_rendered_safety_drops_source_specific_case(
+        make_test_bigtiff_le_with_make_and_old_xmp, ".tif", OMC_SCAN_FMT_TIFF,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_dng_rendered_safety_drops_source_specific(void)
+{
+    exercise_transfer_persist_rendered_safety_drops_source_specific_case(
+        make_test_dng_with_old_xmp_and_make, ".dng", OMC_SCAN_FMT_DNG,
+        OMC_TRANSFER_PERSIST_PRESERVE_DNG_CORE);
+}
+
+static void
 test_transfer_persist_jpeg_target_image_spec_output_metadata(void)
 {
     omc_u8 file_bytes[4096];
@@ -3764,6 +4049,70 @@ test_transfer_persist_jpeg_target_image_spec_output_metadata(void)
     omc_arena_fini(&edited_out);
     omc_store_fini(&output_store);
     omc_store_fini(&source_store);
+}
+
+static void
+test_transfer_persist_heif_rendered_safety_drops_source_specific(void)
+{
+    exercise_transfer_persist_rendered_safety_drops_source_specific_case(
+        make_test_heif_with_old_xmp_and_exif, ".heic", OMC_SCAN_FMT_HEIF,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_avif_rendered_safety_drops_source_specific(void)
+{
+    exercise_transfer_persist_rendered_safety_drops_source_specific_case(
+        make_test_avif_with_old_xmp_and_exif, ".avif", OMC_SCAN_FMT_AVIF,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_cr3_rendered_safety_drops_source_specific(void)
+{
+    exercise_transfer_persist_rendered_safety_drops_source_specific_case(
+        make_test_cr3_with_old_xmp_and_exif, ".cr3", OMC_SCAN_FMT_CR3,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_webp_target_image_spec_filters_stale_layout(void)
+{
+    exercise_transfer_persist_target_image_spec_filters_case(
+        make_test_webp_with_old_xmp_and_exif, ".webp", OMC_SCAN_FMT_WEBP,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_jp2_target_image_spec_filters_stale_layout(void)
+{
+    exercise_transfer_persist_target_image_spec_filters_case(
+        make_test_jp2_with_old_xmp_and_exif, ".jp2", OMC_SCAN_FMT_JP2,
+        OMC_TRANSFER_PERSIST_PRESERVE_EXIF_MAKE);
+}
+
+static void
+test_transfer_persist_heif_target_image_spec_filters_stale_layout(void)
+{
+    exercise_transfer_persist_target_image_spec_filters_case(
+        make_test_heif_with_old_xmp_and_exif, ".heic", OMC_SCAN_FMT_HEIF,
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE);
+}
+
+static void
+test_transfer_persist_avif_target_image_spec_filters_stale_layout(void)
+{
+    exercise_transfer_persist_target_image_spec_filters_case(
+        make_test_avif_with_old_xmp_and_exif, ".avif", OMC_SCAN_FMT_AVIF,
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE);
+}
+
+static void
+test_transfer_persist_cr3_target_image_spec_filters_stale_layout(void)
+{
+    exercise_transfer_persist_target_image_spec_filters_case(
+        make_test_cr3_with_old_xmp_and_exif, ".cr3", OMC_SCAN_FMT_CR3,
+        OMC_TRANSFER_PERSIST_PRESERVE_NONE);
 }
 
 static void
@@ -3979,12 +4328,23 @@ main(void)
     test_transfer_persist_tiff_rendered_safety_drops_source_icc();
     test_transfer_persist_bigtiff_rendered_safety_drops_source_icc();
     test_transfer_persist_dng_rendered_safety_drops_source_icc();
+    test_transfer_persist_tiff_rendered_safety_drops_source_specific();
+    test_transfer_persist_bigtiff_rendered_safety_drops_source_specific();
+    test_transfer_persist_dng_rendered_safety_drops_source_specific();
     test_transfer_persist_jpeg_target_image_spec_output_metadata();
     test_transfer_persist_webp_embedded_only_source_icc();
     test_transfer_persist_jp2_embedded_only_source_icc();
     test_transfer_persist_heif_rendered_safety_drops_source_icc();
     test_transfer_persist_avif_rendered_safety_drops_source_icc();
     test_transfer_persist_cr3_rendered_safety_drops_source_icc();
+    test_transfer_persist_heif_rendered_safety_drops_source_specific();
+    test_transfer_persist_avif_rendered_safety_drops_source_specific();
+    test_transfer_persist_cr3_rendered_safety_drops_source_specific();
+    test_transfer_persist_webp_target_image_spec_filters_stale_layout();
+    test_transfer_persist_jp2_target_image_spec_filters_stale_layout();
+    test_transfer_persist_heif_target_image_spec_filters_stale_layout();
+    test_transfer_persist_avif_target_image_spec_filters_stale_layout();
+    test_transfer_persist_cr3_target_image_spec_filters_stale_layout();
     test_transfer_persist_jxl_embedded_only_source_exif_replaces_brob_exif();
     test_transfer_persist_dng_template_sidecar_only_requires_output_path();
     return 0;

@@ -1435,12 +1435,19 @@ omc_exif_write_select_fields(const omc_store* source,
         (void)omc_exif_write_find_u16_tag(current, "gpsifd", 0x001EU,
                                           &out->gps_differential);
     }
-    return out->make.present || out->model.present || out->date_time.present
+    return out->image_width.present || out->image_length.present
+           || out->bits_per_sample.present || out->compression.present
+           || out->photometric_interpretation.present
+           || out->orientation.present || out->samples_per_pixel.present
+           || out->planar_configuration.present || out->sample_format.present
+           || out->make.present || out->model.present || out->date_time.present
            || out->x_resolution.present || out->y_resolution.present
            || out->resolution_unit.present || out->date_time_original.present
            || out->date_time_digitized.present || out->iso_speed.present
            || out->exposure_time.present || out->fnumber.present
-           || out->focal_length.present || out->lens_specification.present
+           || out->focal_length.present || out->color_space.present
+           || out->pixel_x_dimension.present
+           || out->pixel_y_dimension.present || out->lens_specification.present
            || out->interop_index.present || out->gps_version.present
            || out->gps_lat_ref.present || out->gps_lat.present
            || out->gps_lon_ref.present || out->gps_lon.present

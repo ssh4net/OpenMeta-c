@@ -3566,17 +3566,17 @@ test_transfer_execute_embedded_and_sidecar_source_exif_supported_formats(void)
         1U, 1U, 2U, OMC_TRANSFER_EMBEDDED_REWRITE);
     exercise_transfer_supported_source_exif_case(
         make_test_heif_with_old_xmp_and_exif, OMC_SCAN_FMT_HEIF,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE, OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_TRANSFER_PRESERVE_NONE, OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING, OMC_TRANSFER_EMBEDDED_XMP_NEW,
         1U, 1U, 2U, OMC_TRANSFER_EMBEDDED_REWRITE);
     exercise_transfer_supported_source_exif_case(
         make_test_avif_with_old_xmp_and_exif, OMC_SCAN_FMT_AVIF,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE, OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_TRANSFER_PRESERVE_NONE, OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING, OMC_TRANSFER_EMBEDDED_XMP_NEW,
         1U, 1U, 2U, OMC_TRANSFER_EMBEDDED_REWRITE);
     exercise_transfer_supported_source_exif_case(
         make_test_cr3_with_old_xmp_and_exif, OMC_SCAN_FMT_CR3,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE, OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
+        OMC_TRANSFER_PRESERVE_NONE, OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING, OMC_TRANSFER_EMBEDDED_XMP_NEW,
         1U, 1U, 2U, OMC_TRANSFER_EMBEDDED_REWRITE);
     exercise_transfer_supported_source_exif_case(
@@ -3698,17 +3698,17 @@ test_transfer_execute_sidecar_only_preserve_source_exif_supported_formats(void)
         0U, 0U, 1U, OMC_TRANSFER_EMBEDDED_NONE);
     exercise_transfer_supported_source_exif_case(
         make_test_heif_with_old_xmp_and_exif, OMC_SCAN_FMT_HEIF,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_TRANSFER_PRESERVE_NONE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING, OMC_TRANSFER_EMBEDDED_XMP_OLD,
         0U, 0U, 1U, OMC_TRANSFER_EMBEDDED_NONE);
     exercise_transfer_supported_source_exif_case(
         make_test_avif_with_old_xmp_and_exif, OMC_SCAN_FMT_AVIF,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_TRANSFER_PRESERVE_NONE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING, OMC_TRANSFER_EMBEDDED_XMP_OLD,
         0U, 0U, 1U, OMC_TRANSFER_EMBEDDED_NONE);
     exercise_transfer_supported_source_exif_case(
         make_test_cr3_with_old_xmp_and_exif, OMC_SCAN_FMT_CR3,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_TRANSFER_PRESERVE_NONE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
         OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING, OMC_TRANSFER_EMBEDDED_XMP_OLD,
         0U, 0U, 1U, OMC_TRANSFER_EMBEDDED_NONE);
 }
@@ -3818,17 +3818,17 @@ test_transfer_execute_sidecar_only_strip_source_exif_supported_formats(void)
         1U, 0U, 2U, OMC_TRANSFER_EMBEDDED_STRIP);
     exercise_transfer_supported_source_exif_case(
         make_test_heif_with_old_xmp_and_exif, OMC_SCAN_FMT_HEIF,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_TRANSFER_PRESERVE_NONE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
         OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING, OMC_TRANSFER_EMBEDDED_XMP_NONE,
         1U, 0U, 2U, OMC_TRANSFER_EMBEDDED_STRIP);
     exercise_transfer_supported_source_exif_case(
         make_test_avif_with_old_xmp_and_exif, OMC_SCAN_FMT_AVIF,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_TRANSFER_PRESERVE_NONE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
         OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING, OMC_TRANSFER_EMBEDDED_XMP_NONE,
         1U, 0U, 2U, OMC_TRANSFER_EMBEDDED_STRIP);
     exercise_transfer_supported_source_exif_case(
         make_test_cr3_with_old_xmp_and_exif, OMC_SCAN_FMT_CR3,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
+        OMC_TRANSFER_PRESERVE_NONE, OMC_XMP_WRITEBACK_SIDECAR_ONLY,
         OMC_XMP_DEST_EMBEDDED_STRIP_EXISTING, OMC_TRANSFER_EMBEDDED_XMP_NONE,
         1U, 0U, 2U, OMC_TRANSFER_EMBEDDED_STRIP);
 }
@@ -3915,7 +3915,7 @@ test_transfer_execute_heif_embedded_only_source_exif(void)
 {
     exercise_transfer_supported_source_exif_embedded_only_case(
         make_test_heif_with_old_xmp_and_exif, OMC_SCAN_FMT_HEIF,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+        OMC_TRANSFER_PRESERVE_NONE);
 }
 
 static void
@@ -3923,7 +3923,7 @@ test_transfer_execute_avif_embedded_only_source_exif(void)
 {
     exercise_transfer_supported_source_exif_embedded_only_case(
         make_test_avif_with_old_xmp_and_exif, OMC_SCAN_FMT_AVIF,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+        OMC_TRANSFER_PRESERVE_NONE);
 }
 
 static void
@@ -3988,7 +3988,7 @@ test_transfer_execute_heif_primary_metadata_cdsc_refs(void)
                                      "CreatorTool"),
                       "NewTool");
     assert_embedded_exif_times(&edited_store, k_dto);
-    assert_preserved_metadata(&edited_store, OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+    assert_preserved_metadata(&edited_store, OMC_TRANSFER_PRESERVE_NONE);
     assert(
         count_bmff_field_scalar_value(&edited_store, "meta.primary_item_id", 3U)
         == 1U);
@@ -7360,7 +7360,7 @@ test_transfer_execute_heif_target_image_spec_filters_stale_layout(void)
 {
     exercise_transfer_execute_target_image_spec_filters_case(
         make_test_heif_with_old_xmp_and_exif, OMC_SCAN_FMT_HEIF,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+        OMC_TRANSFER_PRESERVE_NONE);
 }
 
 static void
@@ -7368,7 +7368,7 @@ test_transfer_execute_avif_target_image_spec_filters_stale_layout(void)
 {
     exercise_transfer_execute_target_image_spec_filters_case(
         make_test_avif_with_old_xmp_and_exif, OMC_SCAN_FMT_AVIF,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+        OMC_TRANSFER_PRESERVE_NONE);
 }
 
 static void
@@ -7376,7 +7376,7 @@ test_transfer_execute_cr3_target_image_spec_filters_stale_layout(void)
 {
     exercise_transfer_execute_target_image_spec_filters_case(
         make_test_cr3_with_old_xmp_and_exif, OMC_SCAN_FMT_CR3,
-        OMC_TRANSFER_PRESERVE_EXIF_MAKE);
+        OMC_TRANSFER_PRESERVE_NONE);
 }
 
 static void

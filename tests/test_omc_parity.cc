@@ -2140,11 +2140,15 @@ build_transfer_target_bmff_fixture(const char* existing_creator_tool,
     std::array<unsigned char, 1024> idat_payload {};
     std::array<unsigned char, 64> infe_exif {};
     std::array<unsigned char, 96> infe_xmp {};
+    std::array<unsigned char, 64> infe_primary {};
     std::array<unsigned char, 256> iinf_payload {};
     std::array<unsigned char, 160> iloc_payload {};
+    std::array<unsigned char, 16> pitm_payload {};
     std::array<unsigned char, 1024> meta_payload {};
     std::array<unsigned char, 16> moov_box {};
     std::array<unsigned char, 16> ftyp_payload {};
+    static const unsigned char primary_payload[4] = { 0x11U, 0x22U, 0x33U,
+                                                      0x44U };
     const ByteVec tiff    = build_transfer_tiff_make_only_fixture();
     const std::string xml = (existing_creator_tool != nullptr)
                                 ? build_creator_tool_xmp_xml(
@@ -2153,16 +2157,21 @@ build_transfer_target_bmff_fixture(const char* existing_creator_tool,
     std::size_t exif_size = 0U;
     std::size_t idat_size = 0U;
     std::size_t exif_off;
-    std::size_t xmp_off        = 0U;
-    std::size_t infe_exif_size = 0U;
-    std::size_t infe_xmp_size  = 0U;
-    std::size_t iinf_size      = 0U;
-    std::size_t iloc_size      = 0U;
-    std::size_t meta_size      = 0U;
-    std::size_t moov_size      = 0U;
-    std::size_t ftyp_size      = 0U;
-    std::size_t size           = 0U;
-    std::uint16_t item_count   = (existing_creator_tool != nullptr) ? 2U : 1U;
+    std::size_t xmp_off           = 0U;
+    std::size_t primary_off       = 0U;
+    std::size_t infe_exif_size    = 0U;
+    std::size_t infe_xmp_size     = 0U;
+    std::size_t infe_primary_size = 0U;
+    std::size_t iinf_size         = 0U;
+    std::size_t iloc_size         = 0U;
+    std::size_t pitm_size         = 0U;
+    std::size_t meta_size         = 0U;
+    std::size_t moov_size         = 0U;
+    std::size_t ftyp_size         = 0U;
+    std::size_t size              = 0U;
+    std::uint16_t primary_item_id = (existing_creator_tool != nullptr) ? 3U
+                                                                       : 2U;
+    std::uint16_t item_count      = primary_item_id;
 
     append_u32be(exif_payload.data(), &exif_size, 6U);
     append_text(exif_payload.data(), &exif_size, "Exif");
@@ -2177,6 +2186,9 @@ build_transfer_target_bmff_fixture(const char* existing_creator_tool,
         xmp_off = idat_size;
         append_bytes(idat_payload.data(), &idat_size, xml.data(), xml.size());
     }
+    primary_off = idat_size;
+    append_bytes(idat_payload.data(), &idat_size, primary_payload,
+                 sizeof(primary_payload));
 
     append_fullbox_header(infe_exif.data(), &infe_exif_size, 2U);
     append_u16be(infe_exif.data(), &infe_exif_size, 1U);
@@ -2198,6 +2210,13 @@ build_transfer_target_bmff_fixture(const char* existing_creator_tool,
         append_u8(infe_xmp.data(), &infe_xmp_size, 0U);
         append_u8(infe_xmp.data(), &infe_xmp_size, 0U);
     }
+    append_fullbox_header(infe_primary.data(), &infe_primary_size, 2U);
+    append_u16be(infe_primary.data(), &infe_primary_size, primary_item_id);
+    append_u16be(infe_primary.data(), &infe_primary_size, 0U);
+    append_u32be(infe_primary.data(), &infe_primary_size,
+                 make_fourcc('h', 'v', 'c', '1'));
+    append_text(infe_primary.data(), &infe_primary_size, "Primary");
+    append_u8(infe_primary.data(), &infe_primary_size, 0U);
 
     append_fullbox_header(iinf_payload.data(), &iinf_size, 0U);
     append_u16be(iinf_payload.data(), &iinf_size, item_count);
@@ -2209,6 +2228,9 @@ build_transfer_target_bmff_fixture(const char* existing_creator_tool,
                         make_fourcc('i', 'n', 'f', 'e'), infe_xmp.data(),
                         infe_xmp_size);
     }
+    append_bmff_box(iinf_payload.data(), &iinf_size,
+                    make_fourcc('i', 'n', 'f', 'e'), infe_primary.data(),
+                    infe_primary_size);
 
     append_fullbox_header(iloc_payload.data(), &iloc_size, 1U);
     append_u8(iloc_payload.data(), &iloc_size, 0x44U);
@@ -2233,6 +2255,17 @@ build_transfer_target_bmff_fixture(const char* existing_creator_tool,
         append_u32be(iloc_payload.data(), &iloc_size,
                      (std::uint32_t)xml.size());
     }
+    append_u16be(iloc_payload.data(), &iloc_size, primary_item_id);
+    append_u16be(iloc_payload.data(), &iloc_size, 1U);
+    append_u16be(iloc_payload.data(), &iloc_size, 0U);
+    append_u32be(iloc_payload.data(), &iloc_size, 0U);
+    append_u16be(iloc_payload.data(), &iloc_size, 1U);
+    append_u32be(iloc_payload.data(), &iloc_size, (std::uint32_t)primary_off);
+    append_u32be(iloc_payload.data(), &iloc_size,
+                 (std::uint32_t)sizeof(primary_payload));
+
+    append_fullbox_header(pitm_payload.data(), &pitm_size, 0U);
+    append_u16be(pitm_payload.data(), &pitm_size, primary_item_id);
 
     append_fullbox_header(meta_payload.data(), &meta_size, 0U);
     append_bmff_box(meta_payload.data(), &meta_size,
@@ -2241,6 +2274,9 @@ build_transfer_target_bmff_fixture(const char* existing_creator_tool,
     append_bmff_box(meta_payload.data(), &meta_size,
                     make_fourcc('i', 'l', 'o', 'c'), iloc_payload.data(),
                     iloc_size);
+    append_bmff_box(meta_payload.data(), &meta_size,
+                    make_fourcc('p', 'i', 't', 'm'), pitm_payload.data(),
+                    pitm_size);
     append_bmff_box(meta_payload.data(), &meta_size,
                     make_fourcc('i', 'd', 'a', 't'), idat_payload.data(),
                     idat_size);
@@ -9641,6 +9677,7 @@ struct TransferExecuteParitySummary final {
     std::string status;
     std::string edited_status;
     std::string sidecar_status;
+    std::string detail;
     bool sidecar_requested = false;
     bool edited_present    = false;
     bool sidecar_present   = false;
@@ -10335,6 +10372,9 @@ run_cpp_transfer_execute_case(const ByteVec& source_bytes,
     out->status         = canonical_cpp_transfer_status(effective_edit_status);
     out->edited_status  = canonical_cpp_transfer_status(effective_edit_status);
     out->sidecar_status = canonical_cpp_transfer_status(res.xmp_sidecar_status);
+    out->detail         = res.execute.edit_plan_message.empty()
+                              ? res.execute.edit_apply.message
+                              : res.execute.edit_plan_message;
     out->sidecar_requested = options.writeback_mode
                              != OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
     out->edited_present  = !res.execute.edited_output.empty();
@@ -10886,6 +10926,11 @@ compare_transfer_execute_summary(const char* case_name,
     ok = compare_text_field(case_name, "edited_status", omc.edited_status,
                             cpp.edited_status)
          && ok;
+    if (omc.status != cpp.status || omc.edited_status != cpp.edited_status) {
+        if (!cpp.detail.empty()) {
+            std::fprintf(stderr, "  cpp detail: %s\n", cpp.detail.c_str());
+        }
+    }
     ok = compare_bool_field(case_name, "sidecar_requested",
                             omc.sidecar_requested, cpp.sidecar_requested)
          && ok;
@@ -15913,6 +15958,42 @@ main(int argc, char** argv)
                  "transfer_jp2_exif_embedded_and_sidecar",
                  build_transfer_source_jpeg_exif_xmp_fixture(),
                  build_transfer_target_jp2_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Heif;
+        transfer_opts.target_suffix     = ".heic";
+        ok                              = run_transfer_execute_case(
+                 "transfer_heif_exif_embedded_and_sidecar",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_heif_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Avif;
+        transfer_opts.target_suffix     = ".avif";
+        ok                              = run_transfer_execute_case(
+                 "transfer_avif_exif_embedded_and_sidecar",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_avif_fixture("OldTool"), transfer_opts)
+             && ok;
+    }
+    {
+        TransferExecuteCaseOptions transfer_opts {};
+
+        transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_AND_SIDECAR;
+        transfer_opts.cpp_target_format = openmeta::TransferTargetFormat::Cr3;
+        transfer_opts.target_suffix     = ".cr3";
+        ok                              = run_transfer_execute_case(
+                 "transfer_cr3_exif_embedded_and_sidecar",
+                 build_transfer_source_jpeg_exif_xmp_fixture(),
+                 build_transfer_target_cr3_fixture("OldTool"), transfer_opts)
              && ok;
     }
     {

@@ -380,6 +380,37 @@ add_test_exif_entry(omc_store* store, const char* value_text)
 }
 
 static void
+add_exif_u16_entry(omc_store* store, const char* ifd_name, omc_u16 tag,
+                   omc_u16 value)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_exif_tag(&entry.key, append_cstr(&store->arena, ifd_name),
+                          tag);
+    omc_val_make_u16(&entry.value, value);
+    status = omc_store_add_entry(store, &entry, NULL);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+}
+
+static void
+add_xmp_text_entry(omc_store* store, const char* ns, const char* path,
+                   const char* value_text)
+{
+    omc_entry entry;
+    omc_status status;
+
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(&entry.key, append_cstr(&store->arena, ns),
+                              append_cstr(&store->arena, path));
+    omc_val_make_text(&entry.value, append_cstr(&store->arena, value_text),
+                      OMC_TEXT_UTF8);
+    status = omc_store_add_entry(store, &entry, NULL);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+}
+
+static void
 add_xmp_u32_entry(omc_store* store, const char* ns, const char* path,
                   omc_u32 value)
 {
@@ -785,8 +816,10 @@ test_transfer_package_target_image_spec_filters_stale_layout(void)
 }
 
 static void
-test_transfer_package_rendered_safety_filters_source_specific(void)
+test_transfer_package_bmff_target_image_spec_builds_exif_and_xmp(void)
 {
+    static const char k_ns_tiff[] = "http://ns.adobe.com/tiff/1.0/";
+    static const char k_ns_exif[] = "http://ns.adobe.com/exif/1.0/";
     omc_store store;
     omc_arena storage;
     omc_transfer_package_build_opts opts;
@@ -798,13 +831,70 @@ test_transfer_package_rendered_safety_filters_source_specific(void)
     omc_arena_init(&storage);
 
     add_test_xmp_entry(&store, "OpenMeta-c");
+    add_exif_u16_entry(&store, "ifd0", 0x0100U, 999U);
+    add_exif_u16_entry(&store, "ifd0", 0x0101U, 999U);
+    add_exif_u16_entry(&store, "exififd", 0xA002U, 999U);
+    add_exif_u16_entry(&store, "exififd", 0xA003U, 999U);
+    add_xmp_u32_entry(&store, k_ns_tiff, "ImageWidth", 999U);
+    add_xmp_u32_entry(&store, k_ns_exif, "ExifImageWidth", 999U);
+
+    omc_transfer_package_build_opts_init(&opts);
+    opts.format                           = OMC_SCAN_FMT_HEIF;
+    opts.include_icc                      = 0;
+    opts.include_iptc                     = 0;
+    opts.include_jumbf                    = 0;
+    opts.target_image_spec.has_dimensions = 1;
+    opts.target_image_spec.width          = 640U;
+    opts.target_image_spec.height         = 480U;
+
+    status = omc_transfer_package_batch_build(&store, &opts, &storage, &batch,
+                                              &io_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
+    OMC_TEST_REQUIRE_U64_EQ(batch.target_format, OMC_SCAN_FMT_HEIF);
+    OMC_TEST_REQUIRE_U64_EQ(batch.chunk_count, 2U);
+    OMC_TEST_CHECK(bytes_eq(batch.chunks[0].route, "bmff:item-exif"));
+    OMC_TEST_CHECK_U64_EQ(batch.chunks[0].kind,
+                          OMC_TRANSFER_PACKAGE_CHUNK_TRANSFER_BLOCK);
+    OMC_TEST_CHECK(bytes_eq(batch.chunks[1].route, "bmff:item-xmp"));
+    OMC_TEST_CHECK_U64_EQ(batch.chunks[1].kind,
+                          OMC_TRANSFER_PACKAGE_CHUNK_TRANSFER_BLOCK);
+    OMC_TEST_CHECK(bytes_contains(batch.chunks[1].bytes,
+                                  "<tiff:ImageWidth>640</tiff:ImageWidth>"));
+    OMC_TEST_CHECK(
+        bytes_contains(batch.chunks[1].bytes,
+                       "<exif:ExifImageWidth>640</exif:ExifImageWidth>"));
+    OMC_TEST_CHECK(!bytes_contains(batch.chunks[1].bytes, ">999<"));
+
+    omc_arena_fini(&storage);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_package_rendered_safety_filters_source_specific(void)
+{
+    static const char k_ns_camera_raw[]
+        = "http://ns.adobe.com/camera-raw-settings/1.0/";
+    omc_store store;
+    omc_arena storage;
+    omc_transfer_package_build_opts opts;
+    omc_transfer_package_batch batch;
+    omc_transfer_package_io_res io_res;
+    omc_status status;
+
+    omc_store_init(&store);
+    omc_arena_init(&storage);
+
+    add_test_xmp_entry(&store, "OpenMeta-c");
+    add_exif_u16_entry(&store, "ifd0", 0xC621U, 1U);
+    add_exif_u16_entry(&store, "exififd", 0x927CU, 1U);
+    add_xmp_text_entry(&store, k_ns_camera_raw, "WhiteBalance", "As Shot");
     add_test_icc_entries(&store);
     add_test_jumbf_cbor_text_entry(&store, "box.0.1.cbor.label", "alpha");
 
     omc_transfer_package_build_opts_init(&opts);
     opts.format       = OMC_SCAN_FMT_JPEG;
     opts.safety       = OMC_TRANSFER_SAFETY_RENDERED_IMAGE;
-    opts.include_exif = 0;
     opts.include_iptc = 0;
 
     status = omc_transfer_package_batch_build(&store, &opts, &storage, &batch,
@@ -813,6 +903,8 @@ test_transfer_package_rendered_safety_filters_source_specific(void)
     OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
     OMC_TEST_REQUIRE_U64_EQ(batch.chunk_count, 1U);
     OMC_TEST_CHECK(bytes_contains(batch.chunks[0].bytes, "OpenMeta-c"));
+    OMC_TEST_CHECK(!bytes_contains(batch.chunks[0].bytes, "WhiteBalance"));
+    OMC_TEST_CHECK(!bytes_contains(batch.chunks[0].bytes, "As Shot"));
     OMC_TEST_CHECK(!bytes_contains(batch.chunks[0].bytes, "ICC_PROFILE"));
 
     omc_arena_fini(&storage);
@@ -1846,6 +1938,7 @@ main(void)
     test_transfer_package_build_jpeg_roundtrip_and_replay();
     test_transfer_package_build_jxl_chunks();
     test_transfer_package_target_image_spec_filters_stale_layout();
+    test_transfer_package_bmff_target_image_spec_builds_exif_and_xmp();
     test_transfer_package_rendered_safety_filters_source_specific();
     test_transfer_package_source_range_roundtrip();
     test_transfer_package_build_executed_jpeg_segments();

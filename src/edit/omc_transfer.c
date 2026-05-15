@@ -12352,7 +12352,8 @@ omc_transfer_apply_exif_overlay(const omc_u8* current_bytes,
 
     omc_arena_init(&exif_out);
     omc_exif_write_res_init(&exif_res);
-    if (format == OMC_SCAN_FMT_JXL) {
+    if (format == OMC_SCAN_FMT_JXL || format == OMC_SCAN_FMT_HEIF
+        || format == OMC_SCAN_FMT_AVIF || format == OMC_SCAN_FMT_CR3) {
         status = omc_exif_write_embedded_source_only(current_bytes,
                                                      current_size, store,
                                                      &exif_out, format,
