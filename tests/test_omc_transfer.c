@@ -1326,6 +1326,24 @@ add_jumbf_text_entry(omc_store* store, const char* key_text, const char* value)
 }
 
 static void
+assert_no_jumbf_entries(const omc_store* store)
+{
+    omc_size i;
+
+    assert(store != (const omc_store*)0);
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry* entry;
+
+        entry = &store->entries[i];
+        if ((entry->flags & OMC_ENTRY_FLAG_DELETED) != 0U) {
+            continue;
+        }
+        assert(entry->key.kind != OMC_KEY_JUMBF_FIELD);
+        assert(entry->key.kind != OMC_KEY_JUMBF_CBOR_KEY);
+    }
+}
+
+static void
 build_store_with_pdf_and_rights_namespaces(omc_store* store)
 {
     omc_entry entry;
@@ -6769,6 +6787,8 @@ build_store_with_rendered_safety_source_specific(omc_store* store)
     add_exif_u16_entry(store, "ifd0", 0xC621U, 1U);
     add_exif_u16_entry(store, "exififd", 0x927CU, 1U);
     add_xmp_text_entry(store, k_ns_camera_raw, "WhiteBalance", "As Shot");
+    add_jumbf_text_entry(store, "box.0.1.cbor.label", "manifest");
+    add_jumbf_text_entry(store, "box.0.c2pa.manifest", "claim");
 }
 
 static void
@@ -6781,6 +6801,7 @@ assert_rendered_safety_source_specific_filtered(const omc_store* store)
     assert(find_exif_entry(store, "exififd", 0x927CU) == (const omc_entry*)0);
     assert(find_xmp_entry(store, k_ns_camera_raw, "WhiteBalance")
            == (const omc_entry*)0);
+    assert_no_jumbf_entries(store);
 }
 
 static void

@@ -154,6 +154,28 @@ omc_transfer_package_bytes_materialize_to_buffer(
     omc_u8* out_bytes, omc_size out_cap, omc_transfer_package_io_res* out_res);
 
 /*
+ * Applies BMFF item-route chunks from batch to an existing HEIF/AVIF/CR3
+ * target file. This path is explicit because generic package materialization
+ * has no target bytes and therefore cannot update a BMFF item graph.
+ */
+OMC_API omc_status
+omc_transfer_package_bmff_materialize(const omc_u8* target_bytes,
+                                      omc_size target_size,
+                                      const omc_transfer_package_batch* batch,
+                                      omc_arena* out_bytes,
+                                      omc_transfer_package_io_res* out_res);
+
+/*
+ * Deserializes one persisted OMTPKG01 batch into temp_storage and applies its
+ * BMFF item-route chunks to an existing HEIF/AVIF/CR3 target file.
+ */
+OMC_API omc_status
+omc_transfer_package_bmff_bytes_materialize(
+    const omc_u8* target_bytes, omc_size target_size, const omc_u8* bytes,
+    omc_size size, omc_arena* temp_storage, omc_arena* out_bytes,
+    omc_transfer_package_io_res* out_res);
+
+/*
  * Collects zero-copy semantic views over validated package chunks into a
  * caller-owned array. Passing out_views == NULL with out_cap == 0 is valid for
  * measurement; on OMC_TRANSFER_LIMIT, out_res->chunk_count is the required

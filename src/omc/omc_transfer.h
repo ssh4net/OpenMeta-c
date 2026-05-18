@@ -93,12 +93,25 @@ typedef struct omc_transfer_safety_audit {
     omc_u32 filtered_icc_profiles;
     omc_u32 filtered_makernotes;
     omc_u32 filtered_non_c2pa_jumbf;
+    /*
+     * C2PA manifests are bound to source bytes. Rendered-image transfer does
+     * not re-sign them; source C2PA entries are counted here and omitted from
+     * emitted rendered-image metadata.
+     */
     omc_u32 invalidated_c2pa;
 } omc_transfer_safety_audit;
 
 typedef struct omc_transfer_prepare_opts {
     omc_scan_fmt format;
     omc_dng_target_mode dng_target_mode;
+    /*
+     * CompatibleFile preserves file-compatible source metadata except fields
+     * replaced by target_image_spec. RenderedImage is for content-changing
+     * output and filters source image/layout fields, raw color calibration,
+     * camera-raw settings, ICC profiles, MakerNotes, and JUMBF-derived
+     * metadata. C2PA is audit-only in this mode; the C API does not re-sign or
+     * emit invalid source manifests.
+     */
     omc_transfer_safety_mode safety;
     omc_transfer_target_image_spec target_image_spec;
     omc_xmp_writeback_mode writeback_mode;
