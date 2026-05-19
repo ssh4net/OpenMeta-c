@@ -42,6 +42,10 @@ add_executable(omc_test_ccm_query test_omc_ccm_query.c)
 target_link_libraries(omc_test_ccm_query PRIVATE omc)
 add_test(NAME omc_test_ccm_query COMMAND omc_test_ccm_query)
 
+add_executable(omc_test_capabilities test_omc_capabilities.c)
+target_link_libraries(omc_test_capabilities PRIVATE omc)
+add_test(NAME omc_test_capabilities COMMAND omc_test_capabilities)
+
 add_executable(omc_test_validate test_omc_validate.c)
 target_link_libraries(omc_test_validate PRIVATE omc)
 add_test(NAME omc_test_validate COMMAND omc_test_validate)
@@ -97,6 +101,10 @@ add_test(NAME omc_test_xmp_write COMMAND omc_test_xmp_write)
 add_executable(omc_test_transfer test_omc_transfer.c)
 target_link_libraries(omc_test_transfer PRIVATE omc)
 add_test(NAME omc_test_transfer COMMAND omc_test_transfer)
+
+add_executable(omc_test_transfer_diagnostics test_omc_transfer_diagnostics.c)
+target_link_libraries(omc_test_transfer_diagnostics PRIVATE omc)
+add_test(NAME omc_test_transfer_diagnostics COMMAND omc_test_transfer_diagnostics)
 
 add_executable(omc_test_transfer_persist test_omc_transfer_persist.c)
 target_link_libraries(omc_test_transfer_persist PRIVATE omc)

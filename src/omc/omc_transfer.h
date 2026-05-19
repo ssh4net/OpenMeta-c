@@ -101,6 +101,58 @@ typedef struct omc_transfer_safety_audit {
     omc_u32 invalidated_c2pa;
 } omc_transfer_safety_audit;
 
+typedef enum omc_transfer_diagnostic_kind {
+    OMC_TRANSFER_DIAGNOSTIC_IMAGE_PROPERTIES      = 0,
+    OMC_TRANSFER_DIAGNOSTIC_RAW_COLOR_CALIBRATION = 1,
+    OMC_TRANSFER_DIAGNOSTIC_CAMERA_RAW_SETTINGS   = 2,
+    OMC_TRANSFER_DIAGNOSTIC_ICC_PROFILE           = 3,
+    OMC_TRANSFER_DIAGNOSTIC_MAKERNOTE             = 4,
+    OMC_TRANSFER_DIAGNOSTIC_NON_C2PA_JUMBF        = 5,
+    OMC_TRANSFER_DIAGNOSTIC_C2PA                  = 6
+} omc_transfer_diagnostic_kind;
+
+typedef enum omc_transfer_diagnostic_action {
+    OMC_TRANSFER_DIAGNOSTIC_KEEP                       = 0,
+    OMC_TRANSFER_DIAGNOSTIC_DROP                       = 1,
+    OMC_TRANSFER_DIAGNOSTIC_REQUIRES_TARGET_IMAGE_SPEC = 2
+} omc_transfer_diagnostic_action;
+
+typedef enum omc_transfer_diagnostic_reason {
+    OMC_TRANSFER_DIAGNOSTIC_REASON_SAFE                       = 0,
+    OMC_TRANSFER_DIAGNOSTIC_REASON_SOURCE_BOUND               = 1,
+    OMC_TRANSFER_DIAGNOSTIC_REASON_RENDERED_UNSAFE            = 2,
+    OMC_TRANSFER_DIAGNOSTIC_REASON_TARGET_IMAGE_SPEC_REQUIRED = 3
+} omc_transfer_diagnostic_reason;
+
+typedef enum omc_transfer_diagnostic_severity {
+    OMC_TRANSFER_DIAGNOSTIC_INFO    = 0,
+    OMC_TRANSFER_DIAGNOSTIC_WARNING = 1
+} omc_transfer_diagnostic_severity;
+
+typedef struct omc_transfer_diagnostic {
+    omc_transfer_diagnostic_kind kind;
+    omc_transfer_diagnostic_action action;
+    omc_transfer_diagnostic_reason reason;
+    omc_transfer_diagnostic_severity severity;
+    omc_entry_id entry_id;
+    int compatible_file_safe;
+    int rendered_image_safe;
+    int requires_target_image_spec;
+    int source_bound;
+} omc_transfer_diagnostic;
+
+typedef struct omc_transfer_diagnostics_res {
+    omc_transfer_status status;
+    omc_transfer_safety_mode safety;
+    omc_u32 written;
+    omc_u32 needed;
+    omc_u32 kept_count;
+    omc_u32 dropped_count;
+    omc_u32 requires_target_image_spec_count;
+    omc_u32 rendered_unsafe_count;
+    omc_u32 source_bound_count;
+} omc_transfer_diagnostics_res;
+
 typedef struct omc_transfer_prepare_opts {
     omc_scan_fmt format;
     omc_dng_target_mode dng_target_mode;
@@ -197,6 +249,30 @@ omc_transfer_safety_audit_init(omc_transfer_safety_audit* audit);
 OMC_API omc_transfer_safety_audit
 omc_transfer_safety_audit_from_store(const omc_store* store,
                                      omc_transfer_safety_mode safety);
+
+OMC_API void
+omc_transfer_diagnostic_init(omc_transfer_diagnostic* diagnostic);
+
+OMC_API void
+omc_transfer_diagnostics_res_init(omc_transfer_diagnostics_res* res);
+
+OMC_API const char*
+omc_transfer_diagnostic_kind_name(omc_transfer_diagnostic_kind kind);
+
+OMC_API const char*
+omc_transfer_diagnostic_action_name(omc_transfer_diagnostic_action action);
+
+OMC_API const char*
+omc_transfer_diagnostic_reason_name(omc_transfer_diagnostic_reason reason);
+
+OMC_API const char*
+omc_transfer_diagnostic_severity_name(omc_transfer_diagnostic_severity severity);
+
+OMC_API omc_transfer_diagnostics_res
+omc_transfer_diagnostics_from_store(const omc_store* store,
+                                    omc_transfer_safety_mode safety,
+                                    omc_transfer_diagnostic* out_diagnostics,
+                                    omc_u32 out_cap);
 
 OMC_API void
 omc_transfer_prepare_opts_init(omc_transfer_prepare_opts* opts);

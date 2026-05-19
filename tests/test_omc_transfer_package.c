@@ -537,6 +537,74 @@ make_test_bmff_primary_item_target(omc_u8* out, omc_size capacity,
     return size;
 }
 
+static omc_size
+make_test_bmff_primary_item_target_without_idat(omc_u8* out, omc_size capacity,
+                                                const char* major_brand)
+{
+    static const omc_u8 k_mdat[] = { 0U, 1U, 2U, 3U };
+    omc_u8 ftyp_payload[16];
+    omc_u8 pitm_payload[16];
+    omc_u8 iinf_payload[128];
+    omc_u8 iloc_payload[96];
+    omc_u8 meta_payload[384];
+    omc_size size;
+    omc_size ftyp_size;
+    omc_size pitm_size;
+    omc_size iinf_size;
+    omc_size iloc_size;
+    omc_size meta_size;
+
+    OMC_TEST_REQUIRE(out != (omc_u8*)0);
+    OMC_TEST_REQUIRE(major_brand != (const char*)0);
+
+    ftyp_size = 0U;
+    append_test_raw(ftyp_payload, sizeof(ftyp_payload), &ftyp_size, major_brand,
+                    4U);
+    append_test_u32be(ftyp_payload, sizeof(ftyp_payload), &ftyp_size, 0U);
+    append_test_raw(ftyp_payload, sizeof(ftyp_payload), &ftyp_size, major_brand,
+                    4U);
+
+    pitm_size = 0U;
+    append_test_fullbox_header(pitm_payload, sizeof(pitm_payload), &pitm_size,
+                               0U);
+    append_test_u16be(pitm_payload, sizeof(pitm_payload), &pitm_size, 1U);
+
+    iinf_size = 0U;
+    append_test_fullbox_header(iinf_payload, sizeof(iinf_payload), &iinf_size,
+                               0U);
+    append_test_u16be(iinf_payload, sizeof(iinf_payload), &iinf_size, 1U);
+    append_test_infe(iinf_payload, sizeof(iinf_payload), &iinf_size, 1U, "hvc1",
+                     "primary");
+
+    iloc_size = 0U;
+    append_test_fullbox_header(iloc_payload, sizeof(iloc_payload), &iloc_size,
+                               1U);
+    append_test_u8(iloc_payload, sizeof(iloc_payload), &iloc_size, 0x44U);
+    append_test_u8(iloc_payload, sizeof(iloc_payload), &iloc_size, 0x40U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 1U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 1U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+
+    meta_size = 0U;
+    append_test_fullbox_header(meta_payload, sizeof(meta_payload), &meta_size,
+                               0U);
+    append_test_bmff_box(meta_payload, sizeof(meta_payload), &meta_size, "pitm",
+                         pitm_payload, pitm_size);
+    append_test_bmff_box(meta_payload, sizeof(meta_payload), &meta_size, "iinf",
+                         iinf_payload, iinf_size);
+    append_test_bmff_box(meta_payload, sizeof(meta_payload), &meta_size, "iloc",
+                         iloc_payload, iloc_size);
+
+    size = 0U;
+    append_test_bmff_box(out, capacity, &size, "ftyp", ftyp_payload, ftyp_size);
+    append_test_bmff_box(out, capacity, &size, "meta", meta_payload, meta_size);
+    append_test_bmff_box(out, capacity, &size, "mdat", k_mdat, sizeof(k_mdat));
+    return size;
+}
+
 static void
 add_test_xmp_entry(omc_store* store, const char* value_text)
 {
@@ -1180,6 +1248,74 @@ test_transfer_package_bmff_cr3_item_graph_materializes(void)
 {
     exercise_transfer_package_bmff_item_graph_materialize(OMC_SCAN_FMT_CR3,
                                                           "crx ", 0);
+}
+
+static void
+test_transfer_package_bmff_heif_item_graph_materializes_without_idat(void)
+{
+    static const char k_ns_tiff[]           = "http://ns.adobe.com/tiff/1.0/";
+    static const omc_u8 k_primary_method0[] = { 0U, 1U, 0U, 0U, 0U, 0U };
+    static const omc_u8 k_exif_method0[]    = { 0U, 2U, 0U, 0U, 0U, 0U };
+    static const omc_u8 k_xmp_method0[]     = { 0U, 3U, 0U, 0U, 0U, 0U };
+    omc_u8 target[1024];
+    omc_size target_size;
+    omc_store store;
+    omc_arena storage;
+    omc_arena output;
+    omc_transfer_package_build_opts opts;
+    omc_transfer_package_batch batch;
+    omc_transfer_package_io_res io_res;
+    omc_status status;
+    omc_const_bytes output_view;
+
+    target_size = make_test_bmff_primary_item_target_without_idat(
+        target, sizeof(target), "heic");
+
+    omc_store_init(&store);
+    omc_arena_init(&storage);
+    omc_arena_init(&output);
+
+    add_test_xmp_entry(&store, "OpenMeta-c");
+    add_xmp_u32_entry(&store, k_ns_tiff, "ImageWidth", 640U);
+    add_test_exif_entry(&store, "OpenMeta-c Lens");
+
+    omc_transfer_package_build_opts_init(&opts);
+    opts.format        = OMC_SCAN_FMT_HEIF;
+    opts.include_icc   = 0;
+    opts.include_iptc  = 0;
+    opts.include_jumbf = 0;
+
+    status = omc_transfer_package_batch_build(&store, &opts, &storage, &batch,
+                                              &io_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
+    OMC_TEST_REQUIRE_U64_EQ(batch.target_format, OMC_SCAN_FMT_HEIF);
+    OMC_TEST_REQUIRE_U64_EQ(batch.chunk_count, 2U);
+
+    status = omc_transfer_package_bmff_materialize(target, target_size, &batch,
+                                                   &output, &io_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.chunk_count, batch.chunk_count);
+    OMC_TEST_CHECK(output.size > target_size);
+
+    output_view.data = output.data;
+    output_view.size = output.size;
+    OMC_TEST_CHECK(bytes_contains(output_view, "OpenMeta-c"));
+    OMC_TEST_CHECK(bytes_contains(output_view, "application/rdf+xml"));
+    OMC_TEST_CHECK_U64_EQ(bytes_count(output_view, "idat"), 1U);
+    OMC_TEST_CHECK_U64_EQ(bytes_count(output_view, "infe"), 3U);
+    OMC_TEST_CHECK_U64_EQ(bytes_count(output_view, "cdsc"), 2U);
+    OMC_TEST_CHECK(bytes_contains_blob(output_view, k_primary_method0,
+                                       sizeof(k_primary_method0)));
+    OMC_TEST_CHECK(bytes_contains_blob(output_view, k_exif_method0,
+                                       sizeof(k_exif_method0)));
+    OMC_TEST_CHECK(
+        bytes_contains_blob(output_view, k_xmp_method0, sizeof(k_xmp_method0)));
+
+    omc_arena_fini(&output);
+    omc_arena_fini(&storage);
+    omc_store_fini(&store);
 }
 
 static void
@@ -2257,6 +2393,7 @@ main(void)
     test_transfer_package_bmff_heif_item_graph_materializes();
     test_transfer_package_bmff_avif_item_graph_materializes();
     test_transfer_package_bmff_cr3_item_graph_materializes();
+    test_transfer_package_bmff_heif_item_graph_materializes_without_idat();
     test_transfer_package_rendered_safety_filters_source_specific();
     test_transfer_package_source_range_roundtrip();
     test_transfer_package_build_executed_jpeg_segments();
