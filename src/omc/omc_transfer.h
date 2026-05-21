@@ -118,10 +118,11 @@ typedef enum omc_transfer_diagnostic_action {
 } omc_transfer_diagnostic_action;
 
 typedef enum omc_transfer_diagnostic_reason {
-    OMC_TRANSFER_DIAGNOSTIC_REASON_SAFE                       = 0,
-    OMC_TRANSFER_DIAGNOSTIC_REASON_SOURCE_BOUND               = 1,
-    OMC_TRANSFER_DIAGNOSTIC_REASON_RENDERED_UNSAFE            = 2,
-    OMC_TRANSFER_DIAGNOSTIC_REASON_TARGET_IMAGE_SPEC_REQUIRED = 3
+    OMC_TRANSFER_DIAGNOSTIC_REASON_UNKNOWN                    = 0,
+    OMC_TRANSFER_DIAGNOSTIC_REASON_SAFE                       = 1,
+    OMC_TRANSFER_DIAGNOSTIC_REASON_SOURCE_BOUND               = 2,
+    OMC_TRANSFER_DIAGNOSTIC_REASON_RENDERED_UNSAFE            = 3,
+    OMC_TRANSFER_DIAGNOSTIC_REASON_TARGET_IMAGE_SPEC_REQUIRED = 4
 } omc_transfer_diagnostic_reason;
 
 typedef enum omc_transfer_diagnostic_severity {
@@ -267,6 +268,9 @@ omc_transfer_diagnostic_reason_name(omc_transfer_diagnostic_reason reason);
 
 OMC_API const char*
 omc_transfer_diagnostic_severity_name(omc_transfer_diagnostic_severity severity);
+
+OMC_API const char*
+omc_transfer_diagnostic_message(const omc_transfer_diagnostic* diagnostic);
 
 OMC_API omc_transfer_diagnostics_res
 omc_transfer_diagnostics_from_store(const omc_store* store,

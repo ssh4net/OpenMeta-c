@@ -9790,7 +9790,7 @@ omc_transfer_bmff_parse_iloc_info(const omc_u8* file_bytes, omc_size file_size,
     }
 
     out->version = file_bytes[(omc_size)payload_off];
-    if (out->version != 1U && out->version != 2U) {
+    if (out->version != 0U && out->version != 1U && out->version != 2U) {
         return OMC_TRANSFER_UNSUPPORTED;
     }
 
@@ -9834,15 +9834,35 @@ omc_transfer_bmff_parse_iloc_info(const omc_u8* file_bytes, omc_size file_size,
     for (i = 0U; i < count; ++i) {
         omc_u64 extent_count;
         omc_u64 j;
+        omc_u16 construction_method;
+        omc_u16 data_ref_index;
         omc_u8 item_id_size;
 
         item_id_size = out->version == 2U ? (omc_u8)4U : (omc_u8)2U;
-        if (q + item_id_size + 2U + 2U + out->base_offset_size + 2U
-            > payload_end) {
+        if (q + item_id_size > payload_end) {
             return OMC_TRANSFER_MALFORMED;
         }
         q += item_id_size;
-        q += 2U;
+        construction_method = 0U;
+        if (out->version != 0U) {
+            if (q + 2U > payload_end) {
+                return OMC_TRANSFER_MALFORMED;
+            }
+            construction_method = omc_transfer_read_u16be(file_bytes
+                                                          + (omc_size)q);
+            q += 2U;
+            if ((construction_method & 0xFFF0U) != 0U
+                || (construction_method & 0x000FU) > 1U) {
+                return OMC_TRANSFER_UNSUPPORTED;
+            }
+        }
+        if (q + 2U + out->base_offset_size + 2U > payload_end) {
+            return OMC_TRANSFER_MALFORMED;
+        }
+        data_ref_index = omc_transfer_read_u16be(file_bytes + (omc_size)q);
+        if (data_ref_index != 0U) {
+            return OMC_TRANSFER_UNSUPPORTED;
+        }
         q += 2U;
         q += out->base_offset_size;
         extent_count = (omc_u64)omc_transfer_read_u16be(file_bytes
@@ -10144,10 +10164,13 @@ omc_transfer_build_bmff_package_iloc_box(
         if (status != OMC_STATUS_OK) {
             goto cleanup;
         }
-        status = omc_transfer_append_u16be_arena(&payload, 0U);
-        if (status == OMC_STATUS_OK) {
+        if (info.version != 0U) {
             status = omc_transfer_append_u16be_arena(&payload, 0U);
+            if (status != OMC_STATUS_OK) {
+                goto cleanup;
+            }
         }
+        status = omc_transfer_append_u16be_arena(&payload, 0U);
         if (status == OMC_STATUS_OK) {
             status = omc_transfer_bmff_append_nbe_arena(&payload, 0U,
                                                         info.base_offset_size);
@@ -13036,6 +13059,7 @@ const char*
 omc_transfer_diagnostic_reason_name(omc_transfer_diagnostic_reason reason)
 {
     switch (reason) {
+    case OMC_TRANSFER_DIAGNOSTIC_REASON_UNKNOWN: return "unknown";
     case OMC_TRANSFER_DIAGNOSTIC_REASON_SAFE: return "safe";
     case OMC_TRANSFER_DIAGNOSTIC_REASON_SOURCE_BOUND: return "source_bound";
     case OMC_TRANSFER_DIAGNOSTIC_REASON_RENDERED_UNSAFE:
@@ -13056,6 +13080,47 @@ omc_transfer_diagnostic_severity_name(omc_transfer_diagnostic_severity severity)
     default: break;
     }
     return "unknown";
+}
+
+const char*
+omc_transfer_diagnostic_message(const omc_transfer_diagnostic* diagnostic)
+{
+    if (diagnostic == (const omc_transfer_diagnostic*)0) {
+        return "metadata has no safe automatic transfer action for this mode";
+    }
+    if (diagnostic->action == OMC_TRANSFER_DIAGNOSTIC_KEEP) {
+        return "metadata is safe to keep for this transfer mode";
+    }
+    if (diagnostic->action
+        == OMC_TRANSFER_DIAGNOSTIC_REQUIRES_TARGET_IMAGE_SPEC) {
+        return "source value describes target-owned image properties; provide "
+               "target image specs or write a target-correct value";
+    }
+    if (diagnostic->action == OMC_TRANSFER_DIAGNOSTIC_DROP) {
+        if (diagnostic->reason
+            == OMC_TRANSFER_DIAGNOSTIC_REASON_RENDERED_UNSAFE) {
+            if (diagnostic->kind == OMC_TRANSFER_DIAGNOSTIC_ICC_PROFILE) {
+                return "source ICC profile is unsafe for rendered-image "
+                       "transfer and will be dropped";
+            }
+            if (diagnostic->kind == OMC_TRANSFER_DIAGNOSTIC_C2PA) {
+                return "source C2PA metadata is bound to source bytes and will "
+                       "be dropped for rendered-image transfer";
+            }
+            return "source processing metadata is unsafe for rendered-image "
+                   "transfer and will be dropped";
+        }
+        if (diagnostic->reason == OMC_TRANSFER_DIAGNOSTIC_REASON_SOURCE_BOUND) {
+            return "metadata is bound to the source RAW or correction pipeline "
+                   "and will be dropped for this transfer mode";
+        }
+        if (diagnostic->reason
+            == OMC_TRANSFER_DIAGNOSTIC_REASON_TARGET_IMAGE_SPEC_REQUIRED) {
+            return "target-owned metadata is missing target image specs and "
+                   "will be dropped";
+        }
+    }
+    return "metadata has no safe automatic transfer action for this mode";
 }
 
 static void

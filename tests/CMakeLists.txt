@@ -42,6 +42,10 @@ add_executable(omc_test_ccm_query test_omc_ccm_query.c)
 target_link_libraries(omc_test_ccm_query PRIVATE omc)
 add_test(NAME omc_test_ccm_query COMMAND omc_test_ccm_query)
 
+add_executable(omc_test_public_headers test_omc_public_headers.c)
+target_link_libraries(omc_test_public_headers PRIVATE omc)
+add_test(NAME omc_test_public_headers COMMAND omc_test_public_headers)
+
 add_executable(omc_test_capabilities test_omc_capabilities.c)
 target_link_libraries(omc_test_capabilities PRIVATE omc)
 add_test(NAME omc_test_capabilities COMMAND omc_test_capabilities)
