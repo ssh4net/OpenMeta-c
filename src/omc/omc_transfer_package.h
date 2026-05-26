@@ -154,9 +154,16 @@ omc_transfer_package_bytes_materialize_to_buffer(
     omc_u8* out_bytes, omc_size out_cap, omc_transfer_package_io_res* out_res);
 
 /*
- * Applies BMFF item-route chunks from batch to an existing HEIF/AVIF/CR3
- * target file. This path is explicit because generic package materialization
- * has no target bytes and therefore cannot update a BMFF item graph.
+ * Applies supported BMFF route chunks from batch to an existing HEIF/AVIF/CR3
+ * target file. Supported item routes are bmff:item-exif, bmff:item-xmp,
+ * bmff:item-jumb, and bmff:item-c2pa; bmff:property-colr-icc applies a bounded
+ * colr/prof ICC property rewrite. This path is explicit because generic
+ * package materialization has no target bytes and therefore cannot update a
+ * BMFF item/property graph.
+ *
+ * The target must already expose a parseable primary item graph with pitm,
+ * iinf, and iloc. Retained iloc construction method 2 and external data
+ * references are rejected fail-safe instead of being flattened implicitly.
  */
 OMC_API omc_status
 omc_transfer_package_bmff_materialize(const omc_u8* target_bytes,
@@ -167,7 +174,7 @@ omc_transfer_package_bmff_materialize(const omc_u8* target_bytes,
 
 /*
  * Deserializes one persisted OMTPKG01 batch into temp_storage and applies its
- * BMFF item-route chunks to an existing HEIF/AVIF/CR3 target file.
+ * supported BMFF route chunks to an existing HEIF/AVIF/CR3 target file.
  */
 OMC_API omc_status
 omc_transfer_package_bmff_bytes_materialize(

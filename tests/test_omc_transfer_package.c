@@ -1547,9 +1547,12 @@ test_transfer_package_bmff_rejects_method2_item_extent(void)
     omc_store store;
     omc_arena storage;
     omc_arena output;
+    omc_arena serialized;
+    omc_arena temp_storage;
     omc_transfer_package_build_opts opts;
     omc_transfer_package_batch batch;
     omc_transfer_package_io_res io_res;
+    omc_transfer_package_io_res serialized_res;
     omc_status status;
 
     target_size = make_test_bmff_primary_item_target_with_iloc_variant(
@@ -1558,6 +1561,8 @@ test_transfer_package_bmff_rejects_method2_item_extent(void)
     omc_store_init(&store);
     omc_arena_init(&storage);
     omc_arena_init(&output);
+    omc_arena_init(&serialized);
+    omc_arena_init(&temp_storage);
 
     add_test_xmp_entry(&store, "OpenMeta-c");
     add_xmp_u32_entry(&store, k_ns_tiff, "ImageWidth", 640U);
@@ -1580,6 +1585,22 @@ test_transfer_package_bmff_rejects_method2_item_extent(void)
     OMC_TEST_CHECK_U64_EQ(io_res.status, OMC_TRANSFER_UNSUPPORTED);
     OMC_TEST_CHECK_U64_EQ(output.size, 0U);
 
+    status = omc_transfer_package_batch_serialize(&batch, &serialized,
+                                                  &serialized_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(serialized_res.status, OMC_TRANSFER_OK);
+
+    status = omc_transfer_package_bmff_bytes_materialize(target, target_size,
+                                                         serialized.data,
+                                                         serialized.size,
+                                                         &temp_storage, &output,
+                                                         &io_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_CHECK_U64_EQ(io_res.status, OMC_TRANSFER_UNSUPPORTED);
+    OMC_TEST_CHECK_U64_EQ(output.size, 0U);
+
+    omc_arena_fini(&temp_storage);
+    omc_arena_fini(&serialized);
     omc_arena_fini(&output);
     omc_arena_fini(&storage);
     omc_store_fini(&store);
@@ -1633,9 +1654,16 @@ test_transfer_package_bmff_rejects_external_data_reference(void)
 }
 
 static void
-test_transfer_package_bmff_rejects_32bit_item_id_without_upgrade(void)
+test_transfer_package_bmff_upgrades_inserted_32bit_item_ids(void)
 {
-    static const char k_ns_tiff[] = "http://ns.adobe.com/tiff/1.0/";
+    static const char k_ns_tiff[]   = "http://ns.adobe.com/tiff/1.0/";
+    static const omc_u8 k_iloc_v2[] = { (omc_u8)'i', (omc_u8)'l', (omc_u8)'o',
+                                        (omc_u8)'c', 2U,          0U,
+                                        0U,          0U };
+    static const omc_u8 k_iref_v1[] = { (omc_u8)'i', (omc_u8)'r', (omc_u8)'e',
+                                        (omc_u8)'f', 1U,          0U,
+                                        0U,          0U };
+    static const omc_u8 k_item_65536[] = { 0U, 1U, 0U, 0U };
     omc_u8 target[1024];
     omc_size target_size;
     omc_store store;
@@ -1645,6 +1673,7 @@ test_transfer_package_bmff_rejects_32bit_item_id_without_upgrade(void)
     omc_transfer_package_batch batch;
     omc_transfer_package_io_res io_res;
     omc_status status;
+    omc_const_bytes output_view;
 
     target_size = make_test_bmff_primary_item_target_with_iloc_variant(
         target, sizeof(target), "mif1", 1U, 0xFFFFU, 0U, 0U);
@@ -1671,8 +1700,187 @@ test_transfer_package_bmff_rejects_32bit_item_id_without_upgrade(void)
     status = omc_transfer_package_bmff_materialize(target, target_size, &batch,
                                                    &output, &io_res);
     OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
-    OMC_TEST_CHECK_U64_EQ(io_res.status, OMC_TRANSFER_LIMIT);
-    OMC_TEST_CHECK_U64_EQ(output.size, 0U);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.chunk_count, batch.chunk_count);
+    OMC_TEST_CHECK(output.size > target_size);
+
+    output_view.data = output.data;
+    output_view.size = output.size;
+    OMC_TEST_CHECK(
+        bytes_contains_blob(output_view, k_iloc_v2, sizeof(k_iloc_v2)));
+    OMC_TEST_CHECK(
+        bytes_contains_blob(output_view, k_iref_v1, sizeof(k_iref_v1)));
+    OMC_TEST_CHECK(
+        bytes_contains_blob(output_view, k_item_65536, sizeof(k_item_65536)));
+    OMC_TEST_CHECK(bytes_contains(output_view, "OpenMeta-c"));
+
+    omc_arena_fini(&output);
+    omc_arena_fini(&storage);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_package_bmff_jumbf_and_c2pa_item_routes_materialize(void)
+{
+    static const char k_jumb_route[] = "bmff:item-jumb";
+    static const char k_c2pa_route[] = "bmff:item-c2pa";
+    static const char k_icc_route[]  = "bmff:property-colr-icc";
+    static const omc_u8 k_jumb_payload[]
+        = { (omc_u8)'J', (omc_u8)'U', (omc_u8)'M', (omc_u8)'B', (omc_u8)'!' };
+    static const omc_u8 k_c2pa_payload[]
+        = { (omc_u8)'C', (omc_u8)'2', (omc_u8)'P', (omc_u8)'A', (omc_u8)'!' };
+    omc_u8 icc_profile[160];
+    omc_u8 icc_property[164];
+    omc_u8 target[1024];
+    omc_size target_size;
+    omc_transfer_package_chunk chunks[3];
+    omc_transfer_package_batch batch;
+    omc_transfer_package_io_res io_res;
+    omc_transfer_package_io_res serialized_res;
+    omc_arena output;
+    omc_arena serialized;
+    omc_arena temp_storage;
+    omc_arena serialized_output;
+    omc_status status;
+    omc_const_bytes output_view;
+
+    target_size = make_test_bmff_primary_item_target(target, sizeof(target),
+                                                     "mif1");
+    build_test_icc_blob(icc_profile, sizeof(icc_profile));
+    memcpy(icc_property, "prof", 4U);
+    memcpy(icc_property + 4U, icc_profile, sizeof(icc_profile));
+
+    memset(chunks, 0, sizeof(chunks));
+    chunks[0].kind          = OMC_TRANSFER_PACKAGE_CHUNK_TRANSFER_BLOCK;
+    chunks[0].route.data    = (const omc_u8*)k_jumb_route;
+    chunks[0].route.size    = (omc_size)strlen(k_jumb_route);
+    chunks[0].output_offset = 0U;
+    chunks[0].block_index   = 0xFFFFFFFFU;
+    chunks[0].bytes.data    = k_jumb_payload;
+    chunks[0].bytes.size    = sizeof(k_jumb_payload);
+
+    chunks[1].kind          = OMC_TRANSFER_PACKAGE_CHUNK_TRANSFER_BLOCK;
+    chunks[1].route.data    = (const omc_u8*)k_c2pa_route;
+    chunks[1].route.size    = (omc_size)strlen(k_c2pa_route);
+    chunks[1].output_offset = sizeof(k_jumb_payload);
+    chunks[1].block_index   = 0xFFFFFFFFU;
+    chunks[1].bytes.data    = k_c2pa_payload;
+    chunks[1].bytes.size    = sizeof(k_c2pa_payload);
+
+    chunks[2].kind          = OMC_TRANSFER_PACKAGE_CHUNK_TRANSFER_BLOCK;
+    chunks[2].route.data    = (const omc_u8*)k_icc_route;
+    chunks[2].route.size    = (omc_size)strlen(k_icc_route);
+    chunks[2].output_offset = sizeof(k_jumb_payload) + sizeof(k_c2pa_payload);
+    chunks[2].block_index   = 0xFFFFFFFFU;
+    chunks[2].bytes.data    = icc_property;
+    chunks[2].bytes.size    = sizeof(icc_property);
+
+    omc_transfer_package_batch_init(&batch);
+    batch.contract_version = 1U;
+    batch.target_format    = OMC_SCAN_FMT_HEIF;
+    batch.output_size      = sizeof(k_jumb_payload) + sizeof(k_c2pa_payload)
+                        + sizeof(icc_property);
+    batch.chunk_count = 3U;
+    batch.chunks      = chunks;
+
+    omc_arena_init(&output);
+    omc_arena_init(&serialized);
+    omc_arena_init(&temp_storage);
+    omc_arena_init(&serialized_output);
+
+    status = omc_transfer_package_bmff_materialize(target, target_size, &batch,
+                                                   &output, &io_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.chunk_count, batch.chunk_count);
+
+    output_view.data = output.data;
+    output_view.size = output.size;
+    OMC_TEST_CHECK(bytes_contains(output_view, "OpenMeta JUMBF"));
+    OMC_TEST_CHECK(bytes_contains(output_view, "OpenMeta C2PA"));
+    OMC_TEST_CHECK(bytes_contains(output_view, "JUMB!"));
+    OMC_TEST_CHECK(bytes_contains(output_view, "C2PA!"));
+    OMC_TEST_CHECK_U64_EQ(bytes_count(output_view, "infe"), 3U);
+    OMC_TEST_CHECK_U64_EQ(bytes_count(output_view, "cdsc"), 2U);
+    OMC_TEST_CHECK(bytes_contains(output_view, "colr"));
+    OMC_TEST_CHECK(bytes_contains(output_view, "prof"));
+    OMC_TEST_CHECK(bytes_contains(output_view, "acsp"));
+
+    status = omc_transfer_package_batch_serialize(&batch, &serialized,
+                                                  &serialized_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(serialized_res.status, OMC_TRANSFER_OK);
+    OMC_TEST_CHECK(memcmp(serialized.data, "OMTPKG01", 8U) == 0);
+
+    status = omc_transfer_package_bmff_bytes_materialize(
+        target, target_size, serialized.data, serialized.size, &temp_storage,
+        &serialized_output, &io_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.chunk_count, batch.chunk_count);
+    OMC_TEST_REQUIRE_U64_EQ(serialized_output.size, output.size);
+    OMC_TEST_CHECK(memcmp(serialized_output.data, output.data, output.size)
+                   == 0);
+
+    omc_arena_fini(&serialized_output);
+    omc_arena_fini(&temp_storage);
+    omc_arena_fini(&serialized);
+    omc_arena_fini(&output);
+}
+
+static void
+test_transfer_package_bmff_items_and_icc_property_materialize(void)
+{
+    static const char k_ns_tiff[] = "http://ns.adobe.com/tiff/1.0/";
+    omc_u8 target[1024];
+    omc_size target_size;
+    omc_store store;
+    omc_arena storage;
+    omc_arena output;
+    omc_transfer_package_build_opts opts;
+    omc_transfer_package_batch batch;
+    omc_transfer_package_io_res io_res;
+    omc_status status;
+    omc_const_bytes output_view;
+
+    target_size = make_test_bmff_primary_item_target(target, sizeof(target),
+                                                     "mif1");
+
+    omc_store_init(&store);
+    omc_arena_init(&storage);
+    omc_arena_init(&output);
+
+    add_test_xmp_entry(&store, "OpenMeta-c");
+    add_xmp_u32_entry(&store, k_ns_tiff, "ImageWidth", 640U);
+    add_test_exif_entry(&store, "OpenMeta-c Lens");
+    add_test_icc_entries(&store);
+
+    omc_transfer_package_build_opts_init(&opts);
+    opts.format        = OMC_SCAN_FMT_HEIF;
+    opts.include_iptc  = 0;
+    opts.include_jumbf = 0;
+
+    status = omc_transfer_package_batch_build(&store, &opts, &storage, &batch,
+                                              &io_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
+    OMC_TEST_REQUIRE_U64_EQ(batch.target_format, OMC_SCAN_FMT_HEIF);
+    OMC_TEST_REQUIRE_U64_EQ(batch.chunk_count, 3U);
+    OMC_TEST_CHECK(bytes_eq(batch.chunks[2].route, "bmff:property-colr-icc"));
+
+    status = omc_transfer_package_bmff_materialize(target, target_size, &batch,
+                                                   &output, &io_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.chunk_count, batch.chunk_count);
+
+    output_view.data = output.data;
+    output_view.size = output.size;
+    OMC_TEST_CHECK(bytes_contains(output_view, "OpenMeta-c"));
+    OMC_TEST_CHECK(bytes_contains(output_view, "application/rdf+xml"));
+    OMC_TEST_CHECK(bytes_contains(output_view, "colr"));
+    OMC_TEST_CHECK(bytes_contains(output_view, "prof"));
+    OMC_TEST_CHECK(bytes_contains(output_view, "acsp"));
 
     omc_arena_fini(&output);
     omc_arena_fini(&storage);
@@ -2904,7 +3112,9 @@ main(void)
     test_transfer_package_bmff_retains_method1_idat_extent();
     test_transfer_package_bmff_rejects_method2_item_extent();
     test_transfer_package_bmff_rejects_external_data_reference();
-    test_transfer_package_bmff_rejects_32bit_item_id_without_upgrade();
+    test_transfer_package_bmff_upgrades_inserted_32bit_item_ids();
+    test_transfer_package_bmff_jumbf_and_c2pa_item_routes_materialize();
+    test_transfer_package_bmff_items_and_icc_property_materialize();
     test_transfer_package_bmff_heif_item_graph_materializes_without_idat();
     test_transfer_package_bmff_avif_item_graph_materializes_without_idat();
     test_transfer_package_bmff_cr3_item_graph_materializes_without_idat();

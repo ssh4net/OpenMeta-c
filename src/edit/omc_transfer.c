@@ -45,6 +45,11 @@ omc_transfer_append_bmff_colr_icc_box(omc_arena* out, const omc_u8* profile,
                                       omc_size profile_size);
 
 static omc_status
+omc_transfer_rewrite_bmff_icc(const omc_u8* file_bytes, omc_size file_size,
+                              const omc_u8* profile, omc_size profile_size,
+                              omc_arena* out, omc_transfer_status* out_status);
+
+static omc_status
 omc_transfer_build_png_iccp_payload(const omc_u8* profile,
                                     omc_size profile_size,
                                     omc_arena* payload_out,
@@ -9503,15 +9508,16 @@ omc_transfer_bmff_collect_metadata_ref_ids(const omc_u8* file_bytes,
 static omc_status
 omc_transfer_bmff_append_filtered_iref_child(
     const omc_u8* file_bytes, omc_size file_size,
-    const omc_transfer_bmff_box* child, omc_u8 iref_version,
-    const omc_u32* metadata_ids, omc_u32 metadata_count, omc_arena* payload,
-    omc_transfer_status* out_status)
+    const omc_transfer_bmff_box* child, omc_u8 input_iref_version,
+    omc_u8 output_iref_version, const omc_u32* metadata_ids,
+    omc_u32 metadata_count, omc_arena* payload, omc_transfer_status* out_status)
 {
     omc_arena child_payload;
     omc_status status;
     omc_u64 cursor;
     omc_u64 child_payload_end;
-    omc_u8 id_width;
+    omc_u8 input_id_width;
+    int filter_cdsc;
 
     if (out_status == (omc_transfer_status*)0) {
         return OMC_STATUS_INVALID_ARGUMENT;
@@ -9522,13 +9528,13 @@ omc_transfer_bmff_append_filtered_iref_child(
         return OMC_STATUS_INVALID_ARGUMENT;
     }
 
-    if (child->type != omc_transfer_fourcc('c', 'd', 's', 'c')) {
+    filter_cdsc = child->type == omc_transfer_fourcc('c', 'd', 's', 'c');
+    if (!filter_cdsc && input_iref_version == output_iref_version) {
         return omc_transfer_append_bytes(payload,
                                          file_bytes + (omc_size)child->offset,
                                          (omc_size)child->size);
     }
-
-    id_width          = iref_version == 0U ? (omc_u8)2U : (omc_u8)4U;
+    input_id_width    = input_iref_version == 0U ? (omc_u8)2U : (omc_u8)4U;
     cursor            = child->offset + child->header_size;
     child_payload_end = child->offset + child->size;
     if (child_payload_end > (omc_u64)file_size) {
@@ -9546,13 +9552,14 @@ omc_transfer_bmff_append_filtered_iref_child(
         omc_u32 kept_count;
         omc_u16 i;
 
-        if (cursor + id_width + 2U > child_payload_end
-            || !omc_transfer_bmff_read_nbe(file_bytes, cursor, id_width, &from64)
+        if (cursor + input_id_width + 2U > child_payload_end
+            || !omc_transfer_bmff_read_nbe(file_bytes, cursor, input_id_width,
+                                           &from64)
             || from64 > 0xFFFFFFFFU) {
             *out_status = OMC_TRANSFER_MALFORMED;
             goto cleanup;
         }
-        cursor += id_width;
+        cursor += input_id_width;
         from_id   = (omc_u32)from64;
         ref_count = omc_transfer_read_u16be(file_bytes + (omc_size)cursor);
         cursor += 2U;
@@ -9561,14 +9568,14 @@ omc_transfer_bmff_append_filtered_iref_child(
         for (i = 0U; i < ref_count; ++i) {
             omc_u64 to64;
 
-            if (cursor + id_width > child_payload_end
-                || !omc_transfer_bmff_read_nbe(file_bytes, cursor, id_width,
-                                               &to64)
+            if (cursor + input_id_width > child_payload_end
+                || !omc_transfer_bmff_read_nbe(file_bytes, cursor,
+                                               input_id_width, &to64)
                 || to64 > 0xFFFFFFFFU) {
                 *out_status = OMC_TRANSFER_MALFORMED;
                 goto cleanup;
             }
-            cursor += id_width;
+            cursor += input_id_width;
             if (kept_count >= OMC_TRANSFER_BMFF_MAX_REF_ITEMS) {
                 *out_status = OMC_TRANSFER_LIMIT;
                 goto cleanup;
@@ -9577,14 +9584,15 @@ omc_transfer_bmff_append_filtered_iref_child(
             kept_count += 1U;
         }
 
-        if (omc_transfer_bmff_ref_id_in_list(metadata_ids, metadata_count,
-                                             from_id)
-            || kept_count == 0U) {
+        if (filter_cdsc
+            && (omc_transfer_bmff_ref_id_in_list(metadata_ids, metadata_count,
+                                                 from_id)
+                || kept_count == 0U)) {
             continue;
         }
 
-        status = omc_transfer_bmff_append_iref_id(&child_payload, iref_version,
-                                                  from_id);
+        status = omc_transfer_bmff_append_iref_id(&child_payload,
+                                                  output_iref_version, from_id);
         if (status != OMC_STATUS_OK) {
             goto cleanup;
         }
@@ -9595,14 +9603,15 @@ omc_transfer_bmff_append_filtered_iref_child(
         }
         for (i = 0U; i < (omc_u16)kept_count; ++i) {
             status = omc_transfer_bmff_append_iref_id(&child_payload,
-                                                      iref_version, kept[i]);
+                                                      output_iref_version,
+                                                      kept[i]);
             if (status != OMC_STATUS_OK) {
                 goto cleanup;
             }
         }
     }
 
-    if (child_payload.size != 0U) {
+    if (!filter_cdsc || child_payload.size != 0U) {
         status = omc_transfer_append_bmff_box_arena(payload, child->type,
                                                     child_payload.data,
                                                     child_payload.size);
@@ -9627,6 +9636,7 @@ omc_transfer_build_bmff_iref_cdsc_box(
     omc_u64 payload_end;
     omc_u64 child_off;
     omc_u8 version;
+    omc_u8 input_version;
     omc_u32 i;
 
     if (out_status == (omc_transfer_status*)0) {
@@ -9638,10 +9648,13 @@ omc_transfer_build_bmff_iref_cdsc_box(
     }
 
     omc_arena_init(&payload);
-    status  = OMC_STATUS_OK;
-    version = 0U;
+    status        = OMC_STATUS_OK;
+    version       = 0U;
+    input_version = 0U;
 
     if (iref != (const omc_transfer_bmff_box*)0) {
+        omc_u8 fullbox[4];
+
         payload_off = iref->offset + iref->header_size;
         payload_end = iref->offset + iref->size;
         if (payload_off + 4U > payload_end
@@ -9649,14 +9662,20 @@ omc_transfer_build_bmff_iref_cdsc_box(
             *out_status = OMC_TRANSFER_MALFORMED;
             goto cleanup;
         }
-        version = file_bytes[(omc_size)payload_off];
-        if (version > 1U) {
+        input_version = file_bytes[(omc_size)payload_off];
+        if (input_version > 1U) {
             *out_status = OMC_TRANSFER_UNSUPPORTED;
             goto cleanup;
         }
-        status = omc_transfer_append_bytes(&payload,
-                                           file_bytes + (omc_size)payload_off,
-                                           4U);
+        version = input_version;
+        if (primary_item_id > 0xFFFFU || max_item_id > 0xFFFFU) {
+            version = 1U;
+        }
+        fullbox[0] = version;
+        fullbox[1] = file_bytes[(omc_size)payload_off + 1U];
+        fullbox[2] = file_bytes[(omc_size)payload_off + 2U];
+        fullbox[3] = file_bytes[(omc_size)payload_off + 3U];
+        status = omc_transfer_append_bytes(&payload, fullbox, sizeof(fullbox));
         if (status != OMC_STATUS_OK) {
             goto cleanup;
         }
@@ -9671,8 +9690,8 @@ omc_transfer_build_bmff_iref_cdsc_box(
                 goto cleanup;
             }
             status = omc_transfer_bmff_append_filtered_iref_child(
-                file_bytes, file_size, &child, version, metadata_ids,
-                metadata_count, &payload, out_status);
+                file_bytes, file_size, &child, input_version, version,
+                metadata_ids, metadata_count, &payload, out_status);
             if (status != OMC_STATUS_OK || *out_status != OMC_TRANSFER_OK) {
                 goto cleanup;
             }
@@ -9762,6 +9781,14 @@ typedef struct omc_transfer_bmff_package_item {
     omc_u64 idat_offset;
     int mime_xmp;
 } omc_transfer_bmff_package_item;
+
+typedef struct omc_transfer_bmff_package_plan {
+    omc_transfer_bmff_package_item* items;
+    omc_u32 item_capacity;
+    omc_u32 item_count;
+    omc_const_bytes icc_profile;
+    int has_icc_profile;
+} omc_transfer_bmff_package_plan;
 
 static omc_transfer_status
 omc_transfer_bmff_parse_iloc_info(const omc_u8* file_bytes, omc_size file_size,
@@ -9892,6 +9919,8 @@ omc_transfer_bmff_append_package_infe(omc_arena* out,
 {
     static const char k_exif_name[] = "OpenMeta Exif";
     static const char k_xmp_name[]  = "OpenMeta XMP";
+    static const char k_jumb_name[] = "OpenMeta JUMBF";
+    static const char k_c2pa_name[] = "OpenMeta C2PA";
     static const char k_xmp_type[]  = "application/rdf+xml";
     static const omc_u8 k_zero      = 0U;
     omc_arena payload;
@@ -9935,7 +9964,15 @@ omc_transfer_bmff_append_package_infe(omc_arena* out,
         goto cleanup;
     }
 
-    name   = item->mime_xmp ? k_xmp_name : k_exif_name;
+    if (item->mime_xmp) {
+        name = k_xmp_name;
+    } else if (item->item_type == omc_transfer_fourcc('j', 'u', 'm', 'b')) {
+        name = k_jumb_name;
+    } else if (item->item_type == omc_transfer_fourcc('c', '2', 'p', 'a')) {
+        name = k_c2pa_name;
+    } else {
+        name = k_exif_name;
+    }
     status = omc_transfer_append_bytes(&payload, (const omc_u8*)name,
                                        (omc_size)strlen(name) + 1U);
     if (status != OMC_STATUS_OK) {
@@ -10072,6 +10109,127 @@ cleanup:
 }
 
 static omc_status
+omc_transfer_bmff_append_upgraded_iloc_entries(
+    const omc_u8* file_bytes, const omc_transfer_bmff_iloc_info* info,
+    omc_arena* payload, omc_transfer_status* out_status)
+{
+    omc_status status;
+    omc_u64 q;
+    omc_u8 item_id_size;
+
+    if (out_status == (omc_transfer_status*)0) {
+        return OMC_STATUS_INVALID_ARGUMENT;
+    }
+    if (file_bytes == (const omc_u8*)0
+        || info == (const omc_transfer_bmff_iloc_info*)0
+        || payload == (omc_arena*)0) {
+        return OMC_STATUS_INVALID_ARGUMENT;
+    }
+
+    q            = info->entries_off;
+    item_id_size = info->version == 2U ? (omc_u8)4U : (omc_u8)2U;
+    status       = OMC_STATUS_OK;
+    while (q < info->entries_end) {
+        omc_u64 item_id64;
+        omc_u64 base_offset;
+        omc_u64 extent_count;
+        omc_u64 j;
+        omc_u16 construction_method;
+        omc_u16 data_ref_index;
+
+        if (q + item_id_size > info->entries_end
+            || !omc_transfer_bmff_read_nbe(file_bytes, q, item_id_size,
+                                           &item_id64)
+            || item_id64 > 0xFFFFFFFFU) {
+            *out_status = OMC_TRANSFER_MALFORMED;
+            return OMC_STATUS_OK;
+        }
+        q += item_id_size;
+        construction_method = 0U;
+        if (info->version != 0U) {
+            if (q + 2U > info->entries_end) {
+                *out_status = OMC_TRANSFER_MALFORMED;
+                return OMC_STATUS_OK;
+            }
+            construction_method = omc_transfer_read_u16be(file_bytes
+                                                          + (omc_size)q);
+            q += 2U;
+        }
+        if (q + 2U + info->base_offset_size + 2U > info->entries_end) {
+            *out_status = OMC_TRANSFER_MALFORMED;
+            return OMC_STATUS_OK;
+        }
+        data_ref_index = omc_transfer_read_u16be(file_bytes + (omc_size)q);
+        q += 2U;
+        if (!omc_transfer_bmff_read_nbe(file_bytes, q, info->base_offset_size,
+                                        &base_offset)) {
+            *out_status = OMC_TRANSFER_MALFORMED;
+            return OMC_STATUS_OK;
+        }
+        q += info->base_offset_size;
+        extent_count = (omc_u64)omc_transfer_read_u16be(file_bytes
+                                                        + (omc_size)q);
+        q += 2U;
+
+        status = omc_transfer_append_u32be_arena(payload, (omc_u32)item_id64);
+        if (status == OMC_STATUS_OK) {
+            status = omc_transfer_append_u16be_arena(payload,
+                                                     construction_method);
+        }
+        if (status == OMC_STATUS_OK) {
+            status = omc_transfer_append_u16be_arena(payload, data_ref_index);
+        }
+        if (status == OMC_STATUS_OK) {
+            status = omc_transfer_bmff_append_nbe_arena(payload, base_offset,
+                                                        info->base_offset_size);
+        }
+        if (status == OMC_STATUS_OK) {
+            status = omc_transfer_append_u16be_arena(payload,
+                                                     (omc_u16)extent_count);
+        }
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+
+        for (j = 0U; j < extent_count; ++j) {
+            omc_u64 extent_offset;
+            omc_u64 extent_length;
+
+            if (q + info->offset_size + info->length_size > info->entries_end
+                || !omc_transfer_bmff_read_nbe(file_bytes, q, info->offset_size,
+                                               &extent_offset)) {
+                *out_status = OMC_TRANSFER_MALFORMED;
+                return OMC_STATUS_OK;
+            }
+            q += info->offset_size;
+            if (!omc_transfer_bmff_read_nbe(file_bytes, q, info->length_size,
+                                            &extent_length)) {
+                *out_status = OMC_TRANSFER_MALFORMED;
+                return OMC_STATUS_OK;
+            }
+            q += info->length_size;
+            status = omc_transfer_bmff_append_nbe_arena(payload, extent_offset,
+                                                        info->offset_size);
+            if (status == OMC_STATUS_OK) {
+                status = omc_transfer_bmff_append_nbe_arena(payload,
+                                                            extent_length,
+                                                            info->length_size);
+            }
+            if (status != OMC_STATUS_OK) {
+                return status;
+            }
+        }
+    }
+    if (q != info->entries_end) {
+        *out_status = OMC_TRANSFER_MALFORMED;
+        return OMC_STATUS_OK;
+    }
+
+    *out_status = OMC_TRANSFER_OK;
+    return OMC_STATUS_OK;
+}
+
+static omc_status
 omc_transfer_build_bmff_package_iloc_box(
     const omc_u8* file_bytes, omc_size file_size,
     const omc_transfer_bmff_box* iloc,
@@ -10086,6 +10244,9 @@ omc_transfer_build_bmff_package_iloc_box(
     omc_u64 payload_off;
     omc_u64 total_count;
     omc_u32 i;
+    omc_u8 output_version;
+    omc_u8 output_count_size;
+    int upgrade_to_v2;
 
     if (out_status == (omc_transfer_status*)0) {
         return OMC_STATUS_INVALID_ARGUMENT;
@@ -10104,9 +10265,20 @@ omc_transfer_build_bmff_package_iloc_box(
         return OMC_STATUS_OK;
     }
 
-    total_count = info.entry_count + (omc_u64)item_count;
+    total_count   = info.entry_count + (omc_u64)item_count;
+    upgrade_to_v2 = 0;
+    if (info.version != 2U && total_count > 0xFFFFU) {
+        upgrade_to_v2 = 1;
+    }
+    for (i = 0U; i < item_count; ++i) {
+        if (info.version != 2U && items[i].item_id > 0xFFFFU) {
+            upgrade_to_v2 = 1;
+        }
+    }
+    output_version    = upgrade_to_v2 ? (omc_u8)2U : info.version;
+    output_count_size = output_version == 2U ? (omc_u8)4U : (omc_u8)2U;
     if (total_count < info.entry_count
-        || (info.count_size == 2U && total_count > 0xFFFFU)
+        || (output_count_size == 2U && total_count > 0xFFFFU)
         || total_count > 0xFFFFFFFFU) {
         *out_status = OMC_TRANSFER_LIMIT;
         return OMC_STATUS_OK;
@@ -10114,38 +10286,61 @@ omc_transfer_build_bmff_package_iloc_box(
 
     payload_off = iloc->offset + iloc->header_size;
     omc_arena_init(&payload);
-    status = omc_transfer_append_bytes(&payload,
-                                       file_bytes + (omc_size)payload_off,
-                                       (omc_size)(info.count_off - payload_off));
-    if (status != OMC_STATUS_OK) {
-        goto cleanup;
-    }
-    if (info.count_size == 2U) {
-        status = omc_transfer_append_u16be_arena(&payload,
-                                                 (omc_u16)total_count);
+    if (upgrade_to_v2) {
+        omc_u8 fullbox[4];
+
+        fullbox[0] = 2U;
+        fullbox[1] = file_bytes[(omc_size)payload_off + 1U];
+        fullbox[2] = file_bytes[(omc_size)payload_off + 2U];
+        fullbox[3] = file_bytes[(omc_size)payload_off + 3U];
+        status = omc_transfer_append_bytes(&payload, fullbox, sizeof(fullbox));
+        if (status == OMC_STATUS_OK) {
+            status = omc_transfer_append_bytes(
+                &payload, file_bytes + (omc_size)payload_off + 4U,
+                (omc_size)(info.count_off - payload_off - 4U));
+        }
+        if (status == OMC_STATUS_OK) {
+            status = omc_transfer_append_u32be_arena(&payload,
+                                                     (omc_u32)total_count);
+        }
+        if (status == OMC_STATUS_OK) {
+            status = omc_transfer_bmff_append_upgraded_iloc_entries(file_bytes,
+                                                                    &info,
+                                                                    &payload,
+                                                                    out_status);
+        }
+        if (status != OMC_STATUS_OK || *out_status != OMC_TRANSFER_OK) {
+            goto cleanup;
+        }
     } else {
-        status = omc_transfer_append_u32be_arena(&payload,
-                                                 (omc_u32)total_count);
-    }
-    if (status != OMC_STATUS_OK) {
-        goto cleanup;
-    }
-    status = omc_transfer_append_bytes(&payload,
-                                       file_bytes + (omc_size)info.entries_off,
-                                       (omc_size)(info.entries_end
-                                                  - info.entries_off));
-    if (status != OMC_STATUS_OK) {
-        goto cleanup;
+        status = omc_transfer_append_bytes(&payload,
+                                           file_bytes + (omc_size)payload_off,
+                                           (omc_size)(info.count_off
+                                                      - payload_off));
+        if (status != OMC_STATUS_OK) {
+            goto cleanup;
+        }
+        if (output_count_size == 2U) {
+            status = omc_transfer_append_u16be_arena(&payload,
+                                                     (omc_u16)total_count);
+        } else {
+            status = omc_transfer_append_u32be_arena(&payload,
+                                                     (omc_u32)total_count);
+        }
+        if (status != OMC_STATUS_OK) {
+            goto cleanup;
+        }
+        status = omc_transfer_append_bytes(
+            &payload, file_bytes + (omc_size)info.entries_off,
+            (omc_size)(info.entries_end - info.entries_off));
+        if (status != OMC_STATUS_OK) {
+            goto cleanup;
+        }
     }
 
     for (i = 0U; i < item_count; ++i) {
         omc_u64 item_offset;
 
-        if (info.version != 2U && items[i].item_id > 0xFFFFU) {
-            *out_status = OMC_TRANSFER_LIMIT;
-            status      = OMC_STATUS_OK;
-            goto cleanup;
-        }
         if (new_item_payload_file_offset
             > ((omc_u64)(~(omc_u64)0) - items[i].idat_offset)) {
             *out_status = OMC_TRANSFER_LIMIT;
@@ -10154,7 +10349,7 @@ omc_transfer_build_bmff_package_iloc_box(
         }
         item_offset = new_item_payload_file_offset + items[i].idat_offset;
 
-        if (info.version == 2U) {
+        if (output_version == 2U) {
             status = omc_transfer_append_u32be_arena(&payload,
                                                      items[i].item_id);
         } else {
@@ -10164,7 +10359,7 @@ omc_transfer_build_bmff_package_iloc_box(
         if (status != OMC_STATUS_OK) {
             goto cleanup;
         }
-        if (info.version != 0U) {
+        if (output_version != 0U) {
             status = omc_transfer_append_u16be_arena(&payload, 0U);
             if (status != OMC_STATUS_OK) {
                 goto cleanup;
@@ -10959,22 +11154,22 @@ omc_transfer_package_bmff_format_supported(omc_scan_fmt format)
 }
 
 static omc_status
-omc_transfer_package_collect_bmff_items(const omc_transfer_package_batch* batch,
-                                        omc_transfer_bmff_package_item* items,
-                                        omc_u32* out_item_count,
-                                        omc_transfer_package_io_res* out_res)
+omc_transfer_package_collect_bmff_plan(const omc_transfer_package_batch* batch,
+                                       omc_transfer_bmff_package_plan* plan,
+                                       omc_transfer_package_io_res* out_res)
 {
     omc_u32 i;
-    omc_u32 item_count;
 
     if (batch == (const omc_transfer_package_batch*)0
-        || items == (omc_transfer_bmff_package_item*)0
-        || out_item_count == (omc_u32*)0
+        || plan == (omc_transfer_bmff_package_plan*)0
         || out_res == (omc_transfer_package_io_res*)0) {
         return OMC_STATUS_INVALID_ARGUMENT;
     }
 
-    item_count = 0U;
+    plan->item_count       = 0U;
+    plan->has_icc_profile  = 0;
+    plan->icc_profile.data = (const omc_u8*)0;
+    plan->icc_profile.size = 0U;
     for (i = 0U; i < batch->chunk_count; ++i) {
         omc_u32 item_type;
         int mime_xmp;
@@ -10984,30 +11179,39 @@ omc_transfer_package_collect_bmff_items(const omc_transfer_package_batch* batch,
             out_res->status = OMC_TRANSFER_UNSUPPORTED;
             return OMC_STATUS_OK;
         }
-        if (!omc_transfer_route_view_eq(batch->chunks[i].route, "bmff:item-exif")
-            && !omc_transfer_route_view_eq(batch->chunks[i].route,
-                                           "bmff:item-xmp")) {
-            out_res->status = OMC_TRANSFER_UNSUPPORTED;
-            return OMC_STATUS_OK;
-        }
         if (!omc_transfer_payload_bmff_item_from_route(batch->chunks[i].route,
                                                        &item_type, &mime_xmp)) {
+            if (omc_transfer_route_view_eq(batch->chunks[i].route,
+                                           "bmff:property-colr-icc")) {
+                if (plan->has_icc_profile) {
+                    out_res->status = OMC_TRANSFER_UNSUPPORTED;
+                    return OMC_STATUS_OK;
+                }
+                if (batch->chunks[i].bytes.size <= 4U
+                    || memcmp(batch->chunks[i].bytes.data, "prof", 4U) != 0) {
+                    out_res->status = OMC_TRANSFER_MALFORMED;
+                    return OMC_STATUS_OK;
+                }
+                plan->icc_profile.data = batch->chunks[i].bytes.data + 4U;
+                plan->icc_profile.size = batch->chunks[i].bytes.size - 4U;
+                plan->has_icc_profile  = 1;
+                continue;
+            }
             out_res->status = OMC_TRANSFER_UNSUPPORTED;
             return OMC_STATUS_OK;
         }
-        if (item_count >= OMC_TRANSFER_BMFF_MAX_REF_ITEMS) {
+        if (plan->item_count >= plan->item_capacity) {
             out_res->status = OMC_TRANSFER_LIMIT;
             return OMC_STATUS_OK;
         }
-        items[item_count].chunk       = &batch->chunks[i];
-        items[item_count].item_id     = 0U;
-        items[item_count].item_type   = item_type;
-        items[item_count].idat_offset = 0U;
-        items[item_count].mime_xmp    = mime_xmp;
-        item_count += 1U;
+        plan->items[plan->item_count].chunk       = &batch->chunks[i];
+        plan->items[plan->item_count].item_id     = 0U;
+        plan->items[plan->item_count].item_type   = item_type;
+        plan->items[plan->item_count].idat_offset = 0U;
+        plan->items[plan->item_count].mime_xmp    = mime_xmp;
+        plan->item_count += 1U;
     }
 
-    *out_item_count = item_count;
     return OMC_STATUS_OK;
 }
 
@@ -11102,10 +11306,12 @@ omc_transfer_package_bmff_materialize(const omc_u8* target_bytes,
                                       omc_transfer_package_io_res* out_res)
 {
     omc_transfer_bmff_package_item items[OMC_TRANSFER_BMFF_MAX_REF_ITEMS];
+    omc_transfer_bmff_package_plan plan;
     omc_transfer_status validate_status;
     omc_scan_fmt detected_format;
+    omc_arena item_bytes;
     omc_status status;
-    omc_u32 item_count;
+    int item_bytes_ready;
 
     if (target_bytes == (const omc_u8*)0
         || batch == (const omc_transfer_package_batch*)0
@@ -11133,13 +11339,14 @@ omc_transfer_package_bmff_materialize(const omc_u8* target_bytes,
         return OMC_STATUS_OK;
     }
 
-    status = omc_transfer_package_collect_bmff_items(batch, items, &item_count,
-                                                     out_res);
+    plan.items         = items;
+    plan.item_capacity = OMC_TRANSFER_BMFF_MAX_REF_ITEMS;
+    status = omc_transfer_package_collect_bmff_plan(batch, &plan, out_res);
     if (status != OMC_STATUS_OK || out_res->status != OMC_TRANSFER_OK) {
         return status;
     }
 
-    if (item_count == 0U) {
+    if (plan.item_count == 0U && !plan.has_icc_profile) {
         status = omc_transfer_append_bytes(out_bytes, target_bytes,
                                            target_size);
         if (status != OMC_STATUS_OK) {
@@ -11151,16 +11358,49 @@ omc_transfer_package_bmff_materialize(const omc_u8* target_bytes,
         return OMC_STATUS_OK;
     }
 
-    status = omc_transfer_package_materialize_bmff_items(target_bytes,
-                                                         target_size, items,
-                                                         item_count, out_bytes,
-                                                         &out_res->status);
-    if (status != OMC_STATUS_OK || out_res->status != OMC_TRANSFER_OK) {
-        return status;
+    omc_arena_init(&item_bytes);
+    item_bytes_ready = 0;
+    if (plan.item_count != 0U) {
+        if (plan.has_icc_profile) {
+            status = omc_transfer_package_materialize_bmff_items(
+                target_bytes, target_size, items, plan.item_count, &item_bytes,
+                &out_res->status);
+            item_bytes_ready = out_res->status == OMC_TRANSFER_OK;
+        } else {
+            status = omc_transfer_package_materialize_bmff_items(
+                target_bytes, target_size, items, plan.item_count, out_bytes,
+                &out_res->status);
+        }
+        if (status != OMC_STATUS_OK || out_res->status != OMC_TRANSFER_OK) {
+            omc_arena_fini(&item_bytes);
+            return status;
+        }
     }
 
+    if (plan.has_icc_profile) {
+        const omc_u8* icc_source;
+        omc_size icc_source_size;
+
+        if (item_bytes_ready) {
+            icc_source      = item_bytes.data;
+            icc_source_size = item_bytes.size;
+        } else {
+            icc_source      = target_bytes;
+            icc_source_size = target_size;
+        }
+        status = omc_transfer_rewrite_bmff_icc(icc_source, icc_source_size,
+                                               plan.icc_profile.data,
+                                               plan.icc_profile.size, out_bytes,
+                                               &out_res->status);
+        if (status != OMC_STATUS_OK || out_res->status != OMC_TRANSFER_OK) {
+            omc_arena_fini(&item_bytes);
+            return status;
+        }
+    }
+    omc_arena_fini(&item_bytes);
+
     out_res->bytes       = (omc_u64)out_bytes->size;
-    out_res->chunk_count = item_count;
+    out_res->chunk_count = batch->chunk_count;
     return OMC_STATUS_OK;
 }
 

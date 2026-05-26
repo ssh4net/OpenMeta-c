@@ -12,6 +12,7 @@ extern "C" {
 #include "omc/omc_read.h"
 #include "omc/omc_store.h"
 #include "omc/omc_transfer.h"
+#include "omc/omc_transfer_package.h"
 #include "omc/omc_transfer_persist.h"
 #include "omc/omc_val.h"
 }
@@ -11094,6 +11095,163 @@ run_transfer_persist_case(const char* case_name, const ByteVec& source_bytes,
         case_name, omc, cpp, options.compare_persist_output_bytes);
 }
 
+static bool
+run_bmff_package_route_mix_parity_case(void)
+{
+    static const char* const k_routes[5] = {
+        "bmff:item-exif", "bmff:item-xmp",          "bmff:item-jumb",
+        "bmff:item-c2pa", "bmff:property-colr-icc",
+    };
+    static const omc_transfer_semantic_kind k_semantics[5] = {
+        OMC_TRANSFER_SEMANTIC_EXIF,  OMC_TRANSFER_SEMANTIC_XMP,
+        OMC_TRANSFER_SEMANTIC_JUMBF, OMC_TRANSFER_SEMANTIC_C2PA,
+        OMC_TRANSFER_SEMANTIC_ICC,
+    };
+    openmeta::PreparedTransferBundle bundle;
+    openmeta::PreparedTransferPackagePlan cpp_plan;
+    openmeta::PreparedTransferPackageBatch cpp_batch;
+    std::vector<openmeta::PreparedTransferPackageView> cpp_views;
+    std::array<omc_transfer_package_chunk, 5> c_chunks {};
+    omc_transfer_package_batch c_batch;
+    std::array<omc_transfer_package_view, 5> c_views {};
+    omc_transfer_package_io_res c_res;
+    omc_arena c_bytes;
+    ByteVec expected;
+    omc_status c_status;
+    std::size_t i;
+
+    bundle.target_format = openmeta::TransferTargetFormat::Heif;
+    {
+        openmeta::PreparedTransferBlock block;
+        block.route   = k_routes[0];
+        block.payload = { std::byte { 0x00 }, std::byte { 0x01 } };
+        bundle.blocks.push_back(block);
+    }
+    {
+        openmeta::PreparedTransferBlock block;
+        block.route   = k_routes[1];
+        block.payload = { std::byte { '<' }, std::byte { 'x' } };
+        bundle.blocks.push_back(block);
+    }
+    {
+        openmeta::PreparedTransferBlock block;
+        block.route   = k_routes[2];
+        block.payload = { std::byte { 'J' }, std::byte { 'B' } };
+        bundle.blocks.push_back(block);
+    }
+    {
+        openmeta::PreparedTransferBlock block;
+        block.route   = k_routes[3];
+        block.payload = { std::byte { 'C' }, std::byte { '2' } };
+        bundle.blocks.push_back(block);
+    }
+    {
+        openmeta::PreparedTransferBlock block;
+        block.route   = k_routes[4];
+        block.payload = { std::byte { 'p' }, std::byte { 'r' },
+                          std::byte { 'o' }, std::byte { 'f' },
+                          std::byte { 0x10 } };
+        bundle.blocks.push_back(block);
+    }
+
+    if (openmeta::build_prepared_transfer_emit_package(bundle, &cpp_plan).status
+        != openmeta::TransferStatus::Ok) {
+        std::fprintf(stderr, "bmff_package_route_mix: C++ plan failed\n");
+        return false;
+    }
+    if (openmeta::build_prepared_transfer_package_batch(
+            std::span<const std::byte>(), bundle, cpp_plan, &cpp_batch)
+            .status
+        != openmeta::TransferStatus::Ok) {
+        std::fprintf(stderr, "bmff_package_route_mix: C++ batch failed\n");
+        return false;
+    }
+    if (openmeta::collect_prepared_transfer_package_views(cpp_batch, &cpp_views)
+            .status
+        != openmeta::TransferStatus::Ok) {
+        std::fprintf(stderr, "bmff_package_route_mix: C++ views failed\n");
+        return false;
+    }
+    if (cpp_batch.chunks.size() != 5U || cpp_views.size() != 5U) {
+        std::fprintf(stderr, "bmff_package_route_mix: C++ count mismatch\n");
+        return false;
+    }
+
+    omc_transfer_package_batch_init(&c_batch);
+    c_batch.contract_version = 1U;
+    c_batch.target_format    = OMC_SCAN_FMT_HEIF;
+    c_batch.input_size       = cpp_batch.input_size;
+    c_batch.output_size      = cpp_batch.output_size;
+    c_batch.chunk_count      = (omc_u32)cpp_batch.chunks.size();
+    c_batch.chunks           = c_chunks.data();
+
+    for (i = 0U; i < cpp_batch.chunks.size(); ++i) {
+        const openmeta::PreparedTransferPackageBlob& cpp = cpp_batch.chunks[i];
+
+        if (cpp.kind
+            != openmeta::TransferPackageChunkKind::PreparedTransferBlock) {
+            std::fprintf(stderr,
+                         "bmff_package_route_mix: unexpected C++ chunk kind\n");
+            return false;
+        }
+        if (cpp.route != k_routes[i] || cpp_views[i].route != k_routes[i]) {
+            std::fprintf(stderr, "bmff_package_route_mix: route mismatch\n");
+            return false;
+        }
+        c_chunks[i].kind          = OMC_TRANSFER_PACKAGE_CHUNK_TRANSFER_BLOCK;
+        c_chunks[i].route.data    = (const omc_u8*)cpp.route.data();
+        c_chunks[i].route.size    = cpp.route.size();
+        c_chunks[i].output_offset = cpp.output_offset;
+        c_chunks[i].source_offset = cpp.source_offset;
+        c_chunks[i].block_index   = cpp.block_index;
+        c_chunks[i].jpeg_marker_code = cpp.jpeg_marker_code;
+        c_chunks[i].bytes.data       = (const omc_u8*)cpp.bytes.data();
+        c_chunks[i].bytes.size       = cpp.bytes.size();
+        append_bytes(&expected, cpp.bytes.data(), cpp.bytes.size());
+    }
+
+    c_status = omc_transfer_package_batch_collect_views(&c_batch,
+                                                        c_views.data(),
+                                                        (omc_u32)c_views.size(),
+                                                        &c_res);
+    if (c_status != OMC_STATUS_OK || c_res.status != OMC_TRANSFER_OK
+        || c_res.chunk_count != c_batch.chunk_count) {
+        std::fprintf(stderr, "bmff_package_route_mix: C views failed\n");
+        return false;
+    }
+    for (i = 0U; i < c_batch.chunk_count; ++i) {
+        if (c_views[i].semantic_kind != k_semantics[i]) {
+            std::fprintf(stderr, "bmff_package_route_mix: semantic mismatch\n");
+            return false;
+        }
+        if (c_views[i].route.size != std::strlen(k_routes[i])
+            || std::memcmp(c_views[i].route.data, k_routes[i],
+                           c_views[i].route.size)
+                   != 0) {
+            std::fprintf(stderr, "bmff_package_route_mix: C route mismatch\n");
+            return false;
+        }
+    }
+
+    omc_arena_init(&c_bytes);
+    c_status = omc_transfer_package_batch_materialize(&c_batch, &c_bytes,
+                                                      &c_res);
+    if (c_status != OMC_STATUS_OK || c_res.status != OMC_TRANSFER_OK
+        || c_res.bytes != expected.size() || c_bytes.size != expected.size()) {
+        std::fprintf(stderr, "bmff_package_route_mix: C materialize failed\n");
+        omc_arena_fini(&c_bytes);
+        return false;
+    }
+    if (!expected.empty()
+        && std::memcmp(c_bytes.data, expected.data(), expected.size()) != 0) {
+        std::fprintf(stderr, "bmff_package_route_mix: byte mismatch\n");
+        omc_arena_fini(&c_bytes);
+        return false;
+    }
+    omc_arena_fini(&c_bytes);
+    return true;
+}
+
 struct BenchCase final {
     const char* name;
     ByteVec (*build)();
@@ -11319,6 +11477,7 @@ main(int argc, char** argv)
     ok = run_case("jpeg_irb_fields", build_jpeg_irb_fields_fixture(), false)
          && ok;
     ok = run_case("png_text", build_png_text_fixture(), false) && ok;
+    ok = run_bmff_package_route_mix_parity_case() && ok;
     if (false) {
         /*
          * Remaining transfer/persist parity cases are enabled only after a
