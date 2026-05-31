@@ -162,8 +162,11 @@ omc_transfer_package_bytes_materialize_to_buffer(
  * BMFF item/property graph.
  *
  * The target must already expose a parseable primary item graph with pitm,
- * iinf, and iloc. Retained iloc construction method 2 and external data
- * references are rejected fail-safe instead of being flattened implicitly.
+ * iinf, and iloc. Retained iloc construction method 2 is supported only when
+ * iref/iloc item-reference extents resolve to retained local method-0 file
+ * extents or method-1 idat extents. External data references and unsupported
+ * item-reference graphs are rejected fail-safe instead of being flattened
+ * implicitly.
  */
 OMC_API omc_status
 omc_transfer_package_bmff_materialize(const omc_u8* target_bytes,

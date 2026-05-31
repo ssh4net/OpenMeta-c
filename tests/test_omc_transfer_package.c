@@ -735,6 +735,131 @@ make_test_bmff_primary_item_target_with_iloc_variant(
 }
 
 static omc_size
+make_test_bmff_primary_item_target_with_method2_refs(omc_u8* out,
+                                                     omc_size capacity,
+                                                     const char* major_brand,
+                                                     int use_extent_indices)
+{
+    static const omc_u8 k_idat[]      = { (omc_u8)'A', (omc_u8)'B', (omc_u8)'C',
+                                          (omc_u8)'D', (omc_u8)'E', (omc_u8)'F' };
+    static const omc_u8 k_iloc_refs[] = { 0U, 1U, 0U, 2U, 0U, 2U, 0U, 3U };
+    static const omc_u8 k_mdat[]      = { 0U, 1U, 2U, 3U };
+    omc_u8 ftyp_payload[16];
+    omc_u8 pitm_payload[16];
+    omc_u8 iinf_payload[256];
+    omc_u8 iloc_payload[256];
+    omc_u8 iref_payload[64];
+    omc_u8 meta_payload[768];
+    omc_size size;
+    omc_size ftyp_size;
+    omc_size pitm_size;
+    omc_size iinf_size;
+    omc_size iloc_size;
+    omc_size iref_size;
+    omc_size meta_size;
+    omc_u8 index_size_byte;
+
+    OMC_TEST_REQUIRE(out != (omc_u8*)0);
+    OMC_TEST_REQUIRE(major_brand != (const char*)0);
+
+    ftyp_size = 0U;
+    append_test_raw(ftyp_payload, sizeof(ftyp_payload), &ftyp_size, major_brand,
+                    4U);
+    append_test_u32be(ftyp_payload, sizeof(ftyp_payload), &ftyp_size, 0U);
+    append_test_raw(ftyp_payload, sizeof(ftyp_payload), &ftyp_size, major_brand,
+                    4U);
+
+    pitm_size = 0U;
+    append_test_fullbox_header(pitm_payload, sizeof(pitm_payload), &pitm_size,
+                               0U);
+    append_test_u16be(pitm_payload, sizeof(pitm_payload), &pitm_size, 1U);
+
+    iinf_size = 0U;
+    append_test_fullbox_header(iinf_payload, sizeof(iinf_payload), &iinf_size,
+                               0U);
+    append_test_u16be(iinf_payload, sizeof(iinf_payload), &iinf_size, 3U);
+    append_test_infe(iinf_payload, sizeof(iinf_payload), &iinf_size, 1U, "hvc1",
+                     "primary");
+    append_test_infe(iinf_payload, sizeof(iinf_payload), &iinf_size, 2U, "hvc1",
+                     "tile-a");
+    append_test_infe(iinf_payload, sizeof(iinf_payload), &iinf_size, 3U, "hvc1",
+                     "tile-b");
+
+    index_size_byte = use_extent_indices ? (omc_u8)0x44U : (omc_u8)0x40U;
+    iloc_size       = 0U;
+    append_test_fullbox_header(iloc_payload, sizeof(iloc_payload), &iloc_size,
+                               1U);
+    append_test_u8(iloc_payload, sizeof(iloc_payload), &iloc_size, 0x44U);
+    append_test_u8(iloc_payload, sizeof(iloc_payload), &iloc_size,
+                   index_size_byte);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 3U);
+
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 1U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 2U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 2U);
+    if (use_extent_indices) {
+        append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 1U);
+    }
+    append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 3U);
+    if (use_extent_indices) {
+        append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 2U);
+    }
+    append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 3U);
+
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 2U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 1U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 1U);
+    if (use_extent_indices) {
+        append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    }
+    append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 3U);
+
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 3U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 1U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    append_test_u16be(iloc_payload, sizeof(iloc_payload), &iloc_size, 1U);
+    if (use_extent_indices) {
+        append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 0U);
+    }
+    append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 3U);
+    append_test_u32be(iloc_payload, sizeof(iloc_payload), &iloc_size, 3U);
+
+    iref_size = 0U;
+    append_test_fullbox_header(iref_payload, sizeof(iref_payload), &iref_size,
+                               0U);
+    append_test_bmff_box(iref_payload, sizeof(iref_payload), &iref_size, "iloc",
+                         k_iloc_refs, sizeof(k_iloc_refs));
+
+    meta_size = 0U;
+    append_test_fullbox_header(meta_payload, sizeof(meta_payload), &meta_size,
+                               0U);
+    append_test_bmff_box(meta_payload, sizeof(meta_payload), &meta_size, "pitm",
+                         pitm_payload, pitm_size);
+    append_test_bmff_box(meta_payload, sizeof(meta_payload), &meta_size, "iinf",
+                         iinf_payload, iinf_size);
+    append_test_bmff_box(meta_payload, sizeof(meta_payload), &meta_size, "iloc",
+                         iloc_payload, iloc_size);
+    append_test_bmff_box(meta_payload, sizeof(meta_payload), &meta_size, "idat",
+                         k_idat, sizeof(k_idat));
+    append_test_bmff_box(meta_payload, sizeof(meta_payload), &meta_size, "iref",
+                         iref_payload, iref_size);
+
+    size = 0U;
+    append_test_bmff_box(out, capacity, &size, "ftyp", ftyp_payload, ftyp_size);
+    append_test_bmff_box(out, capacity, &size, "meta", meta_payload, meta_size);
+    append_test_bmff_box(out, capacity, &size, "mdat", k_mdat, sizeof(k_mdat));
+    return size;
+}
+
+static omc_size
 make_test_bmff_primary_item_target_without_idat(omc_u8* out, omc_size capacity,
                                                 const char* major_brand)
 {
@@ -1599,6 +1724,97 @@ test_transfer_package_bmff_rejects_method2_item_extent(void)
     OMC_TEST_CHECK_U64_EQ(io_res.status, OMC_TRANSFER_UNSUPPORTED);
     OMC_TEST_CHECK_U64_EQ(output.size, 0U);
 
+    omc_arena_fini(&temp_storage);
+    omc_arena_fini(&serialized);
+    omc_arena_fini(&output);
+    omc_arena_fini(&storage);
+    omc_store_fini(&store);
+}
+
+static void
+test_transfer_package_bmff_retains_method2_item_refs(int use_extent_indices)
+{
+    static const char k_ns_tiff[] = "http://ns.adobe.com/tiff/1.0/";
+    static const omc_u8 k_iloc_ref_v0[]
+        = { 0U, 0U, 0U, 16U, (omc_u8)'i', (omc_u8)'l', (omc_u8)'o', (omc_u8)'c',
+            0U, 1U, 0U, 2U,  0U,          2U,          0U,          3U };
+    static const omc_u8 k_new_index_prefix[]
+        = { 0U, 4U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U, 0U, 0U, 0U, 0U };
+    omc_u8 target[1536];
+    omc_size target_size;
+    omc_store store;
+    omc_arena storage;
+    omc_arena output;
+    omc_arena serialized;
+    omc_arena temp_storage;
+    omc_arena serialized_output;
+    omc_transfer_package_build_opts opts;
+    omc_transfer_package_batch batch;
+    omc_transfer_package_io_res io_res;
+    omc_transfer_package_io_res serialized_res;
+    omc_status status;
+    omc_const_bytes output_view;
+
+    target_size = make_test_bmff_primary_item_target_with_method2_refs(
+        target, sizeof(target), "mif1", use_extent_indices);
+
+    omc_store_init(&store);
+    omc_arena_init(&storage);
+    omc_arena_init(&output);
+    omc_arena_init(&serialized);
+    omc_arena_init(&temp_storage);
+    omc_arena_init(&serialized_output);
+
+    add_test_xmp_entry(&store, "OpenMeta-c");
+    add_xmp_u32_entry(&store, k_ns_tiff, "ImageWidth", 640U);
+    add_test_exif_entry(&store, "OpenMeta-c Lens");
+
+    omc_transfer_package_build_opts_init(&opts);
+    opts.format        = OMC_SCAN_FMT_HEIF;
+    opts.include_icc   = 0;
+    opts.include_iptc  = 0;
+    opts.include_jumbf = 0;
+
+    status = omc_transfer_package_batch_build(&store, &opts, &storage, &batch,
+                                              &io_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
+
+    status = omc_transfer_package_bmff_materialize(target, target_size, &batch,
+                                                   &output, &io_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.chunk_count, batch.chunk_count);
+
+    output_view.data = output.data;
+    output_view.size = output.size;
+    OMC_TEST_CHECK(bytes_contains(output_view, "ABCDEF"));
+    OMC_TEST_CHECK(bytes_contains(output_view, "OpenMeta-c"));
+    OMC_TEST_CHECK(bytes_contains(output_view, "application/rdf+xml"));
+    OMC_TEST_CHECK_U64_EQ(bytes_count(output_view, "infe"), 5U);
+    OMC_TEST_CHECK_U64_EQ(bytes_count(output_view, "cdsc"), 2U);
+    OMC_TEST_CHECK(
+        bytes_contains_blob(output_view, k_iloc_ref_v0, sizeof(k_iloc_ref_v0)));
+    if (use_extent_indices) {
+        OMC_TEST_CHECK(bytes_contains_blob(output_view, k_new_index_prefix,
+                                           sizeof(k_new_index_prefix)));
+    }
+
+    status = omc_transfer_package_batch_serialize(&batch, &serialized,
+                                                  &serialized_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(serialized_res.status, OMC_TRANSFER_OK);
+
+    status = omc_transfer_package_bmff_bytes_materialize(
+        target, target_size, serialized.data, serialized.size, &temp_storage,
+        &serialized_output, &io_res);
+    OMC_TEST_REQUIRE_U64_EQ(status, OMC_STATUS_OK);
+    OMC_TEST_REQUIRE_U64_EQ(io_res.status, OMC_TRANSFER_OK);
+    OMC_TEST_REQUIRE_U64_EQ(serialized_output.size, output.size);
+    OMC_TEST_CHECK(memcmp(serialized_output.data, output.data, output.size)
+                   == 0);
+
+    omc_arena_fini(&serialized_output);
     omc_arena_fini(&temp_storage);
     omc_arena_fini(&serialized);
     omc_arena_fini(&output);
@@ -3111,6 +3327,8 @@ main(void)
     test_transfer_package_bmff_iloc_v2_item_graph_materializes();
     test_transfer_package_bmff_retains_method1_idat_extent();
     test_transfer_package_bmff_rejects_method2_item_extent();
+    test_transfer_package_bmff_retains_method2_item_refs(0);
+    test_transfer_package_bmff_retains_method2_item_refs(1);
     test_transfer_package_bmff_rejects_external_data_reference();
     test_transfer_package_bmff_upgrades_inserted_32bit_item_ids();
     test_transfer_package_bmff_jumbf_and_c2pa_item_routes_materialize();
