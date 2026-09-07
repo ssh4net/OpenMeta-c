@@ -40,6 +40,7 @@ endfunction()
 set(OMC_SOURCES
   base/omc_arena.c
   base/omc_crc32.c
+  base/omc_source.c
   core/omc_capabilities.c
   core/omc_edit.c
   core/omc_datetime.c
@@ -71,6 +72,7 @@ set(OMC_SOURCES
   read/omc_pay.c
   read/omc_preview.c
   read/omc_read.c
+  read/omc_read_source.c
   read/omc_scan.c
   read/omc_validate.c
   read/omc_xmp.c

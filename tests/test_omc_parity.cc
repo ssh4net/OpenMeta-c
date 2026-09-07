@@ -32,6 +32,7 @@ extern "C" {
 #include <vector>
 
 bool run_omc_authoring_parity();
+bool run_omc_source_parity();
 
 namespace {
 
@@ -11468,15 +11469,19 @@ main(int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--core-authoring") == 0) {
         return run_omc_authoring_parity() ? 0 : 1;
     }
+    if (argc == 2 && std::strcmp(argv[1], "--core-source") == 0) {
+        return run_omc_source_parity() ? 0 : 1;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--bench") == 0) {
         return run_benchmarks();
     }
     if (argc != 1 && !(argc == 2 && std::strcmp(argv[1], "--all") == 0)) {
-        std::fprintf(stderr, "usage: %s [--bench|--core-authoring|--all]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s [--bench|--core-authoring|--core-source|--all]\n", argv[0]);
         return 2;
     }
 
     ok = run_omc_authoring_parity();
+    ok = run_omc_source_parity() && ok;
     ok = run_case("jpeg_comment", build_jpeg_comment_fixture(), false) && ok;
     ok = run_case("jpeg_all", build_jpeg_all_fixture(), false) && ok;
     ok = run_case("jpeg_irb_fields", build_jpeg_irb_fields_fixture(), false)

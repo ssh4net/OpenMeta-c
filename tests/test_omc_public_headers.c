@@ -17,6 +17,8 @@
 #include "omc/omc_pay.h"
 #include "omc/omc_preview.h"
 #include "omc/omc_read.h"
+#include "omc/omc_read_source.h"
+#include "omc/omc_source.h"
 #include "omc/omc_scan.h"
 #include "omc/omc_span.h"
 #include "omc/omc_status.h"

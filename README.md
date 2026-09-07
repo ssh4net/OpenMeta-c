@@ -322,22 +322,27 @@ For persisted transfer artifacts:
   transfer payload batches, transfer package batches, and persisted `JXL`
   encoder handoffs
 
-## Current Gaps
+## Current Core Checkpoint
 
-The main gaps in the portable-core scope are:
+Version 0.3.0 includes typed values and atomic edits, detached validation,
+canonical EXIF serialization, the five bounded native translation groups,
+paired IPTC date/time projection, shared BMFF replacement, and initial
+positional input. See [authoring.md](authoring.md),
+[bmff_writing.md](bmff_writing.md), and [positional_input.md](positional_input.md).
 
-- detached typed validation and output-preserving authoring transactions
-- a general typed, target-neutral canonical TIFF/EXIF serializer beyond the
-  current fixed-field internal writer
-- explicit reverse XMP-to-EXIF/IPTC translation for the five existing bounded
-  C++ mapping groups, plus paired IPTC date/time projection into XMP
-- broader BMFF acceptance beyond the bounded writer in [bmff_writing.md](bmff_writing.md)
-- broader transfer-safety facts, lifecycle and payload/package parity tests
-- positional input with explicit read budgets and staged reader conversion
-- selected current C++ read and naming deltas, verified with shared fixtures
+Clang 20 validation passed 38/38 Release direct plus focused C++ parity targets,
+36/36 ASan/UBSan direct targets, and 36/36 direct targets without compression
+dependencies. These are synthetic WSL gates. The historical broad differential
+inventory still fails; it is not part of the focused passing gate.
 
-The planned order is a fresh baseline, shared typed write foundations, native
-translation, BMFF deltas, and then positional readers. A later isolated C++
-consumer can evaluate reuse of the C core. Rich host features, full C2PA trust,
-and full EXR file rewriting do not block these milestones. See
-[porting_plan.md](porting_plan.md) for dependencies and exit criteria.
+Remaining portable-core work includes:
+
+- broader transfer-safety, lifecycle, structured XMP, and package parity
+- source-native TIFF values and additional MakerNote offset layouts
+- positional conversion of the remaining container and RAW readers
+- selected BMFF primitive/read/naming differences and broader writer acceptance
+
+An isolated C++ consumer can now evaluate the typed serializer or bounded
+source contract. Rich host features, full C2PA trust, and full EXR rewriting
+remain outside the first core milestone. See [porting_plan.md](porting_plan.md)
+for the scoped matrix and remaining acceptance work.

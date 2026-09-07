@@ -9,7 +9,7 @@ C++ core. Keep it suitable for possible reuse underneath the C++ library.
 C++ API coverage is not the completion criterion: owning convenience objects,
 rich queries, host adapters, search, and language bindings can remain in C++.
 
-This revision compares these public source snapshots:
+The initial comparison used these public source snapshots:
 
 | Repository | Revision | Meaning |
 | --- | --- | --- |
@@ -59,10 +59,47 @@ previously disabled transfer/persist block is now available through
 `omc_test_parity --all`. Nested structured XMP and broader transfer lifecycle
 cases still differ. Default parity now includes nine BMFF fixtures with
 remaining primitive and richer C++ summary differences. The focused gates do
-not suppress or relabel those failures. Positional input is the next batch.
+not suppress or relabel those failures. The initial positional batch is now implemented; see the current checkpoint below.
 
 See [authoring.md](authoring.md) for contracts and bounded coverage. The matrix
 below retains source-review detail where broader acceptance remains open.
+
+## Current Checkpoint: Version 0.3.0
+
+The five authorized workstreams have an implemented bounded slice: fresh
+baselines, typed authoring/validation/canonical EXIF, the five reverse groups
+and paired IPTC dates, shared BMFF replacement, and positional input with an
+initial JPEG/TIFF/BigTIFF/DNG conversion. This is not complete C++ core parity.
+
+| Current gate | Result |
+| --- | --- |
+| Clang 20 Release direct tests | 36/36 passed |
+| Focused authoring and positional C/C++ differential targets | 2/2 passed |
+| Clang 20 Debug ASan/UBSan direct tests | 36/36 passed |
+| Clang 20 Release without zlib/Brotli | 36/36 passed; compression-dependent cases remain conditional |
+| Pinned C++ reference baseline | 2/2 CTest targets passed |
+| Historical default differential inventory | Fails on nine BMFF fixtures |
+| Historical `--all` differential inventory | Fails: 266 mismatch reports, compared with 268 at baseline |
+| Corpus and native Windows acceptance | Not run in this checkpoint |
+
+The `--all` count is an inventory, not a coverage percentage. Its final reports
+comprise 91 metadata comparisons, 116 output-byte comparisons, and 59 status,
+output-presence, or sidecar-path comparisons. Some richer C++ summaries are
+outside the C scope; other lifecycle and metadata differences remain real work.
+The new focused gates test the added APIs independently and do not hide these
+reports. Whole-file BMFF byte identity is not promised by the append layout.
+
+Use `ctest --test-dir <c-build> --output-on-failure -E '^omc_test_parity$'` for
+the direct and focused passing gates. Run `omc_test_parity` and
+`omc_test_parity --all` separately to retain the broad inventory. The dedicated
+modes are `--core-authoring` and `--core-source`.
+
+Positional callback reads currently cover JPEG and bounded TIFF/BigTIFF/DNG
+metadata collection. TIFF values must fit the caller's TIFF-relative scratch
+span; requested callback TIFF MakerNote enrichment returns unsupported.
+JPEG MakerNote decoding remains available inside complete EXIF APP payloads.
+See [positional_input.md](positional_input.md) for exact limits, I/O counters,
+range semantics, and the next reader increments.
 
 ## Core Boundary And Decisions
 
@@ -143,10 +180,11 @@ dependencies included in a distribution.
 
 ## Parity Matrix
 
-Status describes inspected source, not a passing test run:
+The matrix combines source evidence with the scoped verification above.
+Presence alone does not establish complete reference parity:
 
 - **Present**: implementation and direct tests exist for a bounded C contract.
-  Current reference parity still needs the baseline gate.
+  Broader reference parity needs the listed acceptance cases.
 - **Partial**: an existing C mechanism needs specific behavior or coverage.
 - **Missing**: no equivalent public C operation was found. Internal reusable
   code may still exist.
@@ -162,7 +200,7 @@ Status describes inspected source, not a passing test run:
 | R2 | Contiguous scan, payload assembly, decode | `omc_scan.h`, `omc_pay.h`, `omc_read.h`; direct EXIF/XMP/ICC/IPTC/IRB/JUMBF/EXR tests | Present, broad bounded coverage. Promote C++ differences by fixture; no universal camera/read-parity claim. |
 | R3 | MakerNote/native RAW and modern-container enrichment | `src/read/omc_exif.c`, `omc_bmff.c`, naming and read tests | Partial against the newer C++ tree. Preserve raw/unknown values; port safety-relevant facts and small proven read deltas before long-tail descriptive enrichment. |
 | R4 | BMFF derived fields | Item semantics, properties, `ipma` associations and `grpl` summaries in `omc_bmff.c` | Partial. C++ has deeper scene/component, derived-image and display-transform summaries. Keep parsing/preservation facts in C; broad semantic aggregation may stay in C++. Read-side summaries do not imply writer remapping. |
-| R5 | Positional source, read budgets, source ranges/windows | Current C scan/decode APIs take complete byte spans; `omc_read_simple` is file-oriented | Missing public source abstraction. Port a bounded `read_at` primitive and readers in stages; an output package source range is not an input source API. |
+| R5 | Positional source, read budgets, source ranges/windows | `omc_source.h`, `omc_read_source.h`, direct and focused C++ source tests | Implemented fixed-size memory/callback sources, exact reads, sticky budgets, ranges/windows, and initial JPEG/TIFF/BigTIFF/DNG collection. Remaining readers and source-native TIFF/MakerNote values are staged work. |
 | R6 | Runtime capabilities, preview, CCM/DNG helpers | `omc_capabilities.h`, `omc_preview.h`, `omc_ccm_query.h` and direct tests | Present bounded helpers. Capabilities must report actual C support and enabled compression features. |
 | R7 | Detached entry/store validation | `omc_validate.h` exposes file/read diagnostics and CCM checks | Implemented initial detached schema in `omc_store_validate.h`; bounded diagnostics, wire/value checks, singleton and image-context tests. |
 | R8 | Decoded snapshots, source provenance and persistence | C callers retain stores/bytes; transfer packages retain output source ranges | Missing named snapshot API; Conditional. C++ snapshot v1 exists. Positional input does not require its owning or serialized snapshot object first. |
@@ -382,6 +420,10 @@ failure. No arbitrary scene graph editing is planned.
 
 ### B4: Add Positional Input Without A Second Decoder Stack
 
+The public source contract and initial reader batch are implemented in version
+0.3.0; see [positional_input.md](positional_input.md). The following sequence
+remains the acceptance checklist for subsequent increments.
+
 Port the small C++ source contract as a flat descriptor: fixed size, context,
 synchronous `read_at`, explicit status, per-operation limits/accounting,
 source-relative ranges and caller-owned windows. Start with a memory adapter.
@@ -466,7 +508,7 @@ C++ paths refer to the public OpenMeta repository at the revision above.
 | Canonical serialization | [omc_exif_write.c](src/edit/omc_exif_write.c), [transfer tests](tests/test_omc_transfer.c) | `src/include/openmeta/exif_tiff_serialize.h`, implementation in `src/openmeta/metadata_transfer.cc`, `tests/metadata_authoring_serialize_test.cc`, `docs/canonical_serialization.md` |
 | Translation/projection | [omc_xmp_dump.c](src/edit/omc_xmp_dump.c), [XMP tests](tests/test_omc_xmp_dump.c), [omc_transfer.c](src/edit/omc_transfer.c) | `src/openmeta/metadata_translation*.cc`, `tests/metadata_translation_test.cc`, `docs/translation.md`, `docs/xmp_sync_policy.md` |
 | BMFF/packages/safety | [package API](src/omc/omc_transfer_package.h), [package tests](tests/test_omc_transfer_package.c), [diagnostic tests](tests/test_omc_transfer_diagnostics.c) | `src/openmeta/metadata_transfer.cc`, `tests/metadata_transfer_api_test.cc`, `docs/writer_target_contract.md` |
-| Positional read | [scan API](src/omc/omc_scan.h), [read API](src/omc/omc_read.h), [payload API](src/omc/omc_pay.h) | `src/include/openmeta/random_access_source.h`, `src/openmeta/random_access_source.cc`, `tests/random_access_source_test.cc`, `docs/random_access_input.md` |
+| Positional read | [source API](src/omc/omc_source.h), [source reader](src/omc/omc_read_source.h), [source tests](tests/test_omc_read_source.c) | `src/include/openmeta/random_access_source.h`, `src/openmeta/random_access_source.cc`, `tests/random_access_source_test.cc`, `docs/random_access_input.md` |
 | Differential gate | [parity tests](tests/test_omc_parity.cc), [test configuration](tests/CMakeLists.txt) | `docs/development.md`, `docs/api_stability.md`, public format tests |
 | Conditional patch/reuse | Existing C payload/package views and replay | `src/include/openmeta/exif_tiff_patch.h`, implementation in `src/openmeta/metadata_transfer.cc`, `docs/canonical_patching.md` |
 
