@@ -70,8 +70,9 @@ In practice:
   Photoshop IRB `0x0404`, while preserving unrelated IRB resources.
 - Prepared transfer / persist APIs support bounded EXIF/XMP/ICC/IPTC lanes.
   Their behavior and coverage remain narrower than the current C++ core.
-- Real C2PA crypto verification and C++ host-adapter surfaces are outside the
-  current C-core milestone.
+- An optional OpenSSL verification backend is eligible for C but is not yet
+  implemented. Full C2PA trust/signing and C++ host-adapter surfaces remain
+  outside the current C-core milestone.
 - See [porting_plan.md](porting_plan.md) for the current public parity matrix
   and roadmap.
 
@@ -198,6 +199,22 @@ self-contained data-reference handling, and multiple-`ipma` consolidation.
 - `src/core/`: store, key/value, and edit core
 - `src/base/`: low-level arena support
 - `tests/`: unit tests and optional parity tests
+
+## Dependencies
+
+The allowed optional runtime dependencies are **zlib, Brotli, Expat and
+OpenSSL/libcrypto**, including the corresponding metadata processing logic.
+The current C build wires zlib and Brotli. Expat and OpenSSL are eligible
+optional backends, not implemented integrations; XMP currently uses the C parser.
+
+**RapidFuzz and Adobe DNG SDK remain C++ only.** Other third-party development,
+test and verification dependencies must not become C runtime requirements.
+Under project distribution policy, ExifTool and other external verification
+applications are invoked only as separately installed tools and are not
+bundled in the Apache-2.0 project's source or binary releases.
+
+See [Dependency And Distribution Policy](porting_plan.md#dependency-and-distribution-policy)
+for backend and packaging boundaries.
 
 ## Build
 
