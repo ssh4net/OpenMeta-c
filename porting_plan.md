@@ -57,10 +57,9 @@ value layout changes in version 0.2.0; consumers must rebuild.
 The historical full differential harness remains a failing inventory. Its
 previously disabled transfer/persist block is now available through
 `omc_test_parity --all`. Nested structured XMP and broader transfer lifecycle
-cases still differ. Default parity still includes ten BMFF fixtures with
-primitive and richer C++ summary differences. The focused authoring gate does
-not suppress or relabel those failures. BMFF writer closure and positional
-input remain the next implementation batches.
+cases still differ. Default parity now includes nine BMFF fixtures with
+remaining primitive and richer C++ summary differences. The focused gates do
+not suppress or relabel those failures. Positional input is the next batch.
 
 See [authoring.md](authoring.md) for contracts and bounded coverage. The matrix
 below retains source-review detail where broader acceptance remains open.
@@ -181,8 +180,8 @@ Status describes inspected source, not a passing test run:
 | W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h` and direct tests | Present bounded pipeline. Existing `omc_transfer_compile()` does not imply parity with C++ compiled worker/handoff APIs. Extend the pipeline rather than replacing it. |
 | W8 | XMP carrier merge and lifecycle | C has destination embedded/sidecar stores, precedence, writeback and persistence options | Present controls, Partial lifecycle parity. Test modes/defaults, strip/overwrite/failure behavior and source/destination conflicts. |
 | W9 | Payload/package artifacts | C has `OMTPLD01` v1, `OMTPKG01` v2, semantic views, replay, executed-output materialization and artifact inspection | Present bounded wire families. Test interoperation in both directions; matching version/magic does not establish complete builder/execution parity. |
-| W10 | BMFF package item insertion | C has Exif/XMP/JUMBF/C2PA routes, ICC, synthesized `idat`, inserted 32-bit IDs and bounded method-2 references | Present bounded materializer. It appends item IDs/entries; this is not full C++ managed-item replacement/strip parity. Do not schedule the insertion foundation again. |
-| W11 | Newer bounded BMFF writer rules | C++ compact `iloc`, self-contained `dref`, managed-item replacement/remapping and multiple `ipma` consolidation | Partial. C package `iloc` accepts 4/8-byte offsets/lengths and rejects nonzero data references; graph/property handling is narrower. Extend current paths, with separate replace/strip and direct/package tests. |
+| W10 | BMFF package item insertion | C has Exif/XMP/JUMBF/C2PA routes, ICC, synthesized `idat`, inserted 32-bit IDs and bounded method-2 references | Shared bounded materializer now replaces managed families and remaps unambiguous IDs. Append layout preserves existing media addresses; physical byte layout differs from C++. |
+| W11 | Newer bounded BMFF writer rules | C++ compact `iloc`, self-contained `dref`, managed-item replacement/remapping and multiple `ipma` consolidation | Implemented bounded normalization, local `dref`, family replacement, `iref`/version-0 `grpl`/`ipma` remapping, and multiple-table ICC association consolidation. See `bmff_writing.md` for limits and validation. |
 | W12 | Prepared canonical TIFF patching | C++ `exif_tiff_patch.h` has plan-scoped handles, fixed-width typed transactions and independent workers | Missing; Conditional for the first writer milestone. Useful later as a small reusable execution primitive after W1/W2, without C++ owner classes. |
 | W13 | MakerNote trust and C2PA | C has conservative rendered filtering and bounded JUMBF/C2PA routes; C++ has richer MakerNote layout audits and optional verification | Partial safety facts. Keep opaque preservation distinct from verified relocation. Bounded OpenSSL verification logic is eligible as an optional C backend. Rendered C2PA invalidation/drop stays explicit; full asset binding, signing and trust remain outside the first writer milestone. |
 
@@ -342,19 +341,15 @@ engine exists. Pin and close one reference batch before advancing it.
 ### B3: Close Specific BMFF Deltas
 
 Keep the package route/materialization boundary and direct XMP/EXIF/ICC paths.
-Current source shows these distinct gaps:
+The shared writer in `src/edit/omc_bmff_rewrite.c` now implements the bounded
+rules below. Version 0.2.1 passed 35/35 Release direct plus focused authoring
+parity targets and 34/34 ASan/UBSan direct targets. Synthetic table tests cover
+one-to-one and ambiguous replacement, retained media offsets, method-2 links,
+compact widths, local data references, mixed property tables, essential-bit
+merging, invalid secondary indexes, and table ceilings. Direct and package
+paths use the same writer. See [bmff_writing.md](bmff_writing.md).
 
-- Package `iloc` accepts only 4/8-byte offsets and lengths, with 0/4/8-byte
-  bases; it retains widths rather than normalizing compact forms.
-- Any nonzero `data_reference_index` is rejected, including self-contained
-  references accepted by the newer C++ contract.
-- Package insertion copies existing `iinf` entries and assigns fresh IDs.
-  Its `iref/cdsc` handling is not managed-family replacement/remapping.
-  Untouched `grpl`/`ipma` children do not establish graph-preservation parity.
-- ICC rewriting updates `ipco` while copying other `iprp` children; it does
-  not implement the C++ property-index remap/multiple-`ipma` consolidation.
-
-Implement and verify in this order:
+Implemented sequence:
 
 1. Normalize valid omitted/narrow offsets and narrow lengths when insertion
    requires wider extents. Preserve method-0/1/2 meaning; omitted lengths stay

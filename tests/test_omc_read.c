@@ -3900,6 +3900,28 @@ make_test_bmff_all(omc_u8* out, omc_u32 major_brand)
     return size;
 }
 
+/* A master followed by its auxiliary IDs is convenient fixture input. Wire
+ * auxl in the normative direction: auxiliary item -> master item. */
+static void
+append_auxl_for_master(omc_u8* out, omc_size* size, unsigned version,
+                      const omc_u8* payload, omc_size payload_size)
+{
+    omc_u8 edge[10];
+    omc_size n;
+    omc_size p;
+    unsigned width;
+    width = version ? 4U : 2U;
+    assert(payload_size >= width + 2U);
+    n = ((omc_size)payload[width] << 8U) | payload[width + 1U];
+    assert(payload_size == width + 2U + n * width);
+    for (p = width + 2U; n != 0U; --n, p += width) {
+        memcpy(edge, payload + p, width);
+        edge[width] = 0U; edge[width + 1U] = 1U;
+        memcpy(edge + width + 2U, payload, width);
+        append_bmff_box(out, size, fourcc('a','u','x','l'), edge, width * 2U + 2U);
+    }
+}
+
 static omc_size
 make_test_bmff_fields_only(omc_u8* out, omc_u32 major_brand)
 {
@@ -4069,8 +4091,8 @@ make_test_bmff_fields_only(omc_u8* out, omc_u32 major_brand)
 
     iref_size = 0U;
     append_fullbox_header(iref_payload, &iref_size, 0U);
-    append_bmff_box(iref_payload, &iref_size, fourcc('a', 'u', 'x', 'l'),
-                    auxl_payload, auxl_size);
+    append_auxl_for_master(iref_payload, &iref_size, 0U,
+                           auxl_payload, auxl_size);
     append_bmff_box(iref_payload, &iref_size, fourcc('d', 'i', 'm', 'g'),
                     dimg_payload, dimg_size);
     append_bmff_box(iref_payload, &iref_size, fourcc('t', 'h', 'm', 'b'),
@@ -4319,8 +4341,8 @@ make_test_bmff_aux_subtype_kinds_only(omc_u8* out, omc_u32 major_brand)
 
     iref_size = 0U;
     append_fullbox_header(iref_payload, &iref_size, 0U);
-    append_bmff_box(iref_payload, &iref_size, fourcc('a', 'u', 'x', 'l'),
-                    auxl_payload, auxl_size);
+    append_auxl_for_master(iref_payload, &iref_size, 0U,
+                           auxl_payload, auxl_size);
 
     meta_size = 0U;
     append_fullbox_header(meta_payload, &meta_size, 0U);
@@ -4428,8 +4450,8 @@ make_test_bmff_v1_auxl_only(omc_u8* out, omc_u32 major_brand)
 
     iref_size = 0U;
     append_fullbox_header(iref_payload, &iref_size, 1U);
-    append_bmff_box(iref_payload, &iref_size, fourcc('a', 'u', 'x', 'l'),
-                    auxl_payload, auxl_size);
+    append_auxl_for_master(iref_payload, &iref_size, 1U,
+                           auxl_payload, auxl_size);
 
     meta_size = 0U;
     append_fullbox_header(meta_payload, &meta_size, 0U);
@@ -4668,10 +4690,10 @@ make_test_bmff_duplicate_edges_only(omc_u8* out, omc_u32 major_brand)
 
     iref_size = 0U;
     append_fullbox_header(iref_payload, &iref_size, 0U);
-    append_bmff_box(iref_payload, &iref_size, fourcc('a', 'u', 'x', 'l'),
-                    auxl_a_payload, auxl_a_size);
-    append_bmff_box(iref_payload, &iref_size, fourcc('a', 'u', 'x', 'l'),
-                    auxl_b_payload, auxl_b_size);
+    append_auxl_for_master(iref_payload, &iref_size, 0U,
+                           auxl_a_payload, auxl_a_size);
+    append_auxl_for_master(iref_payload, &iref_size, 0U,
+                           auxl_b_payload, auxl_b_size);
     append_bmff_box(iref_payload, &iref_size, fourcc('d', 'i', 'm', 'g'),
                     dimg_a_payload, dimg_a_size);
     append_bmff_box(iref_payload, &iref_size, fourcc('d', 'i', 'm', 'g'),
@@ -9939,10 +9961,10 @@ test_read_bmff_fields(void)
     iref_from_unique_count = find_bmff_field(&store,
                                              "iref.from_item_unique_count");
     assert(iref_from_unique_count != (const omc_entry*)0);
-    assert(iref_from_unique_count->value.u.u64 == 1U);
+    assert(iref_from_unique_count->value.u.u64 == 3U);
     iref_to_unique_count = find_bmff_field(&store, "iref.to_item_unique_count");
     assert(iref_to_unique_count != (const omc_entry*)0);
-    assert(iref_to_unique_count->value.u.u64 == 2U);
+    assert(iref_to_unique_count->value.u.u64 == 3U);
     assert(count_bmff_field(&store, "iref.item_id") == 3U);
     assert(count_bmff_field(&store, "iref.item_out_edge_count") == 3U);
     assert(count_bmff_field(&store, "iref.item_in_edge_count") == 3U);
@@ -9962,11 +9984,11 @@ test_read_bmff_fields(void)
     auxl_graph_from_unique_count
         = find_bmff_field(&store, "iref.graph.auxl.from_item_unique_count");
     assert(auxl_graph_from_unique_count != (const omc_entry*)0);
-    assert(auxl_graph_from_unique_count->value.u.u64 == 1U);
+    assert(auxl_graph_from_unique_count->value.u.u64 == 2U);
     auxl_graph_to_unique_count
         = find_bmff_field(&store, "iref.graph.auxl.to_item_unique_count");
     assert(auxl_graph_to_unique_count != (const omc_entry*)0);
-    assert(auxl_graph_to_unique_count->value.u.u64 == 2U);
+    assert(auxl_graph_to_unique_count->value.u.u64 == 1U);
 
     dimg_edge_count = find_bmff_field(&store, "iref.dimg.edge_count");
     assert(dimg_edge_count != (const omc_entry*)0);
@@ -10336,6 +10358,10 @@ test_read_bmff_v1_auxl_edges(void)
     assert(
         count_bmff_field_scalar_value(&store, "primary.auxl_item_id", 0x10003U)
         == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.auxl.auxiliary_item_id", 0x10002U) == 1U);
+    assert(count_bmff_field_scalar_value(&store, "iref.auxl.master_item_id", 0x10001U) == 2U);
+    assert(find_bmff_field_text(&store, "iref.auxl.from_role", "auxiliary_image") != NULL);
+    assert(find_bmff_field_text(&store, "iref.auxl.to_role", "master_image") != NULL);
     assert(count_bmff_field_scalar_value(&store, "primary.auxl_count", 2U)
            == 1U);
 
@@ -10550,10 +10576,10 @@ test_read_bmff_duplicate_edges(void)
         count_bmff_field_scalar_value(&store, "iref.graph.auxl.edge_count", 4U)
         == 1U);
     assert(count_bmff_field_scalar_value(&store,
-                                         "iref.auxl.from_item_unique_count", 1U)
+                                         "iref.auxl.from_item_unique_count", 2U)
            == 1U);
     assert(count_bmff_field_scalar_value(&store,
-                                         "iref.auxl.to_item_unique_count", 2U)
+                                         "iref.auxl.to_item_unique_count", 1U)
            == 1U);
 
     assert(count_bmff_field_scalar_value(&store, "iref.dimg.edge_count", 3U)
@@ -10594,10 +10620,10 @@ test_read_bmff_duplicate_edges(void)
 
     assert(count_bmff_field_scalar_value(&store, "iref.item_count", 8U) == 1U);
     assert(
-        count_bmff_field_scalar_value(&store, "iref.from_item_unique_count", 5U)
+        count_bmff_field_scalar_value(&store, "iref.from_item_unique_count", 4U)
         == 1U);
     assert(
-        count_bmff_field_scalar_value(&store, "iref.to_item_unique_count", 6U)
+        count_bmff_field_scalar_value(&store, "iref.to_item_unique_count", 5U)
         == 1U);
 
     assert(count_bmff_field_scalar_value(&store, "iref.auxl.item_count", 3U)
@@ -10609,9 +10635,9 @@ test_read_bmff_duplicate_edges(void)
     assert(count_bmff_field_scalar_value(&store, "iref.auxl.item_id", 3U)
            == 1U);
     assert(count_bmff_field_scalar_value(&store,
-                                         "iref.auxl.item_out_edge_count", 4U)
+                                         "iref.auxl.item_in_edge_count", 4U)
            == 1U);
-    assert(count_bmff_field_scalar_value(&store, "iref.auxl.item_in_edge_count",
+    assert(count_bmff_field_scalar_value(&store, "iref.auxl.item_out_edge_count",
                                          2U)
            == 2U);
 

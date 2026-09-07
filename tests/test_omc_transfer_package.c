@@ -543,7 +543,7 @@ make_test_bmff_primary_item_target_with_iref(omc_u8* out, omc_size capacity,
 {
     static const omc_u8 k_primary[] = { (omc_u8)'I', (omc_u8)'M', (omc_u8)'G',
                                         (omc_u8)'0' };
-    static const omc_u8 k_auxl[]    = { 0U, 1U, 0U, 1U };
+    static const omc_u8 k_auxl[]    = { 0U, 1U, 0U, 1U, 0U, 1U };
     static const omc_u8 k_mdat[]    = { 0U, 1U, 2U, 3U };
     omc_u8 ftyp_payload[16];
     omc_u8 pitm_payload[16];

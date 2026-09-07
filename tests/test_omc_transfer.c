@@ -4011,10 +4011,10 @@ test_transfer_execute_heif_primary_metadata_cdsc_refs(void)
         count_bmff_field_scalar_value(&edited_store, "meta.primary_item_id", 3U)
         == 1U);
     assert(count_bmff_field_scalar_value(&edited_store,
-                                         "iref.cdsc.from_item_id", 1U)
+                                         "iref.cdsc.from_item_id", 4U)
            == 1U);
     assert(count_bmff_field_scalar_value(&edited_store,
-                                         "iref.cdsc.from_item_id", 2U)
+                                         "iref.cdsc.from_item_id", 5U)
            == 1U);
     assert(
         count_bmff_field_scalar_value(&edited_store, "iref.cdsc.to_item_id", 3U)

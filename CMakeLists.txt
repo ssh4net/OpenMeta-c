@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(OpenMetaC VERSION 0.2.0 LANGUAGES C)
+project(OpenMetaC VERSION 0.2.1 LANGUAGES C)
 
 include(CTest)
 include(CheckCSourceCompiles)

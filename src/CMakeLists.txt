@@ -47,6 +47,7 @@ set(OMC_SOURCES
   core/omc_val.c
   core/omc_store_validate.c
   core/omc_store.c
+  edit/omc_bmff_rewrite.c
   edit/omc_exif_write.c
   edit/omc_exif_overlay.c
   edit/omc_exif_tiff_serialize.c

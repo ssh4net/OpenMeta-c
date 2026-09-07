@@ -331,7 +331,7 @@ The main gaps in the portable-core scope are:
   current fixed-field internal writer
 - explicit reverse XMP-to-EXIF/IPTC translation for the five existing bounded
   C++ mapping groups, plus paired IPTC date/time projection into XMP
-- newer bounded BMFF replacement, graph/property remapping and normalization
+- broader BMFF acceptance beyond the bounded writer in [bmff_writing.md](bmff_writing.md)
 - broader transfer-safety facts, lifecycle and payload/package parity tests
 - positional input with explicit read budgets and staged reader conversion
 - selected current C++ read and naming deltas, verified with shared fixtures

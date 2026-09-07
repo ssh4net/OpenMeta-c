@@ -2633,8 +2633,13 @@ omc_bmff_collect_iref_edges(omc_bmff_ctx* ctx, const omc_bmff_box* iref,
             } else {
                 out_props->edge_truncated = 1;
             }
-            if (out_props->have_item_id && from_item_id == out_props->item_id) {
-                omc_bmff_note_primary_ref(out_props, child.type, to_item_id);
+            if (out_props->have_item_id) {
+                if (child.type == OMC_BMFF_FOURCC('a', 'u', 'x', 'l')) {
+                    if (to_item_id == out_props->item_id)
+                        omc_bmff_note_primary_ref(out_props, child.type, from_item_id);
+                } else if (from_item_id == out_props->item_id) {
+                    omc_bmff_note_primary_ref(out_props, child.type, to_item_id);
+                }
             }
         }
 
@@ -3202,7 +3207,12 @@ omc_bmff_emit_iref_fields(omc_bmff_ctx* ctx,
             continue;
         }
 
-        aux_item = omc_bmff_find_aux_item(props, edge->to_item_id);
+        if (!omc_bmff_emit_u32_field(ctx, "iref.auxl.auxiliary_item_id", edge->from_item_id)
+            || !omc_bmff_emit_u32_field(ctx, "iref.auxl.master_item_id", edge->to_item_id)
+            || !omc_bmff_emit_text_field(ctx, "iref.auxl.from_role", "auxiliary_image", 15U)
+            || !omc_bmff_emit_text_field(ctx, "iref.auxl.to_role", "master_image", 12U))
+            return 0;
+        aux_item = omc_bmff_find_aux_item(props, edge->from_item_id);
         if (!omc_bmff_emit_text_field(
                 ctx, "iref.auxl.semantic",
                 omc_bmff_aux_semantic_name(

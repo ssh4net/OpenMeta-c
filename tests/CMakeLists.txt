@@ -1,3 +1,7 @@
+add_executable(omc_test_bmff_rewrite test_omc_bmff_rewrite.c)
+target_link_libraries(omc_test_bmff_rewrite PRIVATE omc)
+add_test(NAME omc_test_bmff_rewrite COMMAND omc_test_bmff_rewrite)
+
 add_executable(omc_test_exif_carriers test_omc_exif_carriers.c)
 target_link_libraries(omc_test_exif_carriers PRIVATE omc)
 add_test(NAME omc_test_exif_carriers COMMAND omc_test_exif_carriers)
