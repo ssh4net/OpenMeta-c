@@ -37,6 +37,8 @@ omc_edit_fini(omc_edit* edit);
 OMC_API omc_status
 omc_edit_reserve_ops(omc_edit* edit, omc_size capacity);
 
+/* Entry/value references passed to add/set belong to edit->arena. They are
+ * borrowed until commit; commit copies all referenced bytes into out. */
 OMC_API omc_status
 omc_edit_add_entry(omc_edit* edit, const omc_entry* entry);
 
@@ -46,10 +48,14 @@ omc_edit_set_value(omc_edit* edit, omc_entry_id target, const omc_val* value);
 OMC_API omc_status
 omc_edit_tombstone(omc_edit* edit, omc_entry_id target);
 
+/* out must be initialized and distinct from base. On failure out and base,
+ * including their borrowed views, remain unchanged. On success old out views
+ * expire. Out-of-range set/tombstone targets retain the legacy no-op behavior. */
 OMC_API omc_status
 omc_edit_commit(const omc_store* base, const omc_edit* edits,
                 omc_size edit_count, omc_store* out);
 
+/* Same ownership and output-preservation contract as omc_edit_commit. */
 OMC_API omc_status
 omc_store_compact(const omc_store* base, omc_store* out);
 

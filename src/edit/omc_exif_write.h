@@ -9,6 +9,7 @@
 
 OMC_EXTERN_C_BEGIN
 
+
 typedef enum omc_exif_write_status {
     OMC_EXIF_WRITE_OK = 0,
     OMC_EXIF_WRITE_UNSUPPORTED = 1,
@@ -24,6 +25,13 @@ typedef struct omc_exif_write_res {
     omc_size needed;
     omc_size written;
 } omc_exif_write_res;
+
+/* Internal: validated arguments, empty output, canonical bytes produced by
+ * omc_serialize_exif_tiff in the calling writer operation. */
+omc_status
+omc_exif_overlay_tiff(const omc_u8* file, omc_size size, const omc_store* source,
+                      const omc_arena* canonical, omc_arena* out,
+                      omc_exif_write_res* res);
 
 void
 omc_exif_write_res_init(omc_exif_write_res* res);

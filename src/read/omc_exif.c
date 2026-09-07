@@ -2061,6 +2061,9 @@ omc_exif_add_entry(omc_exif_ctx* ctx, const omc_byte_ref* token_ref,
             (entry.value.kind == OMC_VAL_ARRAY) ? (omc_u32)count
                                                 : (omc_u32)raw_size;
         entry.value.u.ref = ref2;
+        entry.value.byte_order = ctx->cfg.little_endian
+                                    ? OMC_BYTE_ORDER_LITTLE
+                                    : OMC_BYTE_ORDER_BIG;
         omc_exif_maybe_mark_contextual_name(ctx, &entry);
         st = omc_store_add_entry(ctx->store, &entry, (omc_entry_id*)0);
         if (st == OMC_STATUS_NO_MEMORY) {

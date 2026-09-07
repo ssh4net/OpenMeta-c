@@ -7020,6 +7020,7 @@ test_transfer_execute_png_embedded_only_source_icc(void)
     status = omc_transfer_execute(file_bytes, file_size, &source_store,
                                   &edited_out, &sidecar_out, &exec, &res);
     assert(status == OMC_STATUS_OK);
+#if OMC_HAVE_ZLIB
     assert(res.status == OMC_TRANSFER_OK);
     assert(res.edited_present);
     assert(!res.sidecar_present);
@@ -7032,6 +7033,9 @@ test_transfer_execute_png_embedded_only_source_icc(void)
                       "Preserve me");
     assert_icc_profile_state(&edited_store);
 
+#else
+    assert(res.status == OMC_TRANSFER_UNSUPPORTED);
+#endif
     omc_arena_fini(&sidecar_out);
     omc_arena_fini(&edited_out);
     omc_store_fini(&edited_store);
@@ -7078,6 +7082,7 @@ test_transfer_execute_png_sidecar_only_preserve_source_icc(void)
     status = omc_transfer_execute(file_bytes, file_size, &source_store,
                                   &edited_out, &sidecar_out, &exec, &res);
     assert(status == OMC_STATUS_OK);
+#if OMC_HAVE_ZLIB
     assert(res.status == OMC_TRANSFER_OK);
     assert(res.edited_present);
     assert(res.sidecar_present);
@@ -7097,6 +7102,9 @@ test_transfer_execute_png_sidecar_only_preserve_source_icc(void)
                                      "CreatorTool"),
                       "NewTool");
 
+#else
+    assert(res.status == OMC_TRANSFER_UNSUPPORTED);
+#endif
     omc_store_fini(&sidecar_store);
     omc_arena_fini(&sidecar_out);
     omc_arena_fini(&edited_out);

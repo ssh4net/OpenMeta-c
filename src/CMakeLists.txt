@@ -39,13 +39,19 @@ endfunction()
 
 set(OMC_SOURCES
   base/omc_arena.c
+  base/omc_crc32.c
   core/omc_capabilities.c
   core/omc_edit.c
+  core/omc_datetime.c
   core/omc_key.c
   core/omc_val.c
+  core/omc_store_validate.c
   core/omc_store.c
   edit/omc_exif_write.c
+  edit/omc_exif_overlay.c
+  edit/omc_exif_tiff_serialize.c
   edit/omc_transfer.c
+  edit/omc_translation.c
   edit/omc_transfer_persist.c
   edit/omc_xmp_apply.c
   edit/omc_xmp_embed.c

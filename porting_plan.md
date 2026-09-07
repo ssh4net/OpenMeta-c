@@ -17,8 +17,9 @@ This revision compares these public source snapshots:
 | OpenMeta-c | `422795e8c2f63bfd77a742fcd2491ac971ee90ed` | C implementation through bounded `iloc` method-2 reference support |
 
 Evidence comes from public headers, implementations, tests, and API docs.
-This is a source review and plan update, not a fresh build, corpus audit, or
-performance measurement. Private inputs and reports are not part of this note.
+The original matrix was a source review. The execution checkpoint below records
+fresh builds and synthetic tests; it does not establish a corpus audit or
+performance result. Private inputs and reports are not part of this note.
 Source paths below are relative to the named public repository.
 
 The earlier plan recorded Release results of `30/30`, including parity, and
@@ -30,6 +31,39 @@ The old estimates of `80-85%` read coverage and `60-65%` overall public surface
 do not define a current core-parity denominator. Track the scoped matrix and
 its acceptance cases instead. Do not average C++ product percentages into C
 completion or count intentionally excluded C++ features as C defects.
+
+## Execution Checkpoint: Typed Writer and Translation
+
+Fresh Clang 20 builds use C++ 0.4.127 as the pinned reference. The original
+C direct baseline passed 29/29 tests; C++ passed 2/2 CTest targets. The original
+C sanitizer run exposed test-only diagnostic string overreads, now corrected.
+The initial default differential run also found a missing Photoshop IPTC byte
+count, now corrected, and BMFF differences.
+
+The authoring batch adds typed makers and array byte order, atomic edit
+publication, detached validation, canonical TIFF serialization, all five
+bounded reverse-translation groups, and paired forward IPTC date/time
+projection. Canonical output now feeds the carrier writers. TIFF/BigTIFF
+metadata updates preserve unrelated entries and image-data offsets. PNG
+writers calculate CRCs independently of optional compression support.
+
+The Release direct plus focused authoring differential gate passed 34/34;
+the corresponding Debug ASan/UBSan direct gate passed 33/33. The no-compression
+build passed 33/33; PNG ICC emission asserts unsupported without zlib, and
+the dependent PNG ICC persistence case is omitted in that configuration. These are synthetic
+fixture gates, not a corpus or native Windows acceptance result. The public
+value layout changes in version 0.2.0; consumers must rebuild.
+
+The historical full differential harness remains a failing inventory. Its
+previously disabled transfer/persist block is now available through
+`omc_test_parity --all`. Nested structured XMP and broader transfer lifecycle
+cases still differ. Default parity still includes ten BMFF fixtures with
+primitive and richer C++ summary differences. The focused authoring gate does
+not suppress or relabel those failures. BMFF writer closure and positional
+input remain the next implementation batches.
+
+See [authoring.md](authoring.md) for contracts and bounded coverage. The matrix
+below retains source-review detail where broader acceptance remains open.
 
 ## Core Boundary And Decisions
 
@@ -125,23 +159,23 @@ Status describes inspected source, not a passing test run:
 
 | ID | Capability | Current C evidence | Status and decision |
 | --- | --- | --- | --- |
-| R1 | Store, keys, values, origins, edits | `omc_store.h`, `omc_val.h`, `omc_edit.h`; add/set/tombstone and reserve operations | Present foundation. Complete typed constructors and define output-preserving transactions before using it for new authoring/translation. |
+| R1 | Store, keys, values, origins, edits | `omc_store.h`, `omc_val.h`, `omc_edit.h`; add/set/tombstone and reserve operations | Present and tested: typed makers, array byte order, candidate publication on commit/compact, and failure preservation. |
 | R2 | Contiguous scan, payload assembly, decode | `omc_scan.h`, `omc_pay.h`, `omc_read.h`; direct EXIF/XMP/ICC/IPTC/IRB/JUMBF/EXR tests | Present, broad bounded coverage. Promote C++ differences by fixture; no universal camera/read-parity claim. |
 | R3 | MakerNote/native RAW and modern-container enrichment | `src/read/omc_exif.c`, `omc_bmff.c`, naming and read tests | Partial against the newer C++ tree. Preserve raw/unknown values; port safety-relevant facts and small proven read deltas before long-tail descriptive enrichment. |
 | R4 | BMFF derived fields | Item semantics, properties, `ipma` associations and `grpl` summaries in `omc_bmff.c` | Partial. C++ has deeper scene/component, derived-image and display-transform summaries. Keep parsing/preservation facts in C; broad semantic aggregation may stay in C++. Read-side summaries do not imply writer remapping. |
 | R5 | Positional source, read budgets, source ranges/windows | Current C scan/decode APIs take complete byte spans; `omc_read_simple` is file-oriented | Missing public source abstraction. Port a bounded `read_at` primitive and readers in stages; an output package source range is not an input source API. |
 | R6 | Runtime capabilities, preview, CCM/DNG helpers | `omc_capabilities.h`, `omc_preview.h`, `omc_ccm_query.h` and direct tests | Present bounded helpers. Capabilities must report actual C support and enabled compression features. |
-| R7 | Detached entry/store validation | `omc_validate.h` exposes file/read diagnostics and CCM checks | Missing equivalent to C++ `validate_entry()` / `validate_store()`. Add the initial typed schema needed for safe authoring and serialization without requiring file I/O. |
+| R7 | Detached entry/store validation | `omc_validate.h` exposes file/read diagnostics and CCM checks | Implemented initial detached schema in `omc_store_validate.h`; bounded diagnostics, wire/value checks, singleton and image-context tests. |
 | R8 | Decoded snapshots, source provenance and persistence | C callers retain stores/bytes; transfer packages retain output source ranges | Missing named snapshot API; Conditional. C++ snapshot v1 exists. Positional input does not require its owning or serialized snapshot object first. |
 
 ### Creation, Translation, And Writing
 
 | ID | Capability | C++ reference and current C evidence | Status and decision |
 | --- | --- | --- | --- |
-| W1 | Typed authoring | C++ `create_metadata_store()` preflights, copies, validates and publishes atomically. C has low-level store/edit operations and all rational value kinds, but incomplete public value makers. | Partial. Add narrow construction helpers and output-preserving transactions on the existing model. Do not duplicate logical builders or FlatHost import. |
-| W2 | Canonical TIFF/EXIF serialization | C++ `serialize_exif_tiff()` is target-neutral and honors supported wire hints. C's internal `omc_exif_write_build_transfer_payload()` selects a fixed field set and applies target framing. | Partial mechanism, missing comparable public serializer. Generalize the existing payload builder with typed validation, measurement, deterministic TIFF output and explicit wrappers. |
-| W3 | EXIF/IPTC to portable XMP | C already has projection, all three conflict policies, custom namespaces and managed-namespace canonicalization | Partial. Paired IPTC creation/digital-creation date/time projection is missing. Preserve existing namespace and conflict behavior while closing mapping deltas. |
-| W4 | Explicit XMP to native metadata | C++ has date, technical, capture, descriptive and target-bound geometry translation. No public C translation operation exists. | Missing. Port all five existing bounded groups over shared typed/transaction machinery. Broader future C++ mappings follow as separate proven batches. |
+| W1 | Typed authoring | C++ `create_metadata_store()` preflights, copies, validates and publishes atomically. C has typed value makers, explicit array byte order, and candidate-based edit publication. | Implemented bounded typed helpers and output-preserving transactions; see `authoring.md`. Logical builders and FlatHost import remain above the core. |
+| W2 | Canonical TIFF/EXIF serialization | C++ `serialize_exif_tiff()` is target-neutral and honors supported wire hints. C's public serializer builds typed TIFF; internal transfer payloads apply target framing above it. | Implemented `omc_serialize_exif_tiff()` with direct tests and exact C++ byte comparison. Carrier wrappers reuse canonical output; TIFF/BigTIFF retain target layout. |
+| W3 | EXIF/IPTC to portable XMP | C already has projection, all three conflict policies, custom namespaces and managed-namespace canonicalization | Paired IPTC creation/digital-creation projection implemented and tested. Broader structured XMP parity remains partial. |
+| W4 | Explicit XMP to native metadata | C++ has date, technical, capture, descriptive and target-bound geometry translation. C exposes these groups through `omc_translate_xmp()`. | Implemented all five bounded groups in `omc_translation.h`, with one transaction and focused C++ EXIF/IPTC differential tests. Broader mappings remain separate batches. |
 | W5 | Native IPTC-IIM emission | Internal `omc_transfer_build_iptc_iim()` emits datasets; JPEG IRB and TIFF tag `33723` carrier paths exist | Present bounded mechanism. Reuse it for descriptive/date translation; add charset, repetition, tombstone and stale-IRB checks. A separate public IPTC writer is not a prerequisite. |
 | W6 | Target image facts and transfer safety | C has target image spec, CompatibleFile/RenderedImage and diagnostics; C++ has wider source-processing classification and a RAW-data descriptor | Partial. C has no source descriptor or explicit lens/preview/general-processing audit categories. Verify selected fields through actual transfer paths; port needed safety facts without the rich query system. |
 | W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h` and direct tests | Present bounded pipeline. Existing `omc_transfer_compile()` does not imply parity with C++ compiled worker/handoff APIs. Extend the pipeline rather than replacing it. |

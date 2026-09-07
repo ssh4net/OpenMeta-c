@@ -16,8 +16,10 @@ binding APIs are outside that core milestone.
 
 The [porting plan](porting_plan.md) records the source-reviewed baseline as of
 2026-09-07 against C++ `0.4.127`, the scoped parity matrix, and acceptance
-gates. Earlier percentage estimates are superseded by that matrix. This
-documentation update does not establish a fresh build or corpus result.
+gates. Earlier percentage estimates are superseded by that matrix. The
+[authoring contract](authoring.md) documents typed construction, detached
+validation, canonical EXIF, and the five explicit reverse-translation groups.
+Version 0.2.0 changes the `omc_val` layout; rebuild consumers.
 
 In practice:
 - Read-path coverage is broad and regression-tested.

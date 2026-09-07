@@ -1,3 +1,4 @@
+#include "../base/omc_crc32.h"
 #include "omc/omc_transfer.h"
 #include "omc/omc_cfg.h"
 #include "omc/omc_jxl_encoder_handoff.h"
@@ -8368,13 +8369,7 @@ omc_transfer_rewrite_jpeg_icc(const omc_u8* file_bytes, omc_size file_size,
     return OMC_STATUS_OK;
 }
 
-#if OMC_HAVE_ZLIB
-static omc_u32
-omc_transfer_crc32_update(omc_u32 crc, const omc_u8* bytes, omc_size size)
-{
-    return (omc_u32)crc32((uLong)crc, (const Bytef*)bytes, (uInt)size);
-}
-#endif
+
 
 static omc_status
 omc_transfer_append_png_chunk(omc_arena* out, const char* type,
@@ -8404,13 +8399,9 @@ omc_transfer_append_png_chunk(omc_arena* out, const char* type,
             return status;
         }
     }
-#if OMC_HAVE_ZLIB
-    crc = omc_transfer_crc32_update(0U, (const omc_u8*)type, 4U);
-    crc = omc_transfer_crc32_update(crc, payload, payload_size);
-    omc_transfer_store_u32be(crc_bytes, crc);
-#else
-    memset(crc_bytes, 0, sizeof(crc_bytes));
-#endif
+    crc = omc_crc32_update(0xFFFFFFFFU, (const omc_u8*)type, 4U);
+    crc = omc_crc32_update(crc, payload, payload_size);
+    omc_transfer_store_u32be(crc_bytes, ~crc);
     return omc_transfer_append_bytes(out, crc_bytes, sizeof(crc_bytes));
 }
 
@@ -8639,8 +8630,8 @@ omc_transfer_build_png_iccp_payload(const omc_u8* profile,
     uLongf compressed_size;
     uLong src_size;
     int zret;
-#endif
     static const char k_name[] = "icc";
+#endif
 
     if (out_status == (omc_transfer_status*)0) {
         return OMC_STATUS_INVALID_ARGUMENT;
@@ -13141,84 +13132,104 @@ static int
 omc_transfer_is_raw_color_exif_tag(omc_u16 tag)
 {
     switch (tag) {
-    case 0x828DU:
-    case 0x828EU:
-    case 0x828FU:
-    case 0x8290U:
-    case 0x8291U:
-    case 0x8292U:
-    case 0xC612U:
-    case 0xC613U:
-    case 0xC614U:
-    case 0xC615U:
-    case 0xC616U:
-    case 0xC617U:
-    case 0xC618U:
-    case 0xC619U:
-    case 0xC61AU:
-    case 0xC61BU:
-    case 0xC61CU:
-    case 0xC61DU:
-    case 0xC61EU:
-    case 0xC61FU:
-    case 0xC620U:
-    case 0xC621U:
-    case 0xC622U:
-    case 0xC623U:
-    case 0xC624U:
-    case 0xC625U:
-    case 0xC626U:
-    case 0xC627U:
-    case 0xC628U:
-    case 0xC629U:
-    case 0xC62AU:
-    case 0xC62BU:
-    case 0xC62CU:
-    case 0xC62DU:
-    case 0xC62EU:
-    case 0xC62FU:
-    case 0xC630U:
-    case 0xC631U:
-    case 0xC632U:
-    case 0xC633U:
-    case 0xC634U:
-    case 0xC635U:
-    case 0xC65AU:
-    case 0xC65BU:
-    case 0xC65CU:
-    case 0xC65DU:
-    case 0xC68BU:
-    case 0xC68CU:
-    case 0xC68DU:
-    case 0xC68EU:
-    case 0xC68FU:
-    case 0xC690U:
-    case 0xC691U:
-    case 0xC692U:
-    case 0xC6BFU:
-    case 0xC6F3U:
-    case 0xC6F4U:
-    case 0xC6F5U:
-    case 0xC6F6U:
-    case 0xC6F7U:
-    case 0xC6F8U:
-    case 0xC6F9U:
-    case 0xC6FAU:
-    case 0xC6FBU:
-    case 0xC6FCU:
-    case 0xC6FDU:
-    case 0xC6FEU:
-    case 0xC714U:
-    case 0xC715U:
-    case 0xC71CU:
-    case 0xC71DU:
-    case 0xC740U:
-    case 0xC741U:
-    case 0xC74EU:
-    case 0xC761U: return 1;
-    default: return 0;
+    case 0x012CU:  /* ColorResponseUnit */
+    case 0x012DU:  /* TransferFunction */
+    case 0x013EU:  /* WhitePoint */
+    case 0x013FU:  /* PrimaryChromaticities */
+    case 0x0140U:  /* ColorMap */
+    case 0x0215U:  /* TransferRange */
+    case 0x828DU:  /* CFARepeatPatternDim */
+    case 0x828EU:  /* CFAPattern */
+    case 0x8773U:  /* InterColorProfile */
+    case 0xA302U:  /* CFAPattern */
+    case 0xC612U:  /* DNGVersion */
+    case 0xC613U:  /* DNGBackwardVersion */
+    case 0xC614U:  /* UniqueCameraModel */
+    case 0xC615U:  /* LocalizedCameraModel */
+    case 0xC616U:  /* CFAPlaneColor */
+    case 0xC617U:  /* CFALayout */
+    case 0xC618U:  /* LinearizationTable */
+    case 0xC619U:  /* BlackLevelRepeatDim */
+    case 0xC61AU:  /* BlackLevel */
+    case 0xC61BU:  /* BlackLevelDeltaH */
+    case 0xC61CU:  /* BlackLevelDeltaV */
+    case 0xC61DU:  /* WhiteLevel */
+    case 0xC61EU:  /* DefaultScale */
+    case 0xC61FU:  /* DefaultCropOrigin */
+    case 0xC620U:  /* DefaultCropSize */
+    case 0xC621U:  /* ColorMatrix1 */
+    case 0xC622U:  /* ColorMatrix2 */
+    case 0xC623U:  /* CameraCalibration1 */
+    case 0xC624U:  /* CameraCalibration2 */
+    case 0xC625U:  /* ReductionMatrix1 */
+    case 0xC626U:  /* ReductionMatrix2 */
+    case 0xC627U:  /* AnalogBalance */
+    case 0xC628U:  /* AsShotNeutral */
+    case 0xC629U:  /* AsShotWhiteXY */
+    case 0xC62AU:  /* BaselineExposure */
+    case 0xC62BU:  /* BaselineNoise */
+    case 0xC62CU:  /* BaselineSharpness */
+    case 0xC62DU:  /* BayerGreenSplit */
+    case 0xC62EU:  /* LinearResponseLimit */
+    case 0xC631U:  /* ChromaBlurRadius */
+    case 0xC632U:  /* AntiAliasStrength */
+    case 0xC633U:  /* ShadowScale */
+    case 0xC634U:  /* DNGPrivateData */
+    case 0xC635U:  /* MakerNoteSafety */
+    case 0xC65AU:  /* CalibrationIlluminant1 */
+    case 0xC65BU:  /* CalibrationIlluminant2 */
+    case 0xC65CU:  /* BestQualityScale */
+    case 0xC65DU:  /* RawDataUniqueID */
+    case 0xC68BU:  /* OriginalRawFileName */
+    case 0xC68CU:  /* OriginalRawFileData */
+    case 0xC68DU:  /* ActiveArea */
+    case 0xC68EU:  /* MaskedAreas */
+    case 0xC68FU:  /* AsShotICCProfile */
+    case 0xC690U:  /* AsShotPreProfileMatrix */
+    case 0xC691U:  /* CurrentICCProfile */
+    case 0xC692U:  /* CurrentPreProfileMatrix */
+    case 0xC6BFU:  /* ColorimetricReference */
+    case 0xC6C5U:  /* SRawType */
+    case 0xC6F3U:  /* CameraCalibrationSignature */
+    case 0xC6F4U:  /* ProfileCalibrationSignature */
+    case 0xC6F5U:  /* ExtraCameraProfiles */
+    case 0xC6F6U:  /* AsShotProfileName */
+    case 0xC6F7U:  /* NoiseReductionApplied */
+    case 0xC6F8U:  /* ProfileName */
+    case 0xC6F9U:  /* ProfileHueSatMapDims */
+    case 0xC6FAU:  /* ProfileHueSatMapData1 */
+    case 0xC6FBU:  /* ProfileHueSatMapData2 */
+    case 0xC6FCU:  /* ProfileToneCurve */
+    case 0xC6FDU:  /* ProfileEmbedPolicy */
+    case 0xC6FEU:  /* ProfileCopyright */
+    case 0xC714U:  /* ForwardMatrix1 */
+    case 0xC715U:  /* ForwardMatrix2 */
+    case 0xC71CU:  /* RawImageDigest */
+    case 0xC71DU:  /* OriginalRawFileDigest */
+    case 0xC725U:  /* ProfileLookTableDims */
+    case 0xC726U:  /* ProfileLookTableData */
+    case 0xC740U:  /* OpcodeList1 */
+    case 0xC741U:  /* OpcodeList2 */
+    case 0xC74EU:  /* OpcodeList3 */
+    case 0xC761U:  /* NoiseProfile */
+    case 0xC7A5U:  /* BaselineExposureOffset */
+    case 0xC7A6U:  /* DefaultBlackRender */
+    case 0xC7A7U:  /* NewRawImageDigest */
+    case 0xC7A8U:  /* RawToPreviewGain */
+    case 0xCD2DU:  /* ProfileGainTableMap */
+    case 0xCD31U:  /* CalibrationIlluminant3 */
+    case 0xCD32U:  /* CameraCalibration3 */
+    case 0xCD33U:  /* ColorMatrix3 */
+    case 0xCD34U:  /* ForwardMatrix3 */
+    case 0xCD39U:  /* ProfileHueSatMapData3 */
+    case 0xCD3AU:  /* ReductionMatrix3 */
+    case 0xCD40U:  /* ProfileGainTableMap2 */
+        return 1;
+    default: break;
     }
+    return 0;
 }
+
 
 static omc_const_bytes
 omc_transfer_xmp_property_base(omc_const_bytes path)
@@ -13369,6 +13380,8 @@ omc_transfer_entry_is_raw_color_calibration(const omc_store* store,
                                             const omc_entry* entry)
 {
     omc_const_bytes schema_ns;
+    omc_const_bytes path;
+    omc_const_bytes name;
 
     if (store == (const omc_store*)0 || entry == (const omc_entry*)0
         || (entry->flags & OMC_ENTRY_FLAG_DELETED) != 0U) {
@@ -13382,8 +13395,17 @@ omc_transfer_entry_is_raw_color_calibration(const omc_store* store,
     }
     schema_ns = omc_arena_view(&store->arena,
                                entry->key.u.xmp_property.schema_ns);
-    return omc_transfer_view_equal_lit(schema_ns,
-                                       "http://ns.adobe.com/DNG/1.0/");
+    if (omc_transfer_view_equal_lit(schema_ns, "http://ns.adobe.com/dng/1.0/")
+        || omc_transfer_view_equal_lit(schema_ns, "http://ns.adobe.com/DNG/1.0/")) return 1;
+    if (!omc_transfer_view_equal_lit(schema_ns, "http://ns.adobe.com/tiff/1.0/")) return 0;
+    path = omc_arena_view(&store->arena, entry->key.u.xmp_property.property_path);
+    name = omc_transfer_xmp_property_base(path);
+    return omc_transfer_view_equal_lit(name, "ColorResponseUnit")
+        || omc_transfer_view_equal_lit(name, "TransferFunction")
+        || omc_transfer_view_equal_lit(name, "WhitePoint")
+        || omc_transfer_view_equal_lit(name, "PrimaryChromaticities")
+        || omc_transfer_view_equal_lit(name, "ColorMap")
+        || omc_transfer_view_equal_lit(name, "TransferRange");
 }
 
 static int

@@ -1,5 +1,6 @@
 #include "omc/omc_xmp_dump.h"
 #include "omc/omc_exif_name.h"
+#include "../core/omc_datetime_internal.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -58,7 +59,8 @@ typedef enum omc_xmp_dump_value_mode {
     OMC_XMP_DUMP_VALUE_EXIF_FNUMBER = 12,
     OMC_XMP_DUMP_VALUE_EXIF_APEX_FNUMBER = 13,
     OMC_XMP_DUMP_VALUE_EXIF_SRATIONAL_DECIMAL = 14,
-    OMC_XMP_DUMP_VALUE_EXIF_RATIONAL_TEXT = 15
+    OMC_XMP_DUMP_VALUE_EXIF_RATIONAL_TEXT = 15,
+    OMC_XMP_DUMP_VALUE_IPTC_DATE = 16
 } omc_xmp_dump_value_mode;
 
 typedef struct omc_xmp_dump_property {
@@ -2366,6 +2368,9 @@ omc_xmp_dump_extract_iptc_property(const omc_store* store, omc_size index,
     omc_u16 record;
     omc_u16 dataset;
     omc_u32 k;
+    omc_entry_id date_entry;
+    omc_size date_size;
+    char date_text[32];
 
     if (store == (const omc_store*)0 || opts == (const omc_xmp_sidecar_opts*)0
         || out_prop == (omc_xmp_dump_property*)0) {
@@ -2389,6 +2394,15 @@ omc_xmp_dump_extract_iptc_property(const omc_store* store, omc_size index,
     }
 
     switch (dataset) {
+    case 55U:
+    case 62U:
+        if (!omc_iptc_project_datetime(store, dataset, date_text, &date_size,
+                                       &date_entry) || date_entry != index) {
+            return 0;
+        }
+        schema_ns = omc_xmp_dump_view_from_lit(dataset == 55U ? k_xmp_ns_ps : k_xmp_ns_xap);
+        property_name = omc_xmp_dump_view_from_lit(dataset == 55U ? "DateCreated" : "CreateDate");
+        break;
     case 5U:
         schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_dc);
         property_name = omc_xmp_dump_view_from_lit(k_prop_title);
@@ -2466,6 +2480,10 @@ omc_xmp_dump_extract_iptc_property(const omc_store* store, omc_size index,
     out_prop->value = &store->entries[index].value;
     out_prop->arena = &store->arena;
     out_prop->value_mode = OMC_XMP_DUMP_VALUE_BYTES_TEXT;
+    if (dataset == 55U || dataset == 62U) {
+        out_prop->value_mode = OMC_XMP_DUMP_VALUE_IPTC_DATE;
+        out_prop->exif_tag = dataset;
+    }
     out_prop->item_index = 0U;
     out_prop->lang.data = (const omc_u8*)0;
     out_prop->lang.size = 0U;
@@ -4493,6 +4511,15 @@ omc_xmp_dump_write_value(omc_xmp_dump_writer* writer,
     const char* override_text;
     double d;
 
+    if (prop->value_mode == OMC_XMP_DUMP_VALUE_IPTC_DATE) {
+        omc_entry_id date_entry;
+        if (omc_iptc_project_datetime(prop->store, prop->exif_tag, date_buf,
+                                      &date_size, &date_entry)) {
+            omc_xmp_dump_write_xml_escaped(writer, (const omc_u8*)date_buf,
+                                           date_size, 0);
+        }
+        return;
+    }
     if (prop->value_mode == OMC_XMP_DUMP_VALUE_BYTES_TEXT) {
         if (prop->value->kind == OMC_VAL_BYTES || prop->value->kind == OMC_VAL_TEXT
             || prop->value->kind == OMC_VAL_ARRAY) {

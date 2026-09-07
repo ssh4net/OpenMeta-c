@@ -1,3 +1,17 @@
+add_executable(omc_test_exif_carriers test_omc_exif_carriers.c)
+target_link_libraries(omc_test_exif_carriers PRIVATE omc)
+add_test(NAME omc_test_exif_carriers COMMAND omc_test_exif_carriers)
+
+add_executable(omc_test_store_validate test_omc_store_validate.c)
+add_executable(omc_test_translation test_omc_translation.c)
+target_link_libraries(omc_test_translation PRIVATE omc)
+add_test(NAME omc_test_translation COMMAND omc_test_translation)
+add_executable(omc_test_exif_tiff_serialize test_omc_exif_tiff_serialize.c)
+target_link_libraries(omc_test_exif_tiff_serialize PRIVATE omc)
+add_test(NAME omc_test_exif_tiff_serialize COMMAND omc_test_exif_tiff_serialize)
+target_link_libraries(omc_test_store_validate PRIVATE omc)
+add_test(NAME omc_test_store_validate COMMAND omc_test_store_validate)
+
 add_executable(omc_test_store test_omc_store.c)
 target_link_libraries(omc_test_store PRIVATE omc)
 add_test(NAME omc_test_store COMMAND omc_test_store)
@@ -196,7 +210,7 @@ if(OMC_BUILD_PARITY_TESTS)
       "Set OMC_OPENMETA_DIR to an OpenMeta build directory or package directory.")
   endif()
 
-  add_executable(omc_test_parity test_omc_parity.cc)
+  add_executable(omc_test_parity test_omc_parity.cc test_omc_authoring_parity.cc)
   set_target_properties(omc_test_parity PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
@@ -208,4 +222,5 @@ if(OMC_BUILD_PARITY_TESTS)
     target_link_options(omc_test_parity PRIVATE -stdlib=libc++)
   endif()
   add_test(NAME omc_test_parity COMMAND omc_test_parity)
+  add_test(NAME omc_test_authoring_parity COMMAND omc_test_parity --core-authoring)
 endif()

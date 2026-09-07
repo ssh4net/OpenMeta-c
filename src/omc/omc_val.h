@@ -48,11 +48,19 @@ typedef enum omc_text_encoding {
     OMC_TEXT_UTF16BE = 4
 } omc_text_encoding;
 
+/* Array storage order. Scalars always use the typed union. */
+typedef enum omc_byte_order {
+    OMC_BYTE_ORDER_NATIVE = 0,
+    OMC_BYTE_ORDER_LITTLE = 1,
+    OMC_BYTE_ORDER_BIG = 2
+} omc_byte_order;
+
 typedef struct omc_val {
     omc_val_kind kind;
     omc_elem_type elem_type;
     omc_text_encoding text_encoding;
     omc_u32 count;
+    omc_byte_order byte_order;
     union {
         omc_u64 u64;
         omc_s64 i64;
@@ -96,6 +104,27 @@ omc_val_make_bytes(omc_val* value, omc_byte_ref ref);
 
 OMC_API void
 omc_val_make_text(omc_val* value, omc_byte_ref ref, omc_text_encoding enc);
+
+OMC_API void
+omc_val_make_i8(omc_val* value, omc_s8 scalar);
+
+OMC_API void
+omc_val_make_i32(omc_val* value, omc_s32 scalar);
+
+OMC_API void
+omc_val_make_urational(omc_val* value, omc_urational scalar);
+
+OMC_API void
+omc_val_make_srational(omc_val* value, omc_srational scalar);
+
+/* Array bytes are borrowed from the owning arena: count * element width.
+ * The maker does not copy storage. Validation checks the reference. */
+OMC_API void
+omc_val_make_array(omc_val* value, omc_elem_type type, omc_u32 count,
+                    omc_byte_ref ref, omc_byte_order order);
+
+OMC_API omc_u32
+omc_elem_size(omc_elem_type type);
 
 OMC_EXTERN_C_END
 

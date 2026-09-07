@@ -1263,7 +1263,13 @@ omc_irb_decode_known_fields(const omc_u8* payload, omc_size payload_size,
                             omc_store* store, omc_block_id source_block,
                             omc_u32 order, omc_irb_res* result)
 {
+    omc_val value;
+
     switch (resource_id) {
+        case 0x0404U:
+            omc_val_make_u32(&value, (omc_u32)payload_size);
+            return omc_irb_emit_field(store, source_block, order, resource_id,
+                                      "IPTCDataBytes", 13U, &value, result);
         case 0x03EDU:
             return omc_irb_decode_resolution_info(payload, payload_size, store,
                                                   source_block, order, result);

@@ -31,6 +31,8 @@ extern "C" {
 #include <utility>
 #include <vector>
 
+bool run_omc_authoring_parity();
+
 namespace {
 
 using ByteVec = std::vector<unsigned char>;
@@ -11463,26 +11465,26 @@ main(int argc, char** argv)
 {
     bool ok;
 
+    if (argc == 2 && std::strcmp(argv[1], "--core-authoring") == 0) {
+        return run_omc_authoring_parity() ? 0 : 1;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--bench") == 0) {
         return run_benchmarks();
     }
-    if (argc != 1) {
-        std::fprintf(stderr, "usage: %s [--bench]\n", argv[0]);
+    if (argc != 1 && !(argc == 2 && std::strcmp(argv[1], "--all") == 0)) {
+        std::fprintf(stderr, "usage: %s [--bench|--core-authoring|--all]\n", argv[0]);
         return 2;
     }
 
-    ok = true;
+    ok = run_omc_authoring_parity();
     ok = run_case("jpeg_comment", build_jpeg_comment_fixture(), false) && ok;
     ok = run_case("jpeg_all", build_jpeg_all_fixture(), false) && ok;
     ok = run_case("jpeg_irb_fields", build_jpeg_irb_fields_fixture(), false)
          && ok;
     ok = run_case("png_text", build_png_text_fixture(), false) && ok;
     ok = run_bmff_package_route_mix_parity_case() && ok;
-    if (false) {
-        /*
-         * Remaining transfer/persist parity cases are enabled only after a
-         * direct C lock exists and the shared C/C++ harness is green.
-         */
+    if (argc == 2 && std::strcmp(argv[1], "--all") == 0) {
+        /* Explicit complete lane: retains mismatches until ported. */
         {
             TransferExecuteCaseOptions transfer_opts {};
 
@@ -11603,7 +11605,7 @@ main(int argc, char** argv)
                      transfer_opts)
                  && ok;
         }
-        if (false) {
+        {
             TransferExecuteCaseOptions transfer_opts {};
 
             transfer_opts.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;

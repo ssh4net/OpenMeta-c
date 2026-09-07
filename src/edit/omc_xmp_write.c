@@ -1,3 +1,4 @@
+#include "../base/omc_crc32.h"
 #include "omc/omc_xmp_write.h"
 
 #include <string.h>
@@ -658,28 +659,7 @@ omc_xmp_write_append_jpeg_xmp_segment(omc_arena* out, const omc_u8* payload,
     return omc_xmp_write_append(out, payload, payload_size);
 }
 
-static omc_u32
-omc_xmp_write_crc32_update(omc_u32 crc, const omc_u8* bytes, omc_size size)
-{
-    omc_size i;
 
-    for (i = 0U; i < size; ++i) {
-        omc_u32 x;
-        int bit;
-
-        crc ^= (omc_u32)bytes[i];
-        x = crc;
-        for (bit = 0; bit < 8; ++bit) {
-            if ((x & 1U) != 0U) {
-                x = (x >> 1) ^ 0xEDB88320U;
-            } else {
-                x >>= 1;
-            }
-        }
-        crc = x;
-    }
-    return crc;
-}
 
 static omc_status
 omc_xmp_write_append_png_xmp_chunk(omc_arena* out, const omc_u8* payload,
@@ -706,8 +686,8 @@ omc_xmp_write_append_png_xmp_chunk(omc_arena* out, const omc_u8* payload,
     }
 
     crc = 0xFFFFFFFFU;
-    crc = omc_xmp_write_crc32_update(crc, header + 4U, 4U);
-    crc = omc_xmp_write_crc32_update(crc, payload, payload_size);
+    crc = omc_crc32_update(crc, header + 4U, 4U);
+    crc = omc_crc32_update(crc, payload, payload_size);
     crc = ~crc;
 
     omc_xmp_write_store_u32be(crc_bytes, crc);

@@ -1,4 +1,5 @@
 #include "omc/omc_edit.h"
+#include "omc_value_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -138,6 +139,9 @@ omc_clone_value(const omc_val* value, const omc_arena* src, omc_arena* dst,
     }
 
     *out_value = *value;
+    if (!omc_value_shape_valid(value, src)) {
+        return OMC_STATUS_STATE;
+    }
     if (value->kind == OMC_VAL_ARRAY || value->kind == OMC_VAL_BYTES
         || value->kind == OMC_VAL_TEXT) {
         return omc_clone_ref(src, value->u.ref, dst, &out_value->u.ref);
@@ -159,7 +163,7 @@ omc_clone_origin(const omc_origin* origin, const omc_arena* src, omc_arena* dst,
                          &out_origin->wire_type_name);
 }
 
-static omc_status
+omc_status
 omc_clone_entry(const omc_entry* entry, const omc_arena* src, omc_arena* dst,
                 omc_entry* out_entry)
 {
@@ -391,8 +395,8 @@ omc_edit_tombstone(omc_edit* edit, omc_entry_id target)
     return OMC_STATUS_OK;
 }
 
-omc_status
-omc_edit_commit(const omc_store* base, const omc_edit* edits,
+static omc_status
+omc_edit_build(const omc_store* base, const omc_edit* edits,
                 omc_size edit_count, omc_store* out)
 {
     omc_status status;
@@ -417,11 +421,19 @@ omc_edit_commit(const omc_store* base, const omc_edit* edits,
     add_count = 0U;
     arena_hint = base->arena.size;
     for (i = 0U; i < edit_count; ++i) {
+        if (edits[i].op_count > edits[i].op_capacity
+            || (edits[i].op_count != 0U && edits[i].ops == NULL)) {
+            return OMC_STATUS_STATE;
+        }
         if (arena_hint > ((omc_size)(~(omc_size)0) - edits[i].arena.size)) {
             return OMC_STATUS_OVERFLOW;
         }
         arena_hint += edits[i].arena.size;
         for (j = 0U; j < edits[i].op_count; ++j) {
+            if (edits[i].ops[j].kind < OMC_EDIT_OP_ADD_ENTRY
+                || edits[i].ops[j].kind > OMC_EDIT_OP_TOMBSTONE) {
+                return OMC_STATUS_INVALID_ARGUMENT;
+            }
             if (edits[i].ops[j].kind == OMC_EDIT_OP_ADD_ENTRY) {
                 if (add_count == (omc_size)(~(omc_size)0)) {
                     return OMC_STATUS_OVERFLOW;
@@ -430,8 +442,6 @@ omc_edit_commit(const omc_store* base, const omc_edit* edits,
             }
         }
     }
-
-    omc_store_reset(out);
 
     status = omc_arena_reserve(&out->arena, arena_hint);
     if (status != OMC_STATUS_OK) {
@@ -497,9 +507,34 @@ omc_edit_commit(const omc_store* base, const omc_edit* edits,
 }
 
 omc_status
+omc_edit_commit(const omc_store* base, const omc_edit* edits,
+                omc_size edit_count, omc_store* out)
+{
+    omc_store candidate;
+    omc_status status;
+
+    if (base == NULL || out == NULL || base == out) {
+        return OMC_STATUS_INVALID_ARGUMENT;
+    }
+    if (!omc_store_shape_valid(base) || !omc_store_shape_valid(out)) {
+        return OMC_STATUS_STATE;
+    }
+    omc_store_init(&candidate);
+    status = omc_edit_build(base, edits, edit_count, &candidate);
+    if (status == OMC_STATUS_OK) {
+        omc_store_fini(out);
+        *out = candidate;
+    } else {
+        omc_store_fini(&candidate);
+    }
+    return status;
+}
+
+omc_status
 omc_store_compact(const omc_store* base, omc_store* out)
 {
     omc_status status;
+    omc_store candidate;
 
     if (base == NULL || out == NULL) {
         return OMC_STATUS_INVALID_ARGUMENT;
@@ -508,17 +543,22 @@ omc_store_compact(const omc_store* base, omc_store* out)
         return OMC_STATUS_INVALID_ARGUMENT;
     }
 
-    omc_store_reset(out);
-
-    status = omc_arena_reserve(&out->arena, base->arena.size);
-    if (status != OMC_STATUS_OK) {
-        return status;
+    omc_store_init(&candidate);
+    if (!omc_store_shape_valid(base) || !omc_store_shape_valid(out)) {
+        return OMC_STATUS_STATE;
     }
-
-    status = omc_copy_blocks(base, out);
-    if (status != OMC_STATUS_OK) {
-        return status;
+    status = omc_arena_reserve(&candidate.arena, base->arena.size);
+    if (status == OMC_STATUS_OK) {
+        status = omc_copy_blocks(base, &candidate);
     }
-
-    return omc_copy_live_entries(base, out, 1);
+    if (status == OMC_STATUS_OK) {
+        status = omc_copy_live_entries(base, &candidate, 1);
+    }
+    if (status == OMC_STATUS_OK) {
+        omc_store_fini(out);
+        *out = candidate;
+    } else {
+        omc_store_fini(&candidate);
+    }
+    return status;
 }

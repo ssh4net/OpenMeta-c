@@ -115,28 +115,25 @@ fill_diagnostic_store(omc_store* store)
 static void
 check_diagnostic_names(void)
 {
-    OMC_TEST_CHECK_MEM_EQ(omc_transfer_diagnostic_kind_name(
+    OMC_TEST_CHECK(strcmp(omc_transfer_diagnostic_kind_name(
                               OMC_TRANSFER_DIAGNOSTIC_IMAGE_PROPERTIES),
-                          16U, "image_properties", 16U);
-    OMC_TEST_CHECK_MEM_EQ(
-        omc_transfer_diagnostic_action_name(
+                          "image_properties") == 0);
+    OMC_TEST_CHECK(strcmp(omc_transfer_diagnostic_action_name(
             OMC_TRANSFER_DIAGNOSTIC_REQUIRES_TARGET_IMAGE_SPEC),
-        26U, "requires_target_image_spec", 26U);
-    OMC_TEST_CHECK_MEM_EQ(omc_transfer_diagnostic_reason_name(
+                          "requires_target_image_spec") == 0);
+    OMC_TEST_CHECK(strcmp(omc_transfer_diagnostic_reason_name(
                               OMC_TRANSFER_DIAGNOSTIC_REASON_UNKNOWN),
-                          7U, "unknown", 7U);
-    OMC_TEST_CHECK_MEM_EQ(omc_transfer_diagnostic_reason_name(
+                          "unknown") == 0);
+    OMC_TEST_CHECK(strcmp(omc_transfer_diagnostic_reason_name(
                               OMC_TRANSFER_DIAGNOSTIC_REASON_RENDERED_UNSAFE),
-                          15U, "rendered_unsafe", 15U);
-    OMC_TEST_CHECK_MEM_EQ(omc_transfer_diagnostic_severity_name(
+                          "rendered_unsafe") == 0);
+    OMC_TEST_CHECK(strcmp(omc_transfer_diagnostic_severity_name(
                               OMC_TRANSFER_DIAGNOSTIC_WARNING),
-                          7U, "warning", 7U);
-    OMC_TEST_CHECK_MEM_EQ(omc_transfer_diagnostic_message(
+                          "warning") == 0);
+    OMC_TEST_CHECK(strcmp(omc_transfer_diagnostic_message(
                               (const omc_transfer_diagnostic*)0),
-                          65U,
                           "metadata has no safe automatic transfer action for "
-                          "this mode",
-                          65U);
+                          "this mode") == 0);
 }
 
 static void
@@ -167,11 +164,9 @@ check_compatible_file_diagnostics(void)
     OMC_TEST_CHECK_U64_EQ(diagnostic->action,
                           OMC_TRANSFER_DIAGNOSTIC_REQUIRES_TARGET_IMAGE_SPEC);
     OMC_TEST_CHECK(diagnostic->requires_target_image_spec);
-    OMC_TEST_CHECK_MEM_EQ(
-        omc_transfer_diagnostic_message(diagnostic), 109U,
-        "source value describes target-owned image properties; provide target "
-        "image specs or write a target-correct value",
-        109U);
+    OMC_TEST_CHECK(strcmp(omc_transfer_diagnostic_message(diagnostic),
+                          "source value describes target-owned image properties; provide target "
+        "image specs or write a target-correct value") == 0);
 
     diagnostic = find_diagnostic(diagnostics, res.written,
                                  OMC_TRANSFER_DIAGNOSTIC_RAW_COLOR_CALIBRATION);
@@ -179,9 +174,8 @@ check_compatible_file_diagnostics(void)
     OMC_TEST_CHECK_U64_EQ(diagnostic->action, OMC_TRANSFER_DIAGNOSTIC_KEEP);
     OMC_TEST_CHECK(diagnostic->compatible_file_safe);
     OMC_TEST_CHECK(!diagnostic->rendered_image_safe);
-    OMC_TEST_CHECK_MEM_EQ(omc_transfer_diagnostic_message(diagnostic), 52U,
-                          "metadata is safe to keep for this transfer mode",
-                          52U);
+    OMC_TEST_CHECK(strcmp(omc_transfer_diagnostic_message(diagnostic),
+                          "metadata is safe to keep for this transfer mode") == 0);
 
     omc_store_fini(&store);
 }
@@ -214,11 +208,9 @@ check_rendered_image_diagnostics(void)
     OMC_TEST_CHECK_U64_EQ(diagnostic->action, OMC_TRANSFER_DIAGNOSTIC_DROP);
     OMC_TEST_CHECK_U64_EQ(diagnostic->severity,
                           OMC_TRANSFER_DIAGNOSTIC_WARNING);
-    OMC_TEST_CHECK_MEM_EQ(
-        omc_transfer_diagnostic_message(diagnostic), 91U,
-        "source C2PA metadata is bound to source bytes and will be dropped for "
-        "rendered-image transfer",
-        91U);
+    OMC_TEST_CHECK(strcmp(omc_transfer_diagnostic_message(diagnostic),
+                          "source C2PA metadata is bound to source bytes and will be dropped for "
+        "rendered-image transfer") == 0);
 
     omc_store_fini(&store);
 }
@@ -321,9 +313,32 @@ check_diagnostic_capacity(void)
     omc_store_fini(&store);
 }
 
+static void
+test_rendered_processing_fields(void)
+{
+    omc_store store;
+    omc_transfer_safety_audit audit;
+    omc_store_init(&store);
+    add_exif_u16(&store, "ifd0", 0xC7A8U, 1U);
+    add_exif_u16(&store, "ifd0", 0xCD40U, 1U);
+    add_exif_u16(&store, "ifd0", 0x012DU, 1U);
+    add_xmp_text(&store, "http://ns.adobe.com/dng/1.0/", "ProfileName", "source");
+    add_xmp_text(&store, "http://ns.adobe.com/tiff/1.0/", "WhitePoint", "0.3");
+    /* Capture facts stay usable after rendering. */
+    add_exif_u16(&store, "ifd0", 0xC630U, 1U);
+    add_exif_u16(&store, "exififd", 0x920AU, 50U);
+    audit = omc_transfer_safety_audit_from_store(&store, OMC_TRANSFER_SAFETY_RENDERED_IMAGE);
+    assert(audit.source_raw_color_calibration == 5U);
+    assert(audit.filtered_raw_color_calibration == 5U);
+    audit = omc_transfer_safety_audit_from_store(&store, OMC_TRANSFER_SAFETY_COMPATIBLE_FILE);
+    assert(audit.filtered_raw_color_calibration == 0U);
+    omc_store_fini(&store);
+}
+
 int
 main(void)
 {
+    test_rendered_processing_fields();
     check_diagnostic_names();
     check_compatible_file_diagnostics();
     check_rendered_image_diagnostics();

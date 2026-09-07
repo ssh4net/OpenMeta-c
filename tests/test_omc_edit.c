@@ -172,11 +172,54 @@ test_compact_removes_deleted_entries(void)
     omc_store_fini(&base);
 }
 
+static void
+test_failure_preserves_output(void)
+{
+    omc_store base;
+    omc_store out;
+    omc_store before;
+    omc_edit edit;
+    omc_entry e;
+    omc_byte_ref saved;
+
+    omc_store_init(&base);
+    omc_store_init(&out);
+    omc_edit_init(&edit);
+    memset(&e, 0, sizeof(e));
+    omc_key_make_comment(&e.key);
+    saved = append_bytes(&out.arena, "previous output");
+    omc_val_make_text(&e.value, saved, OMC_TEXT_UTF8);
+    assert(omc_store_add_entry(&out, &e, NULL) == OMC_STATUS_OK);
+    before = out;
+    omc_val_make_u32(&e.value, 42U);
+    assert(omc_edit_add_entry(&edit, &e) == OMC_STATUS_OK);
+    e.value.kind = OMC_VAL_TEXT;
+    e.value.count = 8U;
+    e.value.u.ref.offset = 999U;
+    e.value.u.ref.size = 8U;
+    assert(omc_edit_add_entry(&edit, &e) == OMC_STATUS_OK);
+    assert(omc_edit_commit(&base, &edit, 1U, &out) == OMC_STATUS_STATE);
+    assert(memcmp(&before, &out, sizeof(out)) == 0);
+    expect_text_ref(&out.arena, saved, "previous output");
+    edit.ops[1].kind = (omc_edit_op_kind)99;
+    assert(omc_edit_commit(&base, &edit, 1U, &out) == OMC_STATUS_INVALID_ARGUMENT);
+    assert(memcmp(&before, &out, sizeof(out)) == 0);
+    assert(omc_edit_commit(&out, NULL, 0U, &out) == OMC_STATUS_INVALID_ARGUMENT);
+    assert(memcmp(&before, &out, sizeof(out)) == 0);
+    assert(omc_store_add_entry(&base, &e, NULL) == OMC_STATUS_OK);
+    assert(omc_store_compact(&base, &out) == OMC_STATUS_STATE);
+    assert(memcmp(&before, &out, sizeof(out)) == 0);
+    omc_store_fini(&base);
+    omc_store_fini(&out);
+    omc_edit_fini(&edit);
+}
+
 int
 main(void)
 {
     test_commit_appends_new_entry();
     test_commit_updates_and_tombstones();
     test_compact_removes_deleted_entries();
+    test_failure_preserves_output();
     return 0;
 }

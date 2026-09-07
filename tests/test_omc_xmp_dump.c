@@ -4272,10 +4272,50 @@ test_sidecar_req_portable_escapes_unsafe_text(void)
     omc_store_fini(&store);
 }
 
+static void
+test_iptc_paired_dates(void)
+{
+    omc_store s;
+    omc_entry e;
+    omc_xmp_sidecar_opts opts;
+    omc_xmp_dump_res res;
+    omc_u8 bytes[2048];
+    const char* values[6];
+    omc_u16 tags[6];
+    omc_size i;
+
+    values[0] = "20230229"; tags[0] = 55U;
+    values[1] = "20240229"; tags[1] = 55U;
+    values[2] = "240000"; tags[2] = 60U;
+    values[3] = "235960-0000"; tags[3] = 60U;
+    values[4] = "20260907"; tags[4] = 62U;
+    values[5] = "broken"; tags[5] = 63U;
+    omc_store_init(&s);
+    for (i = 0U; i < 6U; ++i) {
+        memset(&e, 0, sizeof(e));
+        omc_key_make_iptc_dataset(&e.key, 2U, tags[i]);
+        omc_val_make_bytes(&e.value, append_bytes(&s.arena, values[i]));
+        assert(omc_store_add_entry(&s, &e, NULL) == OMC_STATUS_OK);
+    }
+    omc_xmp_sidecar_opts_init(&opts);
+    opts.include_iptc = 1;
+    assert(omc_xmp_dump_sidecar(&s, bytes, sizeof(bytes), &opts, &res) == OMC_STATUS_OK);
+    assert(res.status == OMC_XMP_DUMP_OK);
+    assert(contains_text(bytes, (omc_size)res.written,
+                        "<photoshop:DateCreated>2024-02-29T23:59:60-00:00</photoshop:DateCreated>"));
+    assert(contains_text(bytes, (omc_size)res.written,
+                        "<xmp:CreateDate>2026-09-07</xmp:CreateDate>"));
+    s.entries[1].flags = OMC_ENTRY_FLAG_DELETED;
+    assert(omc_xmp_dump_sidecar(&s, bytes, sizeof(bytes), &opts, &res) == OMC_STATUS_OK);
+    assert(!contains_text(bytes, (omc_size)res.written, "<photoshop:DateCreated>"));
+    omc_store_fini(&s);
+}
+
 int
 main(void)
 {
     test_lossless_truncation_and_success();
+    test_iptc_paired_dates();
     test_lossless_emits_exr_type_name();
     test_sidecar_cfg_lossless_auto_grows_output();
     test_sidecar_cfg_portable_uses_format_switch();

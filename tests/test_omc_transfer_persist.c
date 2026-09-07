@@ -3879,9 +3879,11 @@ test_transfer_persist_dng_embedded_only_source_iptc(void)
 static void
 test_transfer_persist_png_embedded_only_source_icc(void)
 {
+#if OMC_HAVE_ZLIB
     exercise_transfer_persist_source_icc_case(
         make_test_png_with_old_xmp_and_text, ".png", OMC_SCAN_FMT_PNG,
         OMC_TRANSFER_PERSIST_PRESERVE_PNG_TEXT);
+#endif
 }
 
 static void
