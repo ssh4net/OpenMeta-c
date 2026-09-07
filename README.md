@@ -2,22 +2,22 @@
 
 OpenMeta-c is a native C port of OpenMeta.
 
-It keeps the same general metadata model and safety posture as the C++ library,
-but the public API is C-native: flat, explicit, caller-buffer-oriented, and
-designed around bounded read, edit, and writeback steps instead of C++ object
-lifetimes.
+It follows the C++ library's general metadata model with a C-native API:
+flat, explicit, caller-buffer-oriented, and designed around bounded read,
+edit, and writeback steps. The porting plan tracks differences in behavior
+and safety coverage.
 
 ## Status
 
-The C port is already useful for real metadata reads and bounded XMP writeback,
-but it is not full C++ parity yet.
+The C port provides metadata reads, bounded edits, and transfer/writeback.
+The goal is parity with the portable C++ metadata core, with the option of
+using C beneath the C++ library later. Rich C++ query, search, adapter, and
+binding APIs are outside that core milestone.
 
-Current planning estimate:
-
-| Milestone | Status |
-| --- | --- |
-| Read-only core | About `80-85%` |
-| Overall public surface | About `60-65%` |
+The [porting plan](porting_plan.md) records the source-reviewed baseline as of
+2026-09-07 against C++ `0.4.127`, the scoped parity matrix, and acceptance
+gates. Earlier percentage estimates are superseded by that matrix. This
+documentation update does not establish a fresh build or corpus result.
 
 In practice:
 - Read-path coverage is broad and regression-tested.
@@ -68,10 +68,10 @@ In practice:
   handoffs.
 - The `JPEG` lane now also has direct bounded `APP13` IPTC-IIM carriage via
   Photoshop IRB `0x0404`, while preserving unrelated IRB resources.
-- Prepared transfer / persist APIs exist for bounded XMP-centric targets, but
-  they are still narrower and less stable than the C++ transfer layer.
-- Real C2PA crypto verification and the C++ host-adapter surfaces are still
-  missing.
+- Prepared transfer / persist APIs support bounded EXIF/XMP/ICC/IPTC lanes.
+  Their behavior and coverage remain narrower than the current C++ core.
+- Real C2PA crypto verification and C++ host-adapter surfaces are outside the
+  current C-core milestone.
 - See [porting_plan.md](porting_plan.md) for the current public parity matrix
   and roadmap.
 
@@ -161,6 +161,8 @@ Direct BMFF XMP/EXIF writeback also now emits bounded `iref/cdsc` metadata
 item references when the target exposes a primary item through `pitm`, with
 direct C coverage for both replacing existing metadata items and extending a
 primary-only `meta` item graph through `iinf`, `iloc`, and `idat`.
+This direct writeback path is separate from package materialization, whose
+item routes currently append fresh item IDs.
 `JPEG` now has a real direct bounded `APP13` IPTC transfer path that preserves
 unrelated Photoshop IRB resources, and the TIFF-family now has direct bounded
 tag `33723` IPTC carriage as well. For `JXL`, the first host-side bridge is now
@@ -181,9 +183,12 @@ rewrites, PNG/WebP carrier chunks, and top-level box chunks for bounded
 JP2/JXL/HEIF/AVIF/CR3 edits, with direct arena and bounded-buffer helpers to
 materialize either a validated package batch or persisted `OMTPKG01` bytes back
 into final output bytes. The C wire layout and replay view now match the public
-C++ package-batch family, but the C builder still does not expose the full C++
-edit-plan package builder or the newer C++ foreign BMFF top-level `meta`
-item-graph merge.
+C++ package-batch family. An explicit target-aware BMFF package materializer
+supports Exif/XMP/JUMBF/C2PA item insertion and bounded ICC property rewrite,
+including synthesized `idat`, inserted 32-bit item IDs, and bounded retained
+method-2 references. This is narrower than the current C++ managed-item
+replacement/strip, graph-reference remapping, compact `iloc` normalization,
+self-contained data-reference handling, and multiple-`ipma` consolidation.
 
 ## Layout
 
@@ -223,7 +228,8 @@ Useful options:
 The core code is written in a conservative C89/C90 style, with one explicit
 portability shim for 64-bit integers because offsets and sizes require it.
 
-The current validation baseline is:
+Earlier validation covered the following configurations. These are historical
+coverage claims; refresh the applicable builds before current acceptance:
 - Clang on 64-bit Linux
 - GCC in strict C90 mode
 - Clang `-m32`
@@ -299,17 +305,20 @@ For persisted transfer artifacts:
 
 ## Current Gaps
 
-The largest remaining gaps relative to the C++ library are:
+The main gaps in the portable-core scope are:
 
-- transfer stability and parity coverage across the newer bounded targets
-- C++ foreign BMFF top-level `meta` merge parity for serialized package-batch
-  prepared item routes; C currently has bounded direct BMFF XMP/EXIF/ICC
-  writeback, direct `iref/cdsc` references for primary-item BMFF targets,
-  direct Exif/XMP item-graph replacement/extension coverage, and
-  executed-output package chunking. Full package-batch foreign item-graph merge
-  remains open, with JUMBF/C2PA staged behind Exif/XMP.
-- `EXR` transfer / host-export parity
-- full validation parity beyond the current decode-summary + bounded `CCM`
-  helper surface
-- real C2PA verification backends
-- broader parity work for newer upstream features
+- detached typed validation and output-preserving authoring transactions
+- a general typed, target-neutral canonical TIFF/EXIF serializer beyond the
+  current fixed-field internal writer
+- explicit reverse XMP-to-EXIF/IPTC translation for the five existing bounded
+  C++ mapping groups, plus paired IPTC date/time projection into XMP
+- newer bounded BMFF replacement, graph/property remapping and normalization
+- broader transfer-safety facts, lifecycle and payload/package parity tests
+- positional input with explicit read budgets and staged reader conversion
+- selected current C++ read and naming deltas, verified with shared fixtures
+
+The planned order is a fresh baseline, shared typed write foundations, native
+translation, BMFF deltas, and then positional readers. A later isolated C++
+consumer can evaluate reuse of the C core. Rich host features, full C2PA trust,
+and full EXR file rewriting do not block these milestones. See
+[porting_plan.md](porting_plan.md) for dependencies and exit criteria.
