@@ -14676,7 +14676,11 @@ omc_exif_decode_source_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
     before = ctx->store->entry_count;
     if (!omc_exif_decode_makernote(&local, raw, raw_size)) {
         omc_exif_merge_makernote_child(ctx, &local);
-        return 0;
+        /* Some local postpasses report an absent optional subtable through
+         * their return value after successfully emitting the main table. */
+        if (vendor == OMC_EXIF_MN_UNKNOWN && ctx->store->entry_count == before)
+            ctx->source_result->nested_payloads_skipped++;
+        return local.res.status == OMC_EXIF_OK;
     }
     omc_exif_merge_makernote_child(ctx, &local);
     if (vendor == OMC_EXIF_MN_RICOH) {

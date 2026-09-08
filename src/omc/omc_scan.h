@@ -3,6 +3,7 @@
 
 #include "omc/omc_base.h"
 #include "omc/omc_types.h"
+#include "omc/omc_source.h"
 
 OMC_EXTERN_C_BEGIN
 
@@ -181,6 +182,16 @@ omc_scan_bmff(const omc_u8* bytes, omc_size size,
 OMC_API omc_scan_res
 omc_scan_meas_bmff(const omc_u8* bytes, omc_size size);
 
+/* Shared memory/callback scanners. Offsets are relative to range. No payload
+ * bodies are retained. Fixed bounded structural tables are internal; state
+ * reports exact I/O failures and cumulative budgets. UNKNOWN selects format. */
+OMC_API omc_scan_res
+omc_scan_source(const omc_source_range* range, omc_scan_fmt format,
+                 omc_blk_ref* blocks, omc_u32 capacity,
+                 omc_source_state* state, const omc_source_limits* limits);
+OMC_API omc_scan_res
+omc_scan_meas_source(const omc_source_range* range, omc_scan_fmt format,
+                      omc_source_state* state, const omc_source_limits* limits);
 OMC_EXTERN_C_END
 
 #endif

@@ -262,6 +262,8 @@ sparse_tiff(host *h, int big, int little, unsigned magic)
     range.size = h->gap + h->available;
     w.w.metadata_capacity = 12U;
     omc_source_state_init(&state);
+    assert(omc_scan_source(&range, OMC_SCAN_FMT_UNKNOWN, w.blocks, 32U, &state, NULL).status == OMC_SCAN_OK);
+    omc_source_state_init(&state);
     r = omc_read_source(&range, &actual, &w.w, &state, &opts);
     assert(r.status == OMC_READ_SOURCE_OK && r.decoded.exif.status == OMC_EXIF_OK);
     assert(r.value_scratch_needed == 0U && r.scratch_used == 12U);

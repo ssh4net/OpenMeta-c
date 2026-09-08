@@ -10,4 +10,8 @@ omc_read_res omc_read_tiff_source(const omc_source_range* range,
 omc_scan_res omc_scan_tiff_header(const omc_u8* bytes, omc_size available,
                                   omc_u64 file_size, omc_blk_ref* blocks,
                                   omc_u32 capacity);
+omc_read_res omc_read_container_source(const omc_source_range* range, omc_scan_fmt format,
+                           omc_store* store, omc_read_source_workspace* workspace,
+                           omc_source_state* state, const omc_read_source_opts* opts,
+                           omc_read_source_res* result);
 #endif

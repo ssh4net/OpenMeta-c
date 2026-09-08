@@ -145,13 +145,13 @@ run_fixture(int webp, omc_u32 gap)
         assert(memcmp(&block, &w.blocks[i], sizeof(block)) == 0);
     }
     assert(read.scratch_used < sizeof(w.metadata));
-    assert(state.bytes_requested < f.size + 64U && state.requests_issued < 32U);
+    assert(state.bytes_requested < 2U * f.size && state.requests_issued < 256U);
     printf("%s: gap=%lu calls=%lu bytes=%lu scratch=%lu\n",
            webp ? "WebP" : "PNG", (unsigned long)gap,
            (unsigned long)state.requests_issued, (unsigned long)state.bytes_requested,
            (unsigned long)read.scratch_used);
 
-    /* Exact aggregate capacity is sufficient. */
+    /* One-value/stream scratch is sufficient, including zero for WebP. */
     w.w.metadata_capacity = read.scratch_used;
     omc_store_fini(&actual);
     omc_store_init(&actual);
@@ -160,7 +160,7 @@ run_fixture(int webp, omc_u32 gap)
     assert(read.status == OMC_READ_SOURCE_OK);
     equal_entries(&expected, &actual);
 
-    /* Collection failures must retain a previously populated store. */
+    /* I/O and payload-capacity failures retain a populated store. */
     entry_count = actual.entry_count;
     block_count = actual.block_count;
     arena_size = actual.arena.size;
@@ -169,7 +169,8 @@ run_fixture(int webp, omc_u32 gap)
     for (mode = 0; mode < 7; ++mode) {
         omc_read_source_opts_init(&opts);
         omc_source_state_init(&state);
-        w.w.metadata_capacity = mode == 0 ? read.scratch_used - 1U : sizeof(w.metadata);
+        w.w.metadata_capacity = sizeof(w.metadata);
+        w.w.payload_capacity = mode == 0 ? 1U : sizeof(w.payload);
         f.fail_mode = mode >= 1 && mode <= 3 ? mode : 0;
         f.failure_at = f.base + f.image_begin + 64U + f.gap;
         if (mode == 4)
@@ -222,9 +223,9 @@ header_only(int webp)
                                 mode == 1 ? header_size - 1U : 0U;
         omc_source_state_init(&state);
         read = omc_read_source(&range, &store, &w.w, &state, NULL);
-        assert(read.status == (mode == 0 ? OMC_READ_SOURCE_OK : OMC_READ_SOURCE_LIMIT));
+        assert(read.status == OMC_READ_SOURCE_OK);
         assert(store.entry_count == 0U && store.block_count == 0U);
-        if (mode == 0) assert(read.scratch_used == header_size);
+        assert(read.scratch_used == 0U);
     }
     omc_store_fini(&store);
 }

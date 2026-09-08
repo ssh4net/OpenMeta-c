@@ -48,6 +48,28 @@ omc_pay_meas(const omc_u8* file_bytes, omc_size file_size,
              omc_u32 seed_index, omc_u32* scratch_indices,
              omc_u32 scratch_cap, const omc_pay_opts* opts);
 
+typedef struct omc_pay_source_workspace {
+    omc_u8* stream;
+    omc_size stream_capacity;
+} omc_pay_source_workspace;
+/* Range-relative descriptors, shared assembly/decompression rules. Callback
+ * decompression needs a nonempty caller stream buffer; input feeds are bounded
+ * by its capacity. Uncompressed extraction only reads the accepted output
+ * prefix. Measurement reads framing/compressed data only. Buffers must not
+ * overlap the source, descriptor/index arrays or each other. I/O is sticky. */
+OMC_API omc_pay_res
+omc_pay_ext_source(const omc_source_range* range, const omc_blk_ref* blocks,
+                    omc_u32 count, omc_u32 seed, omc_u8* out, omc_size capacity,
+                    omc_u32* indices, omc_u32 index_capacity,
+                    const omc_pay_source_workspace* workspace,
+                    omc_source_state* state, const omc_source_limits* limits,
+                    const omc_pay_opts* opts);
+OMC_API omc_pay_res
+omc_pay_meas_source(const omc_source_range* range, const omc_blk_ref* blocks,
+                     omc_u32 count, omc_u32 seed, omc_u32* indices,
+                     omc_u32 index_capacity, const omc_pay_source_workspace* workspace,
+                     omc_source_state* state, const omc_source_limits* limits,
+                     const omc_pay_opts* opts);
 OMC_EXTERN_C_END
 
 #endif

@@ -27,82 +27,76 @@ lifetime. Argument/range checks and preparatory view failures identify the
 range-relative request. Exact-read budget failures and dispatched I/O failures
 identify the absolute backing-source offset.
 
-## Initial reader conversion
+## Reader and payload APIs at 0.6.0
 
-`omc_read_source()` takes an `omc_read_source_workspace` containing metadata,
-payload, block, IFD, and multipart-index buffers. It performs no allocation for
-source collection. The existing store and decoders retain their normal bounded
-allocation behavior. Source, workspace, and store storage must not overlap.
+`omc_scan_source()` shares the memory scanners' framing, item and extent rules.
+Pass `OMC_SCAN_FMT_UNKNOWN` for format selection or select a supported family.
+`omc_scan_meas_source()` counts descriptors without storing them. Structural reads
+use fixed local buffers and bounded existing BMFF tables. They never prefetch
+unknown image bodies. Limits remain cumulative across all reads; byte-wise
+string parsing can consume more requests than metadata collection did.
 
-Memory sources use the existing contiguous reader for all its formats.
-Callback sources currently support:
+`omc_pay_ext_source()` assembles range-relative descriptors into caller output.
+Uncompressed extraction reads only the accepted prefix. Measurement needs no
+uncompressed payload bytes. GIF framing and compressed streams require reads.
+A nonempty `omc_pay_source_workspace.stream` supplies bounded zlib/Brotli feeds;
+the output limit bounds expansion. Backend allocations retain their existing
+behavior. JPEG ICC/JUMBF sequence parts, extended-XMP GUID/offset parts and
+BMFF file extents share the memory extraction rules. Extended-XMP parts must
+cover the declared logical range without gaps or overlap.
 
-- JPEG: collect APP/COM segments, skip other segment payloads, stop at SOS/EOI,
-  and reuse the existing multipart and metadata decoders. MakerNote enrichment
-  inside complete EXIF APP payloads uses the existing decoder when requested.
-- TIFF, BigTIFF, and DNG with TIFF magic 42/43: read directory tables, pointer
-  arrays, and referenced tag values. Strip, tile, and preview-offset tags remain
-  metadata values; their image addresses are not followed. Embedded metadata
-  stored as tag values remains available to existing decoders.
-- PNG (0.4.0): collect `eXIf`, `iCCP`, text and `caBX` metadata chunks, skip
-  image bodies and stop at `IEND`. Chunk lengths include CRC storage, but the
-  metadata scanner does not validate CRC values or require `IEND` before EOF.
-- WebP (0.4.0): collect `EXIF`, `XMP `, `ICCP` and `C2PA` chunks within the
-  declared RIFF extent, bounded by source size. Honor odd-length padding and
-  skip image bodies. PNG/WebP reuse the contiguous family decoders, including
-  compressed payload handling and split JUMBF assembly.
+`omc_read_source()` supplies the high-level path. Its workspace contains metadata,
+payload, descriptor, IFD and multipart-index buffers. Callback decoding uses a
+candidate store to preserve the original store on I/O, capacity or allocation
+failure. Store cloning and metadata decoders can allocate; scanner/payload access
+does not allocate a source snapshot. Source, workspace and stores must be disjoint.
+Memory sources retain the existing contiguous reader and its partial results.
+Inspect all decoder statuses and residual fields; top-level success does not
+establish complete nested enrichment or container validity.
 
-JPEG/PNG/WebP collection retains at most 1,024 metadata segments/chunks. Their
-aggregate metadata and framing must fit `metadata_capacity`; logical payloads
-must also fit the separate payload scratch. TIFF collection visits
-at most 1,024 unique IFDs, also constrained by the EXIF limits (default 128 IFDs).
-The TIFF scratch snapshot retains original TIFF offsets. Its highest referenced
-metadata byte must fit `metadata_capacity`, even for a small value far into the
-file. Only referenced ranges are requested from the host; gaps are initialized
-in caller scratch. There is no whole-file callback fallback.
+Supported high-level callback families:
 
-Callback TIFF MakerNote enrichment is explicitly unsupported when requested
-and a MakerNote is present. Disable enrichment to retain its raw bytes. This
-avoids interpreting uncollected vendor offsets as metadata. Source-native TIFF
-value access and additional vendor offset layouts are the next TIFF increment.
-Other callback container families return unsupported until converted.
+- TIFF/BigTIFF/DNG, RW2 and ORF: direct directories and tag values. Pixel pointers
+  remain metadata. Inline values use eight local bytes; one value or combined
+  GeoTIFF parameters use metadata scratch. Tested source-relative MakerNotes
+  reuse typed decoding. `value_scratch_needed` and `nested_payloads_skipped`
+  report incomplete access; uncommon vendor layouts remain parity work.
+- JPEG: metadata segments and multipart payloads; stop at SOS/EOI and skip
+  nonmetadata segments. Embedded uncompressed TIFF uses positional values.
+- PNG/WebP: chunk traversal and logical metadata assembly, including split
+  JUMBF/C2PA. No aggregate chunk snapshot. PNG text framing currently requires
+  one complete text chunk in metadata scratch. CRC contents are not validated.
+- JP2/JXL: box and UUID metadata, ICC, EXIF, XMP and compressed metadata.
+  Skip codestream boxes. Compression remains optional.
+- BMFF HEIF/AVIF/CR3: bounded `iinf`, `iloc`, `iref`, `dref`, property and item
+  tables with construction methods 0/1/2 and remapped extents. Existing bounded
+  structural interpretation is shared. Richer C++ semantic output differences
+  remain in RD5; source conversion does not remove them.
 
-Block offsets remain relative to the supplied range, matching the contiguous
-reader and the C++ positional scanners. Collection/I/O failure leaves the store
-unchanged. Once decoding starts, the existing partial-result contract applies:
-check `decoded` statuses as well as the source-reader result. These are metadata
-readers, not image-validity checks; the JPEG scanner retains its existing
-acceptance of metadata ending at EOF before SOS/EOI.
+Block coordinates are relative to the supplied range. Nested blocks are remapped
+once. Exact-read I/O failure offsets are absolute in the backing source. There
+is no whole-image callback fallback. Native GIF/EXR/RAF/X3F/CRW integration is RD4.
 
-## Verification and next increments
+## Verification
 
-Clang 20 direct tests compare memory and callback results for both TIFF byte
-orders, Classic/BigTIFF, DNG tags, raw MakerNotes, and JPEG MakerNote enrichment.
-Callbacks reject attempted access to the fixtures' image-data ranges. Focused
-C++ differential tests compare exact-read failures/accounting, cached views,
-JPEG block coordinates, and canonical EXIF bytes after positional TIFF decode.
-PNG/WebP tests compare all decoded C entries between memory and callbacks,
-then compare scanner fields, logical payload bytes and decoded records with
-C++. Split JUMBF chunks straddle a 3 GiB virtual image gap. Tests also cover
-exact/insufficient scratch, minimal headers, odd padding, malformed lengths,
-I/O budgets and preservation of populated stores on collection failure.
+Clang 20 Release passes 42 direct/focused targets; the compression-disabled build
+passes the same 42 targets, and ASan/UBSan passes 37 direct targets. LeakSanitizer
+runs outside the ptrace sandbox. Existing scanner and payload tests now compare
+memory and callbacks, including seven-byte compressed feeds. The RD2 gate has
+80 C callback/C++ contiguous TIFF fixtures. RD3 adds 17 C memory/callback decoded
+container fixtures plus eight C/C++ callback scanner/payload cases: JP2/JXL,
+split BMFF extents at zero/8 GiB gaps, JPEG ICC and extended XMP. Callbacks reject
+pixel/media reads. Tests include partial output, overlap, malformed framing,
+I/O failure, cancellation, budgets and preservation of populated stores.
 
-Fixed synthetic sources report a virtual size of 5 GiB:
+Fixed PNG/WebP counters after RD3 (zero or 3 GiB gap):
 
-| Fixture | Callback calls | Requested bytes | Metadata scratch span used |
+| Fixture | Requests | Bytes requested | Metadata scratch used |
 | --- | ---: | ---: | ---: |
-| Classic TIFF, either byte order | 5 | 100 | 180 |
-| BigTIFF, either byte order | 6 | 166 | 180 |
-| JPEG with EXIF/Nikon MakerNote | 7 | 158 | 150 |
+| PNG | 70 | 525 | 31 |
+| WebP | 44 | 533 | 0 |
 
-The scratch-span column is not process peak memory. Tests provide 2 KiB metadata
-and 2 KiB payload buffers; collection also has fixed structural arrays totaling
-at most 32 KiB across active frames. Decoder/store allocations are separate.
-The complete fixed-fixture test rounded to 0.00 seconds with `time -p`; this is
-functional I/O evidence, not a throughput benchmark.
-
-Next: replace the bounded TIFF scratch snapshot with direct value windows and
-convert the first external MakerNote offsets; then add reusable source scanner
-and multipart payload operations. JP2/JXL/BMFF, GIF/EXR, and native RAW readers
-follow. See [read_decode_parity.md](read_decode_parity.md) for the pinned
-reference, ordered batches and acceptance gates.
+Payload, structural stack, backend and store allocations are separate. These are
+sparse-access observations, not throughput or embedded-memory acceptance.
+See [read_decode_parity.md](read_decode_parity.md) for the pinned C++ reference,
+logs and remaining acceptance work.

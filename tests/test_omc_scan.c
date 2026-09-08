@@ -3,6 +3,38 @@
 #include "omc_test_assert.h"
 #include <string.h>
 
+#include "omc_test_input.h"
+static omc_scan_res
+scan_both(const omc_u8* bytes, omc_size size, omc_blk_ref* out, omc_u32 cap,
+          omc_scan_fmt format)
+{
+    omc_test_input host;
+    omc_source_range range;
+    omc_source_state state;
+    omc_blk_ref blocks[32];
+    omc_scan_res memory, source;
+    omc_u32 i;
+    /* The legacy RAW signature-search fixtures are covered separately in RD4. */
+    memory = omc_scan_auto(bytes, size, out, cap);
+    if ((size >= 4U && memcmp(bytes, "FOVb", 4U) == 0) ||
+        (size >= 8U && memcmp(bytes, "FUJIFILM", 8U) == 0) ||
+        (size >= 14U && memcmp(bytes + 6U, "HEAPCCDR", 8U) == 0)) return memory;
+    assert(cap <= 32U);
+    host.bytes = bytes; host.size = size;
+    range.source = omc_source_callback(size + 37U, &host, omc_test_input_read, 0);
+    range.source_offset = 37U; range.size = size;
+    omc_source_state_init(&state);
+    source = omc_scan_source(&range, format, blocks, cap, &state, NULL);
+    assert(state.code == OMC_SOURCE_OK);
+    assert(memory.status == source.status && memory.written == source.written && memory.needed == source.needed);
+    for (i = 0U; i < source.written; ++i) assert(memcmp(&out[i], &blocks[i], sizeof(blocks[i])) == 0);
+    return memory;
+}
+#define omc_scan_auto(b,s,o,c) scan_both(b,s,o,c,OMC_SCAN_FMT_UNKNOWN)
+#define omc_scan_jpeg(b,s,o,c) scan_both(b,s,o,c,OMC_SCAN_FMT_JPEG)
+#define omc_scan_tiff(b,s,o,c) scan_both(b,s,o,c,OMC_SCAN_FMT_TIFF)
+#define omc_scan_gif(b,s,o,c) scan_both(b,s,o,c,OMC_SCAN_FMT_GIF)
+
 static void
 append_u8(omc_u8* out, omc_size* io_size, omc_u8 value)
 {

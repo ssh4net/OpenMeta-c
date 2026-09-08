@@ -215,3 +215,41 @@ Artifacts: `/tmp/openmeta-rd2-build.log`, `/tmp/openmeta-rd2-tests.log`,
 `/tmp/openmeta-rd2-nodeps-tests.log`, `/tmp/openmeta-rd2-sanitize-tests.log`.
 Reproduce the differential gate with `tests/omc_test_parity --rd2` in the existing
 Clang 20 Release build. RD3 follows with reusable source scanner/payload APIs.
+
+## RD3 Checkpoint: Version 0.6.0
+
+Reusable `omc_scan_source`/measurement and `omc_pay_ext_source`/measurement APIs
+now share the existing memory parsers. A private borrowed input adapter uses
+exact structural reads with a 32-byte cache. BMFF structural decoding also uses
+this adapter, including item information, properties and typed references.
+The high-level JPEG/PNG/WebP/JP2/JXL/BMFF path decodes one logical payload at a
+time, preserves original coordinates and uses a candidate store on callbacks.
+No aggregate metadata snapshot or whole-image fallback remains. PNG text still
+needs one complete text chunk; many small header/string reads can reach the
+request budget sooner than collection. These are explicit resource residuals.
+
+JPEG extended XMP discovery, GUID/offset assembly and decoding were added.
+Missing/overlapping fragments fail before reads. Deflate/Brotli feed buffers
+are caller-owned and bounded. An optional Samsung local MakerNote postpass that
+returns no additional table no longer creates a false incomplete-source result.
+
+Validation: 42/42 Release direct/focused targets and 42/42 without zlib/Brotli;
+37/37 ASan/UBSan direct targets. `--rd3` checks 17 C memory/callback decoded
+fixtures and eight C/C++ callback scanner/payload fixtures. JP2/JXL metadata and
+a two-extent BMFF item cross 8 GiB gaps with source base 37. JPEG ICC and extended
+XMP arrive out of order. Payload prefixes, descriptor fields, malformed overlap,
+short reads, cancellation and request limits are checked. Existing scanner and
+payload tests additionally compare callback/memory results, including method-1/2
+BMFF layouts and seven-byte compressed feeds. TIFF auto-detection is tested
+against forbidden reads immediately after an eight-byte classic TIFF header.
+
+The historical default nine BMFF mismatch identifiers and all 266 broad mismatch
+identifiers are unchanged from RD1. This closes source access for the tested
+RD3 lanes, not richer BMFF decoder parity. Fixed PNG/WebP request/scratch counters
+are recorded in [positional_input.md](positional_input.md).
+
+Artifacts: `/tmp/openmeta-rd3-release-tests.log`,
+`/tmp/openmeta-rd3-nodeps-tests.log`,
+`/tmp/openmeta-c-read-sanitize-20260908/Testing/Temporary/LastTest.log`,
+`/tmp/openmeta-rd3-container-parity.log`, `/tmp/openmeta-rd3-default-parity.log`
+and `/tmp/openmeta-rd3-all-parity.log`. RD4 follows with native formats.

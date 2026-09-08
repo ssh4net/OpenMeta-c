@@ -1,3 +1,4 @@
+#include "read/omc_input.h"
 #include "omc/omc_bmff.h"
 
 #include <string.h>
@@ -152,8 +153,8 @@ typedef struct omc_bmff_brand_info {
 } omc_bmff_brand_info;
 
 typedef struct omc_bmff_ctx {
-    const omc_u8* bytes;
-    omc_size size;
+    omc_input* bytes;
+    omc_u64 size;
     omc_store* store;
     omc_bmff_opts opts;
     omc_bmff_res res;
@@ -223,69 +224,35 @@ omc_bmff_opts_init(omc_bmff_opts* opts)
 }
 
 static int
-omc_bmff_read_u16be(const omc_u8* bytes, omc_size size, omc_u64 off,
+omc_bmff_read_u16be(omc_input* bytes, omc_u64 size, omc_u64 off,
                     omc_u16* out)
 {
-    omc_u16 v;
-
-    if (bytes == (const omc_u8*)0 || out == (omc_u16*)0) {
-        return 0;
-    }
-    if (off + 2U > (omc_u64)size) {
-        return 0;
-    }
-
-    v    = (omc_u16)(((omc_u16)bytes[(omc_size)off] << 8)
-                  | ((omc_u16)bytes[(omc_size)off + 1U] << 0));
-    *out = v;
+    omc_u64 value;
+    if (out == NULL || off > size || 2U > size - off ||
+        !omc_input_number(bytes, off, 2U, 0, &value)) return 0;
+    *out = (omc_u16)value;
     return 1;
 }
 
 static int
-omc_bmff_read_u32be(const omc_u8* bytes, omc_size size, omc_u64 off,
+omc_bmff_read_u32be(omc_input* bytes, omc_u64 size, omc_u64 off,
                     omc_u32* out)
 {
-    omc_u32 v;
-
-    if (bytes == (const omc_u8*)0 || out == (omc_u32*)0) {
-        return 0;
-    }
-    if (off + 4U > (omc_u64)size) {
-        return 0;
-    }
-
-    v = 0U;
-    v |= (omc_u32)bytes[(omc_size)off + 0U] << 24;
-    v |= (omc_u32)bytes[(omc_size)off + 1U] << 16;
-    v |= (omc_u32)bytes[(omc_size)off + 2U] << 8;
-    v |= (omc_u32)bytes[(omc_size)off + 3U] << 0;
-    *out = v;
+    omc_u64 value;
+    if (out == NULL || off > size || 4U > size - off ||
+        !omc_input_number(bytes, off, 4U, 0, &value)) return 0;
+    *out = (omc_u32)value;
     return 1;
 }
 
 static int
-omc_bmff_read_u64be(const omc_u8* bytes, omc_size size, omc_u64 off,
+omc_bmff_read_u64be(omc_input* bytes, omc_u64 size, omc_u64 off,
                     omc_u64* out)
 {
-    omc_u64 v;
-
-    if (bytes == (const omc_u8*)0 || out == (omc_u64*)0) {
-        return 0;
-    }
-    if (off + 8U > (omc_u64)size) {
-        return 0;
-    }
-
-    v = 0U;
-    v |= (omc_u64)bytes[(omc_size)off + 0U] << 56;
-    v |= (omc_u64)bytes[(omc_size)off + 1U] << 48;
-    v |= (omc_u64)bytes[(omc_size)off + 2U] << 40;
-    v |= (omc_u64)bytes[(omc_size)off + 3U] << 32;
-    v |= (omc_u64)bytes[(omc_size)off + 4U] << 24;
-    v |= (omc_u64)bytes[(omc_size)off + 5U] << 16;
-    v |= (omc_u64)bytes[(omc_size)off + 6U] << 8;
-    v |= (omc_u64)bytes[(omc_size)off + 7U] << 0;
-    *out = v;
+    omc_u64 value;
+    if (out == NULL || off > size || 8U > size - off ||
+        !omc_input_number(bytes, off, 8U, 0, &value)) return 0;
+    *out = (omc_u64)value;
     return 1;
 }
 
@@ -304,7 +271,7 @@ omc_bmff_note_box(omc_bmff_ctx* ctx)
 }
 
 static int
-omc_bmff_parse_box(const omc_u8* bytes, omc_size size, omc_u64 off, omc_u64 end,
+omc_bmff_parse_box(omc_input* bytes, omc_u64 size, omc_u64 off, omc_u64 end,
                    omc_bmff_box* out_box)
 {
     omc_u32 size32;
@@ -1765,13 +1732,13 @@ omc_bmff_set_primary_auxl_semantic(omc_bmff_primary_props* props,
 }
 
 static int
-omc_bmff_read_cstr(const omc_u8* bytes, omc_size size, omc_u64* io_off,
+omc_bmff_read_cstr(omc_input* bytes, omc_u64 size, omc_u64* io_off,
                    omc_u64 end, char* out, omc_size out_cap, omc_u16* out_len)
 {
     omc_u64 p;
     omc_u16 n;
 
-    if (bytes == (const omc_u8*)0 || io_off == (omc_u64*)0 || out == (char*)0
+    if (bytes == NULL || io_off == (omc_u64*)0 || out == (char*)0
         || out_len == (omc_u16*)0 || out_cap == 0U) {
         return 0;
     }
@@ -1780,7 +1747,7 @@ omc_bmff_read_cstr(const omc_u8* bytes, omc_size size, omc_u64* io_off,
     }
 
     p = *io_off;
-    while (p < end && bytes[(omc_size)p] != 0U) {
+    while (p < end && omc_input_byte(bytes, p) != 0U) {
         p += 1U;
     }
     if (p >= end) {
@@ -1792,7 +1759,7 @@ omc_bmff_read_cstr(const omc_u8* bytes, omc_size size, omc_u64* io_off,
         n = (omc_u16)out_cap;
     }
     if (n != 0U) {
-        memcpy(out, bytes + (omc_size)(*io_off), (omc_size)n);
+        if (!omc_input_read(bytes, *io_off, out, (omc_size)n)) return 0;
     }
     *out_len = n;
     *io_off  = p + 1U;
@@ -1800,14 +1767,14 @@ omc_bmff_read_cstr(const omc_u8* bytes, omc_size size, omc_u64* io_off,
 }
 
 static int
-omc_bmff_parse_pitm(const omc_u8* bytes, omc_size size,
+omc_bmff_parse_pitm(omc_input* bytes, omc_u64 size,
                     const omc_bmff_box* pitm, omc_u32* out_item_id)
 {
     omc_u64 payload_off;
     omc_u64 payload_size;
     omc_u8 version;
 
-    if (bytes == (const omc_u8*)0 || pitm == (const omc_bmff_box*)0
+    if (bytes == NULL || pitm == (const omc_bmff_box*)0
         || out_item_id == (omc_u32*)0) {
         return 0;
     }
@@ -1818,7 +1785,7 @@ omc_bmff_parse_pitm(const omc_u8* bytes, omc_size size,
         return 0;
     }
 
-    version = bytes[(omc_size)payload_off];
+    version = omc_input_byte(bytes, payload_off);
     if (version == 0U) {
         omc_u16 id16;
 
@@ -1835,7 +1802,7 @@ omc_bmff_parse_pitm(const omc_u8* bytes, omc_size size,
 }
 
 static int
-omc_bmff_parse_infe(const omc_u8* bytes, omc_size size,
+omc_bmff_parse_infe(omc_input* bytes, omc_u64 size,
                     const omc_bmff_box* infe, omc_bmff_item_info* out_info)
 {
     omc_u64 payload_off;
@@ -1843,7 +1810,7 @@ omc_bmff_parse_infe(const omc_u8* bytes, omc_size size,
     omc_u64 p;
     omc_u8 version;
 
-    if (bytes == (const omc_u8*)0 || infe == (const omc_bmff_box*)0
+    if (bytes == NULL || infe == (const omc_bmff_box*)0
         || out_info == (omc_bmff_item_info*)0) {
         return 0;
     }
@@ -1855,7 +1822,7 @@ omc_bmff_parse_infe(const omc_u8* bytes, omc_size size,
         return 0;
     }
 
-    version = bytes[(omc_size)payload_off];
+    version = omc_input_byte(bytes, payload_off);
     p       = payload_off + 4U;
     if (version <= 1U) {
         omc_u16 item_id16;
@@ -1995,7 +1962,7 @@ omc_bmff_collect_iinf_items(omc_bmff_ctx* ctx, const omc_bmff_box* iinf,
         return 0;
     }
 
-    version = ctx->bytes[(omc_size)payload_off];
+    version = omc_input_byte(ctx->bytes, payload_off);
     p       = payload_off + 4U;
     if (version == 0U) {
         omc_u16 entry_count16;
@@ -2205,7 +2172,7 @@ omc_bmff_collect_ipco_props(omc_bmff_ctx* ctx, const omc_bmff_box* ipco,
                 if (payload_size >= 1U && *out_irot_count < 64U) {
                     out_irot[*out_irot_count].index = prop_index;
                     out_irot[*out_irot_count].value
-                        = (omc_u8)(ctx->bytes[(omc_size)payload_off] & 0x03U);
+                        = (omc_u8)(omc_input_byte(ctx->bytes, payload_off) & 0x03U);
                     *out_irot_count += 1U;
                     omc_bmff_append_prop_type(
                         out_prop_types, out_prop_type_count, 64U, prop_index,
@@ -2215,7 +2182,7 @@ omc_bmff_collect_ipco_props(omc_bmff_ctx* ctx, const omc_bmff_box* ipco,
                 if (payload_size >= 1U && *out_imir_count < 64U) {
                     out_imir[*out_imir_count].index = prop_index;
                     out_imir[*out_imir_count].value
-                        = ctx->bytes[(omc_size)payload_off];
+                        = omc_input_byte(ctx->bytes, payload_off);
                     *out_imir_count += 1U;
                     omc_bmff_append_prop_type(
                         out_prop_types, out_prop_type_count, 64U, prop_index,
@@ -2234,7 +2201,7 @@ omc_bmff_collect_ipco_props(omc_bmff_ctx* ctx, const omc_bmff_box* ipco,
 
                     p = payload_off + 4U;
                     e = payload_off + payload_size;
-                    while (p < e && ctx->bytes[(omc_size)p] != 0U) {
+                    while (p < e && omc_input_byte(ctx->bytes, p) != 0U) {
                         p += 1U;
                     }
                     if (p < e) {
@@ -2256,8 +2223,7 @@ omc_bmff_collect_ipco_props(omc_bmff_ctx* ctx, const omc_bmff_box* ipco,
                             if (type_len > sizeof(prop->aux_type)) {
                                 type_len = sizeof(prop->aux_type);
                             }
-                            memcpy(prop->aux_type,
-                                   ctx->bytes + (omc_size)type_off, type_len);
+                            (void)omc_input_read(ctx->bytes, type_off, prop->aux_type, type_len);
                             prop->aux_type_len = (omc_u16)type_len;
                             prop->semantic     = omc_bmff_classify_auxc_type(
                                 prop->aux_type, prop->aux_type_len);
@@ -2268,9 +2234,7 @@ omc_bmff_collect_ipco_props(omc_bmff_ctx* ctx, const omc_bmff_box* ipco,
                                 if (subtype_len > sizeof(prop->aux_subtype)) {
                                     subtype_len = sizeof(prop->aux_subtype);
                                 }
-                                memcpy(prop->aux_subtype,
-                                       ctx->bytes + (omc_size)(p + 1U),
-                                       subtype_len);
+                                (void)omc_input_read(ctx->bytes, p + 1U, prop->aux_subtype, subtype_len);
                                 prop->aux_subtype_len = (omc_u16)subtype_len;
                             }
                             *out_auxc_count += 1U;
@@ -2291,7 +2255,7 @@ omc_bmff_collect_ipco_props(omc_bmff_ctx* ctx, const omc_bmff_box* ipco,
                 if (payload_size >= 5U) {
                     omc_u8 channel_count;
 
-                    channel_count = ctx->bytes[(omc_size)(payload_off + 4U)];
+                    channel_count = omc_input_byte(ctx->bytes, (payload_off + 4U));
                     if (channel_count != 0U
                         && (omc_u64)channel_count <= payload_size - 5U) {
                         omc_bmff_append_prop_type(
@@ -2378,7 +2342,7 @@ omc_bmff_apply_ipma_primary(omc_bmff_ctx* ctx, const omc_bmff_box* ipma,
         return 0;
     }
 
-    version = ctx->bytes[(omc_size)payload_off];
+    version = omc_input_byte(ctx->bytes, payload_off);
     if (!omc_bmff_read_u32be(ctx->bytes, ctx->size, payload_off + 4U,
                              &entry_count)) {
         return 0;
@@ -2409,7 +2373,7 @@ omc_bmff_apply_ipma_primary(omc_bmff_ctx* ctx, const omc_bmff_box* ipma,
         if (off + 1U > end) {
             return 0;
         }
-        assoc_count = ctx->bytes[(omc_size)off];
+        assoc_count = omc_input_byte(ctx->bytes, off);
         off += 1U;
 
         for (j = 0U; j < assoc_count; ++j) {
@@ -2422,7 +2386,7 @@ omc_bmff_apply_ipma_primary(omc_bmff_ctx* ctx, const omc_bmff_box* ipma,
                 if (off + 1U > end) {
                     return 0;
                 }
-                v = ctx->bytes[(omc_size)off];
+                v = omc_input_byte(ctx->bytes, off);
                 off += 1U;
                 essential  = (omc_u8)((v & 0x80U) != 0U ? 1U : 0U);
                 prop_index = (omc_u32)(v & 0x7FU);
@@ -2554,7 +2518,7 @@ omc_bmff_collect_iref_edges(omc_bmff_ctx* ctx, const omc_bmff_box* iref,
         return 0;
     }
 
-    version = ctx->bytes[(omc_size)payload_off];
+    version = omc_input_byte(ctx->bytes, payload_off);
     if (version > 1U) {
         return 0;
     }
@@ -2704,7 +2668,7 @@ omc_bmff_collect_item_groups(omc_bmff_ctx* ctx, const omc_bmff_box* grpl,
             continue;
         }
 
-        version = ctx->bytes[(omc_size)child_payload_off];
+        version = omc_input_byte(ctx->bytes, child_payload_off);
         if (version != 0U) {
             off += child.size;
             if (child.size == 0U) {
@@ -3943,7 +3907,7 @@ omc_bmff_scan_for_meta(omc_bmff_ctx* ctx, omc_u64 off, omc_u64 end,
 }
 
 static omc_bmff_res
-omc_bmff_run(const omc_u8* file_bytes, omc_size file_size, omc_store* store,
+omc_bmff_run(omc_input* file_bytes, omc_u64 file_size, omc_store* store,
              const omc_bmff_opts* opts)
 {
     omc_bmff_ctx ctx;
@@ -3963,7 +3927,7 @@ omc_bmff_run(const omc_u8* file_bytes, omc_size file_size, omc_store* store,
     ctx.opts     = local_opts;
     ctx.block_id = OMC_INVALID_BLOCK_ID;
 
-    if (file_bytes == (const omc_u8*)0) {
+    if (file_bytes == NULL) {
         ctx.res.status = OMC_BMFF_MALFORMED;
         return ctx.res;
     }
@@ -4030,15 +3994,34 @@ omc_bmff_run(const omc_u8* file_bytes, omc_size file_size, omc_store* store,
 }
 
 omc_bmff_res
-omc_bmff_dec(const omc_u8* file_bytes, omc_size file_size, omc_store* store,
-             const omc_bmff_opts* opts)
-{
-    return omc_bmff_run(file_bytes, file_size, store, opts);
-}
-
-omc_bmff_res
-omc_bmff_meas(const omc_u8* file_bytes, omc_size file_size,
+omc_bmff_dec(const omc_u8* bytes, omc_size size, omc_store* store,
               const omc_bmff_opts* opts)
 {
-    return omc_bmff_run(file_bytes, file_size, (omc_store*)0, opts);
+    omc_input input;
+    omc_input_memory(&input, bytes, size);
+    return omc_bmff_run(bytes == NULL ? NULL : &input, size, store, opts);
+}
+omc_bmff_res
+omc_bmff_meas(const omc_u8* bytes, omc_size size, const omc_bmff_opts* opts)
+{
+    return omc_bmff_dec(bytes, size, NULL, opts);
+}
+omc_bmff_res
+omc_bmff_dec_source(const omc_source_range* range, omc_store* store,
+                     omc_source_state* state, const omc_source_limits* limits,
+                     const omc_bmff_opts* opts)
+{
+    omc_bmff_res res;
+    omc_input input;
+    omc_bmff_res_init(&res);
+    if (!omc_source_range_valid(range) || state == NULL || state->code != OMC_SOURCE_OK) {
+        res.status = OMC_BMFF_MALFORMED; return res;
+    }
+    memset(&input, 0, sizeof(input));
+    input.range = *range;
+    input.state = state;
+    input.limits = limits;
+    res = omc_bmff_run(&input, range->size, store, opts);
+    if (!omc_input_ok(&input)) res.status = OMC_BMFF_MALFORMED;
+    return res;
 }

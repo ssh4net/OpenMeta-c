@@ -3,6 +3,35 @@
 #include "omc_test_assert.h"
 #include <string.h>
 
+#include "omc_test_input.h"
+static omc_pay_res
+pay_both(const omc_u8* bytes, omc_size size, const omc_blk_ref* blocks,
+         omc_u32 count, omc_u32 seed, omc_u8* out, omc_size cap,
+         omc_u32* indices, omc_u32 index_cap, const omc_pay_opts* opts)
+{
+    omc_test_input host;
+    omc_source_range range;
+    omc_source_state state;
+    omc_u8 payload[65536], stream[7];
+    omc_u32 source_indices[256];
+    omc_pay_source_workspace work;
+    omc_pay_res memory, source;
+    memory = omc_pay_ext(bytes, size, blocks, count, seed, out, cap, indices, index_cap, opts);
+    assert(cap <= sizeof(payload) && index_cap <= 256U);
+    host.bytes = bytes; host.size = size;
+    range.source = omc_source_callback(size + 37U, &host, omc_test_input_read, 0);
+    range.source_offset = 37U; range.size = size;
+    omc_source_state_init(&state);
+    work.stream = stream; work.stream_capacity = sizeof(stream);
+    source = omc_pay_ext_source(&range, blocks, count, seed, out == NULL ? NULL : payload,
+                cap, indices == NULL ? NULL : source_indices, index_cap, &work, &state, NULL, opts);
+    assert(state.code == OMC_SOURCE_OK);
+    assert(memory.status == source.status && memory.written == source.written && memory.needed == source.needed);
+    if (out != NULL && source.written) assert(memcmp(out, payload, (omc_size)source.written) == 0);
+    return memory;
+}
+#define omc_pay_ext(b,s,r,n,i,o,c,x,z,p) pay_both(b,s,r,n,i,o,c,x,z,p)
+
 static void
 append_u8(omc_u8* out, omc_size* io_size, omc_u8 value)
 {

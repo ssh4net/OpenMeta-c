@@ -38,15 +38,17 @@ typedef struct omc_read_source_res {
 
 OMC_API void omc_read_source_opts_init(omc_read_source_opts *opts);
 /* Borrowed fixed-size source and caller-owned workspace. Callback conversion
- * supports JPEG, PNG, WebP and TIFF/BigTIFF/DNG. No whole-file callback fallback.
- * JPEG stops at SOS/EOI. PNG/WebP skip image chunks and collect metadata chunks
- * including framing into metadata_capacity; multipart payloads use payload.
+ * supports JPEG, PNG, WebP, JP2, JXL, BMFF and TIFF/BigTIFF/DNG.
+ * JPEG stops at SOS/EOI. Chunk/box scanners skip image and media bodies.
+ * Metadata is decoded one logical payload at a time; compressed input uses
+ * metadata as a bounded feed buffer. PNG text framing must also fit metadata.
  * TIFF/BigTIFF/RW2/ORF read directories and values at their original offsets.
  * Metadata scratch holds one value (combined GeoTIFF parameters when needed).
  * Source-relative MakerNotes reuse the typed decoder; inspect decoded.exif,
  * value_scratch_needed and nested_payloads_skipped for incomplete results.
  * Memory sources retain the existing contiguous reader and all its formats.
- * Collection/I/O failure leaves the store unchanged. Decode follows the
+ * Callback I/O, capacity and allocation failure leaves the store unchanged.
+ * Other decoder outcomes follow the
  * existing partial-result contract; inspect decoded statuses as well.
  * Block offsets are relative to range, matching the contiguous reader and C++
  * source scanners. I/O failure offsets are absolute in the backing source.

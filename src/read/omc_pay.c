@@ -1,4 +1,5 @@
 #include "omc/omc_pay.h"
+#include "read/omc_input.h"
 
 #include <string.h>
 
@@ -43,12 +44,11 @@ omc_pay_min_u64(omc_u64 a, omc_u64 b)
 #endif
 
 static int
-omc_pay_copy_range(const omc_u8* file_bytes, omc_size file_size,
+omc_pay_copy_range(omc_input* file_bytes, omc_u64 file_size,
                    omc_u64 data_offset, omc_u64 data_size,
                    omc_u8* out_payload, omc_size out_cap,
                    omc_u64 out_offset, omc_pay_res* res)
 {
-    omc_size src_off;
     omc_size copy_size;
     omc_size dst_off;
 
@@ -68,11 +68,11 @@ omc_pay_copy_range(const omc_u8* file_bytes, omc_size file_size,
         return 1;
     }
 
-    src_off = (omc_size)data_offset;
-    copy_size = (omc_size)data_size;
+    copy_size = data_size > out_cap - (omc_size)out_offset
+                    ? out_cap - (omc_size)out_offset : (omc_size)data_size;
     dst_off = (omc_size)out_offset;
 
-    if (copy_size > out_cap - dst_off) {
+    if (data_size > out_cap - dst_off) {
         copy_size = out_cap - dst_off;
         if (res->status == OMC_PAY_OK) {
             res->status = OMC_PAY_TRUNCATED;
@@ -80,7 +80,10 @@ omc_pay_copy_range(const omc_u8* file_bytes, omc_size file_size,
     }
 
     if (copy_size != 0U && out_payload != (omc_u8*)0) {
-        memcpy(out_payload + dst_off, file_bytes + src_off, copy_size);
+        if (!omc_input_read(file_bytes, data_offset, out_payload + dst_off, copy_size)) {
+            res->status = OMC_PAY_MALFORMED;
+            return 0;
+        }
     }
     if ((omc_u64)(dst_off + copy_size) > res->written) {
         res->written = (omc_u64)(dst_off + copy_size);
@@ -89,7 +92,7 @@ omc_pay_copy_range(const omc_u8* file_bytes, omc_size file_size,
 }
 
 static int
-omc_pay_copy_gif_sub_blocks(const omc_u8* file_bytes, omc_size file_size,
+omc_pay_copy_gif_sub_blocks(omc_input* file_bytes, omc_u64 file_size,
                             omc_u64 data_offset, omc_u64 data_size,
                             omc_u8* out_payload, omc_size out_cap,
                             omc_u64 max_output_bytes, omc_pay_res* res)
@@ -110,7 +113,8 @@ omc_pay_copy_gif_sub_blocks(const omc_u8* file_bytes, omc_size file_size,
     while (p < end) {
         omc_u8 sub_size;
 
-        sub_size = file_bytes[(omc_size)p];
+        sub_size = omc_input_byte(file_bytes, p);
+        if (!omc_input_ok(file_bytes)) { res->status = OMC_PAY_MALFORMED; return 0; }
         p += 1U;
         if (sub_size == 0U) {
             if (p != end) {
@@ -142,9 +146,35 @@ omc_pay_copy_gif_sub_blocks(const omc_u8* file_bytes, omc_size file_size,
     return 0;
 }
 
+#if OMC_HAVE_ZLIB || OMC_HAVE_BROTLI
+static int
+omc_pay_feed(omc_input* input, omc_u64 offset, omc_u64 remaining,
+              const omc_u8** data, omc_size* size, omc_pay_res* res)
+{
+    omc_u64 n;
+    if (input->range.source.contiguous_data != NULL) {
+        n = remaining < 65536U ? remaining : 65536U;
+        *data = input->range.source.contiguous_data +
+                (omc_size)(input->range.source_offset + offset);
+    } else {
+        if (input->stream_capacity == 0U) { res->status = OMC_PAY_LIMIT; return 0; }
+        n = remaining < input->stream_capacity ? remaining : input->stream_capacity;
+        if (input->limits != NULL && input->limits->max_single_read_bytes != 0U &&
+            n > input->limits->max_single_read_bytes) n = input->limits->max_single_read_bytes;
+        if (n > 65536U) n = 65536U;
+        if (!omc_input_read(input, offset, input->stream, (omc_size)n)) {
+            res->status = OMC_PAY_MALFORMED; return 0;
+        }
+        *data = input->stream;
+    }
+    *size = (omc_size)n;
+    return 1;
+}
+#endif
+
 #if OMC_HAVE_ZLIB
 static int
-omc_pay_inflate_zlib_range(const omc_u8* file_bytes, omc_size file_size,
+omc_pay_inflate_zlib_range(omc_input* file_bytes, omc_u64 file_size,
                            omc_u64 data_offset, omc_u64 data_size,
                            omc_u8* out_payload, omc_size out_cap,
                            omc_u64 max_output_bytes, omc_pay_res* res)
@@ -181,12 +211,14 @@ omc_pay_inflate_zlib_range(const omc_u8* file_bytes, omc_size file_size,
         omc_u64 produced;
 
         if (strm.avail_in == 0U && in_off < data_size) {
-            omc_u64 feed_size;
-
-            feed_size = data_size - in_off;
-            feed_size = omc_pay_min_u64(feed_size, (omc_u64)max_chunk);
-            strm.next_in =
-                (Bytef*)(file_bytes + (omc_size)data_offset + (omc_size)in_off);
+            const omc_u8* feed;
+            omc_size feed_size;
+            if (!omc_pay_feed(file_bytes, data_offset + in_off, data_size - in_off,
+                               &feed, &feed_size, res)) {
+                (void)inflateEnd(&strm);
+                return 0;
+            }
+            strm.next_in = (Bytef*)feed;
             strm.avail_in = (uInt)feed_size;
             in_off += feed_size;
         }
@@ -266,7 +298,7 @@ omc_pay_inflate_zlib_range(const omc_u8* file_bytes, omc_size file_size,
 
 #if OMC_HAVE_BROTLI
 static int
-omc_pay_brotli_range(const omc_u8* file_bytes, omc_size file_size,
+omc_pay_brotli_range(omc_input* file_bytes, omc_u64 file_size,
                      omc_u64 data_offset, omc_u64 data_size,
                      omc_u8* out_payload, omc_size out_cap,
                      omc_u64 max_output_bytes, omc_pay_res* res)
@@ -274,6 +306,7 @@ omc_pay_brotli_range(const omc_u8* file_bytes, omc_size file_size,
     BrotliDecoderState* state;
     const uint8_t* next_in;
     size_t avail_in;
+    omc_u64 in_off;
     omc_u64 total_out;
     omc_u8 scratch[256];
 
@@ -290,8 +323,9 @@ omc_pay_brotli_range(const omc_u8* file_bytes, omc_size file_size,
         return 0;
     }
 
-    next_in = (const uint8_t*)(file_bytes + (omc_size)data_offset);
-    avail_in = (size_t)data_size;
+    next_in = NULL;
+    avail_in = 0U;
+    in_off = 0U;
     total_out = 0U;
 
     for (;;) {
@@ -302,6 +336,18 @@ omc_pay_brotli_range(const omc_u8* file_bytes, omc_size file_size,
         omc_u64 produced;
         BrotliDecoderResult br;
 
+        if (avail_in == 0U && in_off < data_size) {
+            const omc_u8* feed;
+            omc_size feed_size;
+            if (!omc_pay_feed(file_bytes, data_offset + in_off, data_size - in_off,
+                               &feed, &feed_size, res)) {
+                BrotliDecoderDestroyInstance(state);
+                return 0;
+            }
+            next_in = (const uint8_t*)feed;
+            avail_in = feed_size;
+            in_off += feed_size;
+        }
         if (total_out >= max_output_bytes) {
             res->status = OMC_PAY_LIMIT;
             BrotliDecoderDestroyInstance(state);
@@ -345,6 +391,7 @@ omc_pay_brotli_range(const omc_u8* file_bytes, omc_size file_size,
             continue;
         }
         if (br == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
+            if (in_off < data_size) continue;
             res->status = OMC_PAY_MALFORMED;
         } else {
             res->status = OMC_PAY_MALFORMED;
@@ -372,8 +419,8 @@ omc_pay_opts_init(omc_pay_opts* opts)
     opts->limits.max_output_bytes = 64U * 1024U * 1024U;
 }
 
-omc_pay_res
-omc_pay_ext(const omc_u8* file_bytes, omc_size file_size,
+static omc_pay_res
+omc_pay_ext_input(omc_input* file_bytes, omc_u64 file_size,
             const omc_blk_ref* blocks, omc_u32 block_count,
             omc_u32 seed_index, omc_u8* out_payload, omc_size out_cap,
             omc_u32* scratch_indices, omc_u32 scratch_cap,
@@ -396,7 +443,7 @@ omc_pay_ext(const omc_u8* file_bytes, omc_size file_size,
         use_opts = opts;
     }
 
-    if (file_bytes == (const omc_u8*)0 || blocks == (const omc_blk_ref*)0
+    if (file_bytes == (omc_input*)0 || blocks == (const omc_blk_ref*)0
         || seed_index >= block_count) {
         res.status = OMC_PAY_MALFORMED;
         return res;
@@ -451,7 +498,10 @@ omc_pay_ext(const omc_u8* file_bytes, omc_size file_size,
         return res;
     }
 
-    if (seed->chunking == OMC_BLK_CHUNK_NONE
+    if ((seed->chunking == OMC_BLK_CHUNK_NONE ||
+         seed->chunking == OMC_BLK_CHUNK_JP2_UUID ||
+         seed->chunking == OMC_BLK_CHUNK_BMFF_EXIF_OFF ||
+         seed->chunking == OMC_BLK_CHUNK_PS_IRB_8BIM)
         && (seed->part_count == 0U || seed->part_count == 1U)) {
         res.needed = seed->data_size;
         if (res.needed > use_opts->limits.max_output_bytes) {
@@ -480,8 +530,41 @@ omc_pay_ext(const omc_u8* file_bytes, omc_size file_size,
 
     if (seed->chunking != OMC_BLK_CHUNK_NONE
         && seed->chunking != OMC_BLK_CHUNK_JPEG_APP2_SEQ
-        && seed->chunking != OMC_BLK_CHUNK_JPEG_APP11_SEQ) {
+        && seed->chunking != OMC_BLK_CHUNK_JPEG_APP11_SEQ
+        && seed->chunking != OMC_BLK_CHUNK_JPEG_XMP_EXT) {
         res.status = OMC_PAY_UNSUPPORTED;
+        return res;
+    }
+
+    if (seed->chunking == OMC_BLK_CHUNK_JPEG_XMP_EXT) {
+        omc_u32 found = 0U;
+        omc_u32 j;
+        omc_u64 end = 0U;
+        for (i = 0U; i < block_count; ++i) {
+            if (!omc_pay_same_stream(seed, &blocks[i])) continue;
+            if (found >= scratch_cap || found >= use_opts->limits.max_parts || scratch_indices == NULL) {
+                res.status = OMC_PAY_LIMIT; return res;
+            }
+            j = found;
+            while (j > 0U && blocks[scratch_indices[j - 1U]].logical_offset > blocks[i].logical_offset) {
+                scratch_indices[j] = scratch_indices[j - 1U]; --j;
+            }
+            scratch_indices[j] = i; ++found;
+        }
+        for (i = 0U; i < found; ++i) {
+            const omc_blk_ref* part = &blocks[scratch_indices[i]];
+            if (part->logical_size != seed->logical_size || part->logical_offset != end ||
+                part->data_size > ~(omc_u64)0 - end) { res.status = OMC_PAY_MALFORMED; return res; }
+            end += part->data_size;
+        }
+        res.needed = seed->logical_size;
+        if (end != res.needed) { res.status = OMC_PAY_MALFORMED; return res; }
+        if (end > use_opts->limits.max_output_bytes) { res.status = OMC_PAY_LIMIT; return res; }
+        for (i = 0U; i < found; ++i) {
+            const omc_blk_ref* part = &blocks[scratch_indices[i]];
+            if (!omc_pay_copy_range(file_bytes, file_size, part->data_offset, part->data_size,
+                                     out_payload, out_cap, part->logical_offset, &res)) return res;
+        }
         return res;
     }
 
@@ -578,18 +661,66 @@ omc_pay_ext(const omc_u8* file_bytes, omc_size file_size,
 }
 
 omc_pay_res
-omc_pay_meas(const omc_u8* file_bytes, omc_size file_size,
-             const omc_blk_ref* blocks, omc_u32 block_count,
-             omc_u32 seed_index, omc_u32* scratch_indices,
-             omc_u32 scratch_cap, const omc_pay_opts* opts)
+omc_pay_ext(const omc_u8* bytes, omc_size size, const omc_blk_ref* blocks,
+            omc_u32 count, omc_u32 seed, omc_u8* out, omc_size capacity,
+            omc_u32* indices, omc_u32 index_capacity, const omc_pay_opts* opts)
 {
+    omc_input input;
+    omc_input_memory(&input, bytes, size);
+    return omc_pay_ext_input(bytes == NULL ? NULL : &input, size, blocks, count,
+                              seed, out, capacity, indices, index_capacity, opts);
+}
+omc_pay_res
+omc_pay_ext_source(const omc_source_range* range, const omc_blk_ref* blocks,
+                    omc_u32 count, omc_u32 seed, omc_u8* out, omc_size capacity,
+                    omc_u32* indices, omc_u32 index_capacity,
+                    const omc_pay_source_workspace* workspace,
+                    omc_source_state* state, const omc_source_limits* limits,
+                    const omc_pay_opts* opts)
+{
+    omc_input input;
     omc_pay_res res;
-
-    res = omc_pay_ext(file_bytes, file_size, blocks, block_count, seed_index,
-                      (omc_u8*)0, 0U, scratch_indices, scratch_cap, opts);
-    if (res.status == OMC_PAY_TRUNCATED) {
-        res.status = OMC_PAY_OK;
+    omc_pay_res_init(&res);
+    if (!omc_source_range_valid(range) || state == NULL ||
+        (capacity && out == NULL) || (index_capacity && indices == NULL) ||
+        (workspace != NULL && workspace->stream_capacity && workspace->stream == NULL)) {
+        res.status = OMC_PAY_MALFORMED; return res;
     }
+    if (state->code != OMC_SOURCE_OK) { res.status = OMC_PAY_MALFORMED; return res; }
+    memset(&input, 0, sizeof(input));
+    input.range = *range;
+    input.state = state;
+    input.limits = limits;
+    if (workspace != NULL) {
+        input.stream = workspace->stream;
+        input.stream_capacity = workspace->stream_capacity;
+    }
+    res = omc_pay_ext_input(&input, range->size, blocks, count, seed, out, capacity,
+                             indices, index_capacity, opts);
+    if (!omc_input_ok(&input)) res.status = OMC_PAY_MALFORMED;
+    return res;
+}
+omc_pay_res
+omc_pay_meas(const omc_u8* bytes, omc_size size, const omc_blk_ref* blocks,
+             omc_u32 count, omc_u32 seed, omc_u32* indices,
+             omc_u32 index_capacity, const omc_pay_opts* opts)
+{
+    omc_pay_res res = omc_pay_ext(bytes, size, blocks, count, seed, NULL, 0U,
+                                   indices, index_capacity, opts);
+    if (res.status == OMC_PAY_TRUNCATED) res.status = OMC_PAY_OK;
+    res.written = 0U;
+    return res;
+}
+omc_pay_res
+omc_pay_meas_source(const omc_source_range* range, const omc_blk_ref* blocks,
+                     omc_u32 count, omc_u32 seed, omc_u32* indices,
+                     omc_u32 index_capacity, const omc_pay_source_workspace* workspace,
+                     omc_source_state* state, const omc_source_limits* limits,
+                     const omc_pay_opts* opts)
+{
+    omc_pay_res res = omc_pay_ext_source(range, blocks, count, seed, NULL, 0U,
+                                          indices, index_capacity, workspace, state, limits, opts);
+    if (res.status == OMC_PAY_TRUNCATED) res.status = OMC_PAY_OK;
     res.written = 0U;
     return res;
 }

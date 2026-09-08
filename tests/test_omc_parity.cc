@@ -36,6 +36,7 @@ extern "C" {
 bool run_omc_authoring_parity();
 bool run_omc_source_parity();
 bool run_omc_chunk_parity();
+bool run_omc_box_source_parity();
 
 namespace {
 
@@ -9709,6 +9710,8 @@ struct TransferPersistParitySummary final {
 };
 
 static bool g_tiff_source_inventory = false;
+static bool g_container_source_inventory = false;
+static unsigned g_container_source_cases = 0;
 static unsigned g_tiff_source_cases = 0U;
 
 static omc_source_io_res
@@ -10027,6 +10030,18 @@ run_case(const char* case_name, const ByteVec& file_bytes,
     std::vector<std::string> cpp;
 
     ReadCaseOptions use_options = options;
+    if (g_container_source_inventory) {
+        omc_blk_ref block{};
+        const auto scan = omc_scan_auto(file_bytes.data(), file_bytes.size(), &block, 1U);
+        if ((!scan.written && !(file_bytes.size() >= 8U && std::memcmp(file_bytes.data() + 4U, "ftyp", 4U) == 0)) || block.format == OMC_SCAN_FMT_TIFF || block.format == OMC_SCAN_FMT_GIF ||
+            block.format == OMC_SCAN_FMT_RAF || block.format == OMC_SCAN_FMT_X3F || block.format == OMC_SCAN_FMT_CRW)
+            return true;
+        ++g_container_source_cases;
+        use_options.positional = true;
+        omc = read_omc_records(file_bytes, use_options);
+        cpp = read_omc_records(file_bytes, options);
+        return compare_records(case_name, omc, cpp);
+    }
     if (g_tiff_source_inventory) {
         if (file_bytes.size() < 8U ||
             !((file_bytes[0] == 'I' && file_bytes[1] == 'I') ||
@@ -11549,13 +11564,14 @@ main(int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--bench") == 0) {
         return run_benchmarks();
     }
+    g_container_source_inventory = argc == 2 && std::strcmp(argv[1], "--rd3") == 0;
     g_tiff_source_inventory = argc == 2 && std::strcmp(argv[1], "--rd2") == 0;
-    if (argc != 1 && !g_tiff_source_inventory && !(argc == 2 && std::strcmp(argv[1], "--all") == 0)) {
+    if (argc != 1 && !g_tiff_source_inventory && !g_container_source_inventory && !(argc == 2 && std::strcmp(argv[1], "--all") == 0)) {
         std::fprintf(stderr, "usage: %s [--bench|--core-authoring|--core-source|--read-chunks|--rd2|--all]\n", argv[0]);
         return 2;
     }
 
-    ok = run_omc_authoring_parity();
+    ok = g_container_source_inventory ? run_omc_box_source_parity() : run_omc_authoring_parity();
     ok = run_omc_source_parity() && ok;
     ok = run_omc_chunk_parity() && ok;
     ok = run_chunk_decode_cases() && ok;
@@ -16813,6 +16829,8 @@ main(int argc, char** argv)
                   build_tiff_nikon_main_single_long_fixture("E700", 0x000AU, 0U),
                   true)
          && ok;
+    if (g_container_source_inventory)
+        std::fprintf(stderr, "source container cases: %u\n", g_container_source_cases);
     if (g_tiff_source_inventory)
         std::fprintf(stderr, "source TIFF cases: %u\n", g_tiff_source_cases);
     return ok ? 0 : 1;

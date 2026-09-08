@@ -226,7 +226,7 @@ if(OMC_BUILD_PARITY_TESTS)
       "Set OMC_OPENMETA_DIR to an OpenMeta build directory or package directory.")
   endif()
 
-  add_executable(omc_test_parity test_omc_parity.cc test_omc_authoring_parity.cc test_omc_source_parity.cc test_omc_chunk_parity.cc)
+  add_executable(omc_test_parity test_omc_parity.cc test_omc_authoring_parity.cc test_omc_source_parity.cc test_omc_chunk_parity.cc test_omc_box_source_parity.cc)
   set_target_properties(omc_test_parity PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
@@ -240,6 +240,7 @@ if(OMC_BUILD_PARITY_TESTS)
   add_test(NAME omc_test_parity COMMAND omc_test_parity)
   add_test(NAME omc_test_authoring_parity COMMAND omc_test_parity --core-authoring)
   add_test(NAME omc_test_source_parity COMMAND omc_test_parity --core-source)
+  add_test(NAME omc_test_box_source_parity COMMAND omc_test_parity --rd3)
   add_test(NAME omc_test_tiff_source_parity COMMAND omc_test_parity --rd2)
   add_test(NAME omc_test_chunk_parity COMMAND omc_test_parity --read-chunks)
 endif()

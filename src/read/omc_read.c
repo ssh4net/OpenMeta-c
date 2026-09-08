@@ -721,6 +721,7 @@ omc_read_should_decode_block(const omc_blk_ref* block)
     if (block == (const omc_blk_ref*)0) {
         return 0;
     }
+    if (block->chunking == OMC_BLK_CHUNK_JPEG_XMP_EXT) return block->logical_offset == 0U;
     if (block->part_count == 0U || block->part_count == 1U) {
         return 1;
     }
@@ -1314,13 +1315,23 @@ omc_read_value_bytes(const omc_store* store, const omc_entry* entry,
     return 0;
 }
 
+typedef struct omc_read_source_context {
+    const omc_source_range* range;
+    omc_read_source_workspace* workspace;
+    omc_source_state* state;
+    const omc_source_limits* limits;
+    omc_read_source_res* result;
+    omc_scan_fmt format;
+} omc_read_source_context;
+
 static int
-omc_read_block_view(const omc_u8* file_bytes, omc_size file_size,
+omc_read_block_view(const omc_u8* file_bytes, omc_u64 file_size,
                     const omc_blk_ref* blocks, omc_u32 block_count,
                     omc_u32 block_index, omc_u8* payload, omc_size payload_cap,
                     omc_u32* payload_scratch_indices,
                     omc_u32 payload_scratch_cap, const omc_pay_opts* opts,
-                    omc_const_bytes* out_view, omc_pay_res* out_pay)
+                    omc_const_bytes* out_view, omc_pay_res* out_pay,
+                    omc_read_source_context* source)
 {
     const omc_blk_ref* block;
 
@@ -1334,16 +1345,34 @@ omc_read_block_view(const omc_u8* file_bytes, omc_size file_size,
     out_pay->written = 0U;
     out_pay->needed = 0U;
 
-    if (file_bytes == (const omc_u8*)0 || blocks == (const omc_blk_ref*)0
+    if ((file_bytes == NULL && source == NULL) || blocks == (const omc_blk_ref*)0
         || block_index >= block_count) {
         out_pay->status = OMC_PAY_MALFORMED;
         return 0;
     }
 
     block = &blocks[block_index];
+    if (source != NULL) {
+        omc_pay_source_workspace work;
+        work.stream = source->workspace->metadata;
+        work.stream_capacity = source->workspace->metadata_capacity;
+        *out_pay = omc_pay_ext_source(source->range, blocks, block_count, block_index,
+                                      payload, payload_cap, payload_scratch_indices,
+                                      payload_scratch_cap, &work, source->state,
+                                      source->limits, opts);
+        if (block->compression != OMC_BLK_COMP_NONE) {
+            omc_size used = block->data_size > work.stream_capacity ? work.stream_capacity : (omc_size)block->data_size;
+            if (used > source->result->scratch_used) source->result->scratch_used = used;
+        }
+        if (out_pay->status != OMC_PAY_OK) return 0;
+        out_view->data = payload;
+        out_view->size = (omc_size)out_pay->written;
+        return 1;
+    }
     if (block->compression == OMC_BLK_COMP_NONE
         && (block->part_count == 0U || block->part_count == 1U)
         && block->chunking != OMC_BLK_CHUNK_JPEG_APP2_SEQ
+        && block->chunking != OMC_BLK_CHUNK_JPEG_XMP_EXT
         && block->chunking != OMC_BLK_CHUNK_GIF_SUB) {
         if (block->data_offset > (omc_u64)file_size
             || block->data_size > ((omc_u64)file_size - block->data_offset)) {
@@ -1365,6 +1394,26 @@ omc_read_block_view(const omc_u8* file_bytes, omc_size file_size,
     out_view->data = payload;
     out_view->size = (omc_size)out_pay->written;
     return 1;
+}
+
+static void
+omc_read_png_text_source(omc_read_source_context* source, const omc_blk_ref* block,
+                          omc_const_bytes view, omc_store* store, omc_block_id block_id)
+{
+    omc_blk_ref local = *block;
+    omc_size size;
+    if (block->outer_size > source->workspace->metadata_capacity) {
+        source->result->status = OMC_READ_SOURCE_LIMIT;
+        source->result->value_scratch_needed = block->outer_size;
+        return;
+    }
+    size = (omc_size)block->outer_size;
+    if (omc_source_read(source->range, block->outer_offset, source->workspace->metadata,
+                           size, source->state, source->limits) != OMC_SOURCE_OK) return;
+    local.data_offset -= local.outer_offset;
+    local.outer_offset = 0U;
+    if (size > source->result->scratch_used) source->result->scratch_used = size;
+    omc_read_decode_png_text(source->workspace->metadata, size, &local, view, 1, store, block_id);
 }
 
 static int
@@ -1475,13 +1524,13 @@ omc_read_opts_init(omc_read_opts* opts)
     omc_xmp_opts_init(&opts->xmp);
 }
 
-omc_read_res
-omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
+static omc_read_res
+omc_read_run(const omc_u8* file_bytes, omc_u64 file_size,
                 omc_store* store, omc_blk_ref* out_blocks, omc_u32 block_cap,
                 omc_exif_ifd_ref* out_ifds, omc_u32 ifd_cap,
                 omc_u8* payload, omc_size payload_cap,
                 omc_u32* payload_scratch_indices, omc_u32 payload_scratch_cap,
-                const omc_read_opts* opts)
+                const omc_read_opts* opts, omc_read_source_context* source)
 {
     omc_read_res res;
     omc_read_opts local_opts;
@@ -1500,7 +1549,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
         use_opts = &local_opts;
     }
 
-    if (file_bytes == (const omc_u8*)0 || store == (omc_store*)0) {
+    if ((file_bytes == NULL && source == NULL) || store == (omc_store*)0) {
         res.scan.status = OMC_SCAN_MALFORMED;
         res.bmff.status = OMC_BMFF_MALFORMED;
         res.exr.status = OMC_EXR_MALFORMED;
@@ -1515,10 +1564,17 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
 
     entries_before = store->entry_count;
     casio_qvci_index = 0U;
-    res.scan = omc_scan_auto(file_bytes, file_size, out_blocks, block_cap);
-    omc_read_merge_bmff(&res.bmff,
-                        omc_bmff_dec(file_bytes, file_size, store,
-                                     &use_opts->bmff));
+    if (source != NULL) {
+        res.scan = omc_scan_source(source->range, source->format, out_blocks, block_cap,
+                                    source->state, source->limits);
+        if (source->format == OMC_SCAN_FMT_HEIF || source->format == OMC_SCAN_FMT_AVIF ||
+            source->format == OMC_SCAN_FMT_CR3)
+            omc_read_merge_bmff(&res.bmff, omc_bmff_dec_source(source->range, store,
+                                 source->state, source->limits, &use_opts->bmff));
+    } else {
+        res.scan = omc_scan_auto(file_bytes, (omc_size)file_size, out_blocks, block_cap);
+        omc_read_merge_bmff(&res.bmff, omc_bmff_dec(file_bytes, (omc_size)file_size, store, &use_opts->bmff));
+    }
 
     for (i = 0U; i < res.scan.written; ++i) {
         const omc_blk_ref* block;
@@ -1546,7 +1602,38 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
             omc_size entry_start;
 
             entry_start = store->entry_count;
-            if (block->format == OMC_SCAN_FMT_TIFF && block->data_offset == 0U
+            if (source != NULL && block->compression == OMC_BLK_COMP_NONE &&
+                (block->part_count == 0U || block->part_count == 1U) &&
+                block->chunking != OMC_BLK_CHUNK_GIF_SUB) {
+                omc_source_range nested = *source->range;
+                omc_exif_source_workspace work;
+                omc_exif_source_res decoded;
+                if (block->data_offset > nested.size || block->data_size > nested.size - block->data_offset) {
+                    res.exif.status = OMC_EXIF_MALFORMED; continue;
+                }
+                nested.source_offset += block->data_offset;
+                nested.size = block->data_size;
+                work.value = source->workspace->metadata;
+                work.value_capacity = source->workspace->metadata_capacity;
+                decoded = omc_exif_dec_source(&nested, store, block_id, out_ifds, ifd_cap,
+                                               &work, source->state, source->limits, &use_opts->exif);
+                omc_read_merge_exif(&res.exif, decoded.decoded);
+                if (decoded.value_scratch_needed > source->result->value_scratch_needed)
+                    source->result->value_scratch_needed = decoded.value_scratch_needed;
+                if (decoded.value_scratch_used > source->result->scratch_used)
+                    source->result->scratch_used = decoded.value_scratch_used;
+                source->result->nested_payloads_skipped += decoded.nested_payloads_skipped;
+                omc_read_clear_casio_simple_context(store, entry_start);
+                omc_read_clear_pentax_simple_context(store, entry_start);
+                omc_read_clear_ricoh_simple_context(store, entry_start);
+                omc_read_clear_motorola_simple_context(store, entry_start);
+                omc_read_clear_nikon_main_simple_context(store, entry_start);
+                omc_read_remap_ricoh_padded_type2_ifd(store, entry_start);
+                omc_read_remap_kodak_simple_ifd(store, entry_start);
+                omc_read_adjust_sigma_simple(store, entry_start);
+                omc_read_adjust_samsung_simple(store, entry_start);
+                omc_read_prune_nikon_preview_simple(store, entry_start);
+            } else if (block->format == OMC_SCAN_FMT_TIFF && block->data_offset == 0U
                 && block->data_size == (omc_u64)file_size) {
                 exif_res = omc_exif_dec(file_bytes, file_size, store, block_id,
                                         out_ifds, ifd_cap, &use_opts->exif);
@@ -1571,7 +1658,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                          res.scan.written, i, payload,
                                          payload_cap, payload_scratch_indices,
                                          payload_scratch_cap, &use_opts->pay,
-                                         &block_view, &pay_res)) {
+                                         &block_view, &pay_res, source)) {
                     omc_read_merge_pay(&res.pay, pay_res);
                     continue;
                 }
@@ -1598,7 +1685,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
             ciff_res = omc_ciff_dec(file_bytes, file_size, store, block_id,
                                     &use_opts->exif);
             omc_read_merge_exif(&res.exif, ciff_res);
-        } else if (block->kind == OMC_BLK_XMP) {
+        } else if (block->kind == OMC_BLK_XMP || block->kind == OMC_BLK_XMP_EXT) {
             omc_const_bytes block_view;
             omc_pay_res pay_res;
             omc_xmp_res xmp_res;
@@ -1607,7 +1694,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                      res.scan.written, i, payload, payload_cap,
                                      payload_scratch_indices,
                                      payload_scratch_cap, &use_opts->pay,
-                                     &block_view, &pay_res)) {
+                                     &block_view, &pay_res, source)) {
                 omc_read_merge_pay(&res.pay, pay_res);
                 continue;
             }
@@ -1626,7 +1713,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                      res.scan.written, i, payload, payload_cap,
                                      payload_scratch_indices,
                                      payload_scratch_cap, &use_opts->pay,
-                                     &block_view, &pay_res)) {
+                                     &block_view, &pay_res, source)) {
                 omc_read_merge_pay(&res.pay, pay_res);
                 continue;
             }
@@ -1644,7 +1731,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                      res.scan.written, i, payload, payload_cap,
                                      payload_scratch_indices,
                                      payload_scratch_cap, &use_opts->pay,
-                                     &block_view, &pay_res)) {
+                                     &block_view, &pay_res, source)) {
                 omc_read_merge_pay(&res.pay, pay_res);
                 continue;
             }
@@ -1663,7 +1750,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                      res.scan.written, i, payload, payload_cap,
                                      payload_scratch_indices,
                                      payload_scratch_cap, &use_opts->pay,
-                                     &block_view, &pay_res)) {
+                                     &block_view, &pay_res, source)) {
                 omc_read_merge_pay(&res.pay, pay_res);
                 continue;
             }
@@ -1681,7 +1768,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                      res.scan.written, i, payload, payload_cap,
                                      payload_scratch_indices,
                                      payload_scratch_cap, &use_opts->pay,
-                                     &block_view, &pay_res)) {
+                                     &block_view, &pay_res, source)) {
                 omc_read_merge_pay(&res.pay, pay_res);
                 continue;
             }
@@ -1702,7 +1789,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                      res.scan.written, i, payload, payload_cap,
                                      payload_scratch_indices,
                                      payload_scratch_cap, &use_opts->pay,
-                                     &block_view, &pay_res)) {
+                                     &block_view, &pay_res, source)) {
                 omc_read_merge_pay(&res.pay, pay_res);
                 continue;
             }
@@ -1720,7 +1807,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                      res.scan.written, i, payload, payload_cap,
                                      payload_scratch_indices,
                                      payload_scratch_cap, &use_opts->pay,
-                                     &block_view, &pay_res)) {
+                                     &block_view, &pay_res, source)) {
                 omc_read_merge_pay(&res.pay, pay_res);
                 continue;
             }
@@ -1769,7 +1856,7 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                      res.scan.written, i, payload, payload_cap,
                                      payload_scratch_indices,
                                      payload_scratch_cap, &use_opts->pay,
-                                     &block_view, &pay_res)) {
+                                     &block_view, &pay_res, source)) {
                 omc_read_merge_pay(&res.pay, pay_res);
                 continue;
             }
@@ -1785,18 +1872,19 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                                      res.scan.written, i, payload, payload_cap,
                                      payload_scratch_indices,
                                      payload_scratch_cap, &use_opts->pay,
-                                     &block_view, &pay_res)) {
+                                     &block_view, &pay_res, source)) {
                 omc_read_merge_pay(&res.pay, pay_res);
                 continue;
             }
 
             omc_read_merge_pay(&res.pay, pay_res);
-            omc_read_decode_png_text(file_bytes, file_size, block, block_view,
-                                     1, store, block_id);
+            if (source != NULL) omc_read_png_text_source(source, block, block_view, store, block_id);
+            else omc_read_decode_png_text(file_bytes, (omc_size)file_size, block, block_view,
+                                           1, store, block_id);
         }
     }
 
-    if (res.scan.written == 0U && omc_read_looks_like_xmp(file_bytes, file_size)) {
+    if (source == NULL && res.scan.written == 0U && omc_read_looks_like_xmp(file_bytes, (omc_size)file_size)) {
         omc_block_info xmp_block;
         omc_block_id xmp_block_id;
         omc_xmp_res xmp_res2;
@@ -1815,8 +1903,8 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
         }
     }
 
-    res.exr = omc_exr_dec(file_bytes, file_size, store, OMC_ENTRY_FLAG_NONE,
-                          &use_opts->exr);
+    if (source == NULL)
+        res.exr = omc_exr_dec(file_bytes, (omc_size)file_size, store, OMC_ENTRY_FLAG_NONE, &use_opts->exr);
 
     res.entries_added = (omc_u32)(store->entry_count - entries_before);
     return res;
@@ -1878,4 +1966,33 @@ omc_read_tiff_source(const omc_source_range* range, omc_store* store,
         omc_read_decode_tiff_embedded(&opts->decode, store, block, entry_start, &res);
     res.entries_added = (omc_u32)(store->entry_count - entry_start);
     return res;
+}
+
+omc_read_res
+omc_read_simple(const omc_u8* bytes, omc_size size, omc_store* store,
+                  omc_blk_ref* blocks, omc_u32 block_capacity,
+                  omc_exif_ifd_ref* ifds, omc_u32 ifd_capacity,
+                  omc_u8* payload, omc_size payload_capacity,
+                  omc_u32* indices, omc_u32 index_capacity, const omc_read_opts* opts)
+{
+    return omc_read_run(bytes, size, store, blocks, block_capacity, ifds, ifd_capacity,
+                          payload, payload_capacity, indices, index_capacity, opts, NULL);
+}
+omc_read_res
+omc_read_container_source(const omc_source_range* range, omc_scan_fmt format,
+                           omc_store* store, omc_read_source_workspace* workspace,
+                           omc_source_state* state, const omc_read_source_opts* opts,
+                           omc_read_source_res* result)
+{
+    omc_read_source_context source;
+    source.range = range;
+    source.workspace = workspace;
+    source.state = state;
+    source.limits = &opts->io;
+    source.result = result;
+    source.format = format;
+    return omc_read_run(NULL, range->size, store, workspace->blocks, workspace->block_capacity,
+                          workspace->ifds, workspace->ifd_capacity, workspace->payload,
+                          workspace->payload_capacity, workspace->payload_indices,
+                          workspace->payload_index_capacity, &opts->decode, &source);
 }
