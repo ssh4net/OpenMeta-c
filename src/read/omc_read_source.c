@@ -1,8 +1,9 @@
+#include "read/omc_read_internal.h"
+#include "omc/omc_edit.h"
 #include "omc/omc_read_source.h"
 #include <string.h>
 
 #define OMC_SOURCE_MAX_SEGMENTS 1024U
-#define OMC_SOURCE_MAX_IFDS 1024U
 
 typedef struct omc_source_segment {
     omc_u64 original;
@@ -42,21 +43,6 @@ read_bytes(omc_source_collect *c, omc_u64 offset, omc_u8 *out, omc_size size)
         return 0;
     }
     return 1;
-}
-static int
-snapshot(omc_source_collect *c, omc_u64 offset, omc_u64 size)
-{
-    omc_size end;
-    if (offset > c->capacity || size > c->capacity - offset) {
-        c->status = OMC_READ_SOURCE_LIMIT;
-        return 0;
-    }
-    end = (omc_size)(offset + size);
-    if (end > c->used) {
-        memset(c->bytes + c->used, 0, end - c->used);
-        c->used = end;
-    }
-    return read_bytes(c, offset, c->bytes + (omc_size)offset, (omc_size)size);
 }
 static int
 collect_jpeg(omc_source_collect *c, omc_source_segment *segments, omc_u32 *count)
@@ -241,142 +227,10 @@ collect_webp(omc_source_collect *c, omc_source_segment *segments, omc_u32 *count
     }
     return 1;
 }
-static int
-queue_ifd(omc_source_collect *c, omc_u64 *queue, omc_u32 *count, omc_u64 offset)
-{
-    omc_u32 i;
-    if (offset == 0U)
-        return 1;
-    for (i = 0U; i < *count; ++i)
-        if (queue[i] == offset)
-            return 1;
-    if (*count == OMC_SOURCE_MAX_IFDS ||
-        *count >= c->opts->decode.exif.limits.max_ifds) {
-        c->status = OMC_READ_SOURCE_LIMIT;
-        return 0;
-    }
-    queue[(*count)++] = offset;
-    return 1;
-}
-static int
-collect_tiff(omc_source_collect *c)
-{
-    static const unsigned widths[19] = {0U, 1U, 1U, 2U, 4U, 8U, 1U, 1U, 2U, 4U,
-                                        8U, 4U, 8U, 4U, 0U, 0U, 8U, 8U, 8U};
-    omc_u64 queue[OMC_SOURCE_MAX_IFDS];
-    omc_u64 ifd, count, total, table, entry, n, value, size, next, j;
-    omc_u32 queued, processed;
-    unsigned version, cw, ew, vw, tag, type, width;
-    int little;
-    if (!snapshot(c, 0U, 8U))
-        return 0;
-    little = c->bytes[0] == 'I';
-    version = (unsigned)number(c->bytes + 2U, 2U, little);
-    if (version == 43U) {
-        if (!snapshot(c, 8U, 8U))
-            return 0;
-        if (number(c->bytes + 4U, 2U, little) != 8U ||
-            number(c->bytes + 6U, 2U, little) != 0U) {
-            c->status = OMC_READ_SOURCE_MALFORMED;
-            return 0;
-        }
-        cw = 8U;
-        ew = 20U;
-        vw = 8U;
-        next = number(c->bytes + 8U, 8U, little);
-    } else if (version == 42U) {
-        cw = 2U;
-        ew = 12U;
-        vw = 4U;
-        next = number(c->bytes + 4U, 4U, little);
-    } else {
-        c->status = OMC_READ_SOURCE_UNSUPPORTED;
-        return 0;
-    }
-    queued = 0U;
-    processed = 0U;
-    total = 0U;
-    if (!queue_ifd(c, queue, &queued, next))
-        return 0;
-    while (processed < queued) {
-        ifd = queue[processed++];
-        if (!snapshot(c, ifd, cw))
-            return 0;
-        count = number(c->bytes + (omc_size)ifd, cw, little);
-        if (count > c->opts->decode.exif.limits.max_entries_per_ifd ||
-            total > c->opts->decode.exif.limits.max_total_entries ||
-            count > c->opts->decode.exif.limits.max_total_entries - total) {
-            c->status = OMC_READ_SOURCE_LIMIT;
-            return 0;
-        }
-        total += count;
-        table = count * ew;
-        if (!snapshot(c, ifd + cw, table + vw))
-            return 0;
-        next = number(c->bytes + (omc_size)(ifd + cw + table), vw, little);
-        if (!queue_ifd(c, queue, &queued, next))
-            return 0;
-        for (n = 0U; n < count; ++n) {
-            entry = ifd + cw + n * ew;
-            tag = (unsigned)number(c->bytes + (omc_size)entry, 2U, little);
-            type = (unsigned)number(c->bytes + (omc_size)entry + 2U, 2U, little);
-            width = type < 19U ? widths[type] : 0U;
-            if (!width) {
-                c->status = OMC_READ_SOURCE_UNSUPPORTED;
-                return 0;
-            }
-            size = number(c->bytes + (omc_size)entry + 4U, vw, little);
-            if (size > ~(omc_u64)0 / width) {
-                c->status = OMC_READ_SOURCE_LIMIT;
-                return 0;
-            }
-            size *= width;
-            if (size > c->opts->decode.exif.limits.max_value_bytes) {
-                c->status = OMC_READ_SOURCE_LIMIT;
-                return 0;
-            }
-            value = entry + (vw == 8U ? 12U : 8U);
-            if (size > vw) {
-                value = number(c->bytes + (omc_size)value, vw, little);
-                if (!snapshot(c, value, size))
-                    return 0;
-            }
-            if (tag == 0x927CU && size && c->opts->decode.exif.decode_makernote) {
-                c->status = OMC_READ_SOURCE_UNSUPPORTED;
-                return 0;
-            }
-            if (tag == 0x014AU || tag == 0x8769U || tag == 0x8825U || tag == 0xA005U) {
-                if (type != 3U && type != 4U && type != 13U && type != 16U &&
-                    type != 18U) {
-                    c->status = OMC_READ_SOURCE_UNSUPPORTED;
-                    return 0;
-                }
-                /* EXIF/GPS/Interop use one offset; SubIFDs may contain an array. */
-                for (j = 0U; j < size; j += width) {
-                    if (!queue_ifd(
-                            c, queue, &queued,
-                            number(c->bytes + (omc_size)(value + j), width, little)))
-                        return 0;
-                    if (tag != 0x014AU)
-                        break;
-                }
-            }
-        }
-    }
-    return 1;
-}
 static void
-remap_block(omc_blk_ref *block, const omc_source_range *range,
-            const omc_source_segment *segments, omc_u32 count, int tiff)
+remap_block(omc_blk_ref *block, const omc_source_segment *segments, omc_u32 count)
 {
     omc_u32 i;
-    if (tiff) {
-        block->outer_offset = 0U;
-        block->outer_size = range->size;
-        block->data_offset = 0U;
-        block->data_size = range->size;
-        return;
-    }
     for (i = 0U; i < count; ++i) {
         if (block->outer_offset >= segments[i].compact &&
             block->outer_offset - segments[i].compact < segments[i].size) {
@@ -409,7 +263,6 @@ omc_read_source(const omc_source_range *range, omc_store *store,
     omc_size i, before, size;
     const omc_u8 *data;
     omc_u8 signature[2];
-    int tiff;
     memset(&res, 0, sizeof(res));
     if (!omc_source_range_valid(range) || store == NULL || w == NULL || state == NULL ||
         (w->block_capacity && w->blocks == NULL) ||
@@ -430,7 +283,6 @@ omc_read_source(const omc_source_range *range, omc_store *store,
     }
     before = store->block_count;
     count = 0U;
-    tiff = 0;
     if (range->source.contiguous_data != NULL) {
         data = range->source.contiguous_data + (omc_size)range->source_offset;
         size = (omc_size)range->size;
@@ -453,12 +305,36 @@ omc_read_source(const omc_source_range *range, omc_store *store,
             }
         } else if ((signature[0] == 'I' && signature[1] == 'I') ||
                    (signature[0] == 'M' && signature[1] == 'M')) {
-            tiff = 1;
-            if (!collect_tiff(&c)) {
-                res.status = c.status;
-                res.scratch_used = c.used;
+            omc_store candidate;
+            omc_exif_source_res exif_source;
+            memset(&exif_source, 0, sizeof(exif_source));
+            omc_store_init(&candidate);
+            if (omc_edit_commit(store, NULL, 0U, &candidate) != OMC_STATUS_OK) {
+                res.status = OMC_READ_SOURCE_LIMIT;
                 return res;
             }
+            res.decoded = omc_read_tiff_source(range, &candidate, w, state,
+                                                opts, &exif_source);
+            res.value_scratch_needed = exif_source.value_scratch_needed;
+            res.scratch_used = exif_source.value_scratch_used;
+            res.nested_payloads_skipped = exif_source.nested_payloads_skipped;
+            if (state->code != OMC_SOURCE_OK)
+                res.status = OMC_READ_SOURCE_IO;
+            else if (exif_source.value_scratch_needed != 0U ||
+                     res.decoded.exif.status == OMC_EXIF_LIMIT ||
+                     res.decoded.exif.status == OMC_EXIF_NOMEM)
+                res.status = OMC_READ_SOURCE_LIMIT;
+            else if (res.decoded.scan.status == OMC_SCAN_UNSUPPORTED)
+                res.status = OMC_READ_SOURCE_UNSUPPORTED;
+            else if (res.decoded.scan.status == OMC_SCAN_MALFORMED)
+                res.status = OMC_READ_SOURCE_MALFORMED;
+            if (res.status == OMC_READ_SOURCE_OK) {
+                omc_store_fini(store);
+                *store = candidate;
+            } else {
+                omc_store_fini(&candidate);
+            }
+            return res;
         } else if (signature[0] == 0x89U && signature[1] == 'P') {
             if (!collect_png(&c, segments, &count)) {
                 res.status = c.status;
@@ -485,9 +361,9 @@ omc_read_source(const omc_source_range *range, omc_store *store,
                         w->payload_indices, w->payload_index_capacity, &opts->decode);
     if (range->source.contiguous_data == NULL) {
         for (i = 0U; i < res.decoded.scan.written; ++i)
-            remap_block(&w->blocks[i], range, segments, count, tiff);
+            remap_block(&w->blocks[i], segments, count);
         for (i = before; i < store->block_count; ++i)
-            remap_block(&store->blocks[i], range, segments, count, tiff);
+            remap_block(&store->blocks[i], segments, count);
     }
     return res;
 }

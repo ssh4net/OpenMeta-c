@@ -32,6 +32,8 @@ typedef struct omc_read_source_res {
     omc_read_source_status status;
     omc_read_res decoded;
     omc_size scratch_used;
+    omc_u64 value_scratch_needed;
+    omc_u32 nested_payloads_skipped;
 } omc_read_source_res;
 
 OMC_API void omc_read_source_opts_init(omc_read_source_opts *opts);
@@ -39,10 +41,10 @@ OMC_API void omc_read_source_opts_init(omc_read_source_opts *opts);
  * supports JPEG, PNG, WebP and TIFF/BigTIFF/DNG. No whole-file callback fallback.
  * JPEG stops at SOS/EOI. PNG/WebP skip image chunks and collect metadata chunks
  * including framing into metadata_capacity; multipart payloads use payload.
- * TIFF gathers directory/value ranges into a bounded
- * TIFF-relative snapshot; metadata offsets must fit metadata_capacity.
- * Callback TIFF MakerNote enrichment is explicitly unsupported when requested
- * and present. Raw MakerNote values are retained with enrichment disabled.
+ * TIFF/BigTIFF/RW2/ORF read directories and values at their original offsets.
+ * Metadata scratch holds one value (combined GeoTIFF parameters when needed).
+ * Source-relative MakerNotes reuse the typed decoder; inspect decoded.exif,
+ * value_scratch_needed and nested_payloads_skipped for incomplete results.
  * Memory sources retain the existing contiguous reader and all its formats.
  * Collection/I/O failure leaves the store unchanged. Decode follows the
  * existing partial-result contract; inspect decoded statuses as well.

@@ -334,14 +334,18 @@ For persisted transfer artifacts:
 
 ## Current Core Checkpoint
 
-Version 0.4.0 includes typed values and atomic edits, detached validation,
+Version 0.5.0 includes typed values and atomic edits, detached validation,
 canonical EXIF serialization, the five bounded native translation groups,
 paired IPTC date/time projection, shared BMFF replacement, and bounded
 positional input for JPEG, TIFF/BigTIFF/DNG, PNG and WebP. PNG `caBX` and WebP
 `C2PA` discovery now supports split JUMBF metadata. See [authoring.md](authoring.md),
 [bmff_writing.md](bmff_writing.md), and [positional_input.md](positional_input.md).
 
-Clang 20 validation passed 40/40 Release direct plus focused C++ parity targets,
+TIFF callback input now reads distant directories and values with one value
+buffer; RW2/ORF headers and tested source MakerNote layouts are supported.
+See [read_decode_parity.md](read_decode_parity.md) for residual coverage.
+
+Clang 20 validation passed 41/41 Release direct plus focused C++ parity targets,
 37/37 ASan/UBSan direct targets, and 37/37 direct targets without compression
 dependencies. Brotli discovery now enables the available backend, alongside
 zlib. These are synthetic WSL gates against C++ 0.4.127. The historical broad

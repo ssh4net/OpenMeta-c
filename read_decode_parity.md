@@ -180,3 +180,38 @@ ctest --test-dir /tmp/openmeta-c-read-release-20260908 --output-on-failure \
 The final command intentionally returns failure while the inventory remains
 open. RD2 is next: replace TIFF-relative scratch spans with direct value windows
 before adding special TIFF headers and source-relative MakerNote layouts.
+
+## RD2 Checkpoint: Version 0.5.0
+
+The callback TIFF path now uses the existing typed IFD traversal with positional
+structural reads and one caller value buffer. It no longer allocates scratch up
+to the greatest TIFF offset. Inline values use an eight-byte local buffer.
+GeoTIFF parameters share a checked combined value buffer. Revisited IFD offsets
+are bounded and suppressed, with the reference GPS/Interop exception. Values
+over the configured byte limit are emitted as truncated without reading them.
+
+The public `omc_exif_dec_source` API reports value scratch needs and nested
+residuals. High-level TIFF input decodes into a candidate store and preserves the
+original store on I/O, scratch or allocation failure. Direct decoding retains
+its documented partial-result contract. Source-relative vendor routes cover
+Canon base selection, Nikon nested TIFF, Sony, Panasonic, Fuji, old Olympus
+subtables, Casio type 2 and Ricoh theta pointers. Payload-local vendor decoders
+remain shared. This is tested fixture coverage, not acceptance of every vendor
+layout: candidate selection, uncommon external-reference layouts and malformed
+value continuation remain RD5 differential work. Unknown undecoded notes and
+failed source routes report residuals/status; they do not imply full enrichment.
+
+Validation on Clang 20: 41/41 Release direct/focused targets, including a new
+80-case C callback versus C++ contiguous TIFF/MakerNote gate; 41/41 with zlib and
+Brotli disabled; 37/37 ASan/UBSan direct targets with LeakSanitizer outside the
+ptrace sandbox. Fixed sparse fixtures test both byte orders and classic TIFF,
+BigTIFF, RW2 and ORF. Directories and values are shifted beyond 2 GiB (classic)
+or 8 GiB (BigTIFF), source base is 1000, value scratch is 12 bytes, and callbacks
+reject gap reads. These tests compare typed C memory/callback entries and original
+IFD offsets; the 80-case gate separately compares C++ output. Neither gate is a
+complete C++ callback error-policy or vendor-offset inventory.
+
+Artifacts: `/tmp/openmeta-rd2-build.log`, `/tmp/openmeta-rd2-tests.log`,
+`/tmp/openmeta-rd2-nodeps-tests.log`, `/tmp/openmeta-rd2-sanitize-tests.log`.
+Reproduce the differential gate with `tests/omc_test_parity --rd2` in the existing
+Clang 20 Release build. RD3 follows with reusable source scanner/payload APIs.

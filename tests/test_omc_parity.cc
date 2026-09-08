@@ -19,6 +19,7 @@ extern "C" {
 
 #include "omc_test_assert.h"
 #include "omc_test_chunk_fixture.h"
+#include "omc/omc_read_source.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -9707,7 +9708,22 @@ struct TransferPersistParitySummary final {
     std::vector<std::string> sidecar_records;
 };
 
+static bool g_tiff_source_inventory = false;
+static unsigned g_tiff_source_cases = 0U;
+
+static omc_source_io_res
+fixture_source_read(void* context, omc_u64 offset, omc_u8* out, omc_size size)
+{
+    const auto& bytes = *static_cast<const ByteVec*>(context);
+    assert(offset >= 37U);
+    offset -= 37U;
+    assert(offset <= bytes.size() && size <= bytes.size() - offset);
+    if (size != 0U) std::memcpy(out, bytes.data() + offset, size);
+    return {OMC_SOURCE_IO_OK, size};
+}
+
 struct ReadCaseOptions final {
+    bool positional = false;
     bool decode_makernote                   = false;
     bool verify_c2pa                        = false;
     bool verify_require_resolved_references = false;
@@ -9741,11 +9757,36 @@ read_omc_records(const ByteVec& file_bytes, const ReadCaseOptions& options)
             opts.jumbf.verify_backend = OMC_C2PA_VERIFY_BACKEND_OPENSSL;
         }
     }
+    if (options.positional) {
+        std::array<omc_u8, 65536> values{};
+        omc_read_source_workspace w{values.data(), values.size(), blocks.data(),
+            static_cast<omc_u32>(blocks.size()), ifds.data(),
+            static_cast<omc_u32>(ifds.size()), payload.data(), payload.size(),
+            scratch.data(), static_cast<omc_u32>(scratch.size())};
+        const omc_source_range range{
+            omc_source_callback(file_bytes.size() + 37U,
+                const_cast<ByteVec*>(&file_bytes), fixture_source_read, 0),
+            37U, file_bytes.size()};
+        omc_source_state state{};
+        omc_read_source_opts source_opts;
+        omc_read_source_opts_init(&source_opts);
+        source_opts.decode = opts;
+        const auto source_res = omc_read_source(&range, &store, &w, &state, &source_opts);
+        res = source_res.decoded;
+        if (source_res.status != OMC_READ_SOURCE_OK || source_res.nested_payloads_skipped) {
+            std::fprintf(stderr, "source status=%d exif=%d input=%d needed=%llu skipped=%u\n",
+                source_res.status, res.exif.status, state.code,
+                static_cast<unsigned long long>(source_res.value_scratch_needed),
+                source_res.nested_payloads_skipped);
+            out.push_back("SOURCE_INCOMPLETE");
+        }
+    } else {
     res = omc_read_simple(file_bytes.data(), (omc_size)file_bytes.size(),
                           &store, blocks.data(), (omc_u32)blocks.size(),
                           ifds.data(), (omc_u32)ifds.size(), payload.data(),
                           (omc_size)payload.size(), scratch.data(),
                           (omc_u32)scratch.size(), &opts);
+    }
     if (res.scan.status == OMC_SCAN_MALFORMED) {
         std::fprintf(stderr, "omc scan failed with malformed status\n");
         std::exit(1);
@@ -9985,7 +10026,21 @@ run_case(const char* case_name, const ByteVec& file_bytes,
     std::vector<std::string> omc;
     std::vector<std::string> cpp;
 
-    omc = read_omc_records(file_bytes, options);
+    ReadCaseOptions use_options = options;
+    if (g_tiff_source_inventory) {
+        if (file_bytes.size() < 8U ||
+            !((file_bytes[0] == 'I' && file_bytes[1] == 'I') ||
+              (file_bytes[0] == 'M' && file_bytes[1] == 'M'))) return true;
+        const unsigned version = file_bytes[0] == 'I'
+            ? unsigned(file_bytes[2]) | (unsigned(file_bytes[3]) << 8U)
+            : (unsigned(file_bytes[2]) << 8U) | unsigned(file_bytes[3]);
+        if (version != 42U && version != 43U && version != 0x55U && version != 0x4f52U)
+            return true;
+        use_options.positional = true;
+        ++g_tiff_source_cases;
+        std::fprintf(stderr, "source case: %s\n", case_name);
+    }
+    omc = read_omc_records(file_bytes, use_options);
     cpp = read_cpp_records(file_bytes, options);
     normalize_case_records(case_name, &omc, &cpp);
     return compare_records(case_name, omc, cpp);
@@ -11494,8 +11549,9 @@ main(int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--bench") == 0) {
         return run_benchmarks();
     }
-    if (argc != 1 && !(argc == 2 && std::strcmp(argv[1], "--all") == 0)) {
-        std::fprintf(stderr, "usage: %s [--bench|--core-authoring|--core-source|--read-chunks|--all]\n", argv[0]);
+    g_tiff_source_inventory = argc == 2 && std::strcmp(argv[1], "--rd2") == 0;
+    if (argc != 1 && !g_tiff_source_inventory && !(argc == 2 && std::strcmp(argv[1], "--all") == 0)) {
+        std::fprintf(stderr, "usage: %s [--bench|--core-authoring|--core-source|--read-chunks|--rd2|--all]\n", argv[0]);
         return 2;
     }
 
@@ -16757,5 +16813,7 @@ main(int argc, char** argv)
                   build_tiff_nikon_main_single_long_fixture("E700", 0x000AU, 0U),
                   true)
          && ok;
+    if (g_tiff_source_inventory)
+        std::fprintf(stderr, "source TIFF cases: %u\n", g_tiff_source_cases);
     return ok ? 0 : 1;
 }

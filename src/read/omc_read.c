@@ -1,3 +1,4 @@
+#include "read/omc_read_internal.h"
 #include "omc/omc_read.h"
 
 #include "read/omc_ciff.h"
@@ -1818,5 +1819,63 @@ omc_read_simple(const omc_u8* file_bytes, omc_size file_size,
                           &use_opts->exr);
 
     res.entries_added = (omc_u32)(store->entry_count - entries_before);
+    return res;
+}
+
+omc_read_res
+omc_read_tiff_source(const omc_source_range* range, omc_store* store,
+                      omc_read_source_workspace* w, omc_source_state* state,
+                      const omc_read_source_opts* opts,
+                      omc_exif_source_res* source_result)
+{
+    omc_read_res res;
+    omc_exif_source_workspace exif_work;
+    omc_u8 header[16];
+    omc_size header_size, entry_start;
+    omc_block_id block;
+    omc_read_init_res(&res);
+    header_size = range->size < 8U ? (omc_size)range->size : 8U;
+    if (omc_source_read(range, 0U, header, header_size, state, &opts->io) !=
+        OMC_SOURCE_OK)
+        return res;
+    if (header_size == 8U &&
+        ((header[2] == 43U && header[3] == 0U) ||
+         (header[2] == 0U && header[3] == 43U))) {
+        if (range->size < 16U) {
+            res.scan.status = OMC_SCAN_MALFORMED;
+            return res;
+        }
+        if (omc_source_read(range, 8U, header + 8U, 8U, state, &opts->io) !=
+            OMC_SOURCE_OK) return res;
+        header_size = 16U;
+    }
+    res.scan = omc_scan_tiff_header(header, header_size, range->size,
+                                     w->blocks, w->block_capacity);
+    if (res.scan.written == 0U)
+        return res;
+    if (!omc_read_store_block(store, w->blocks, &block)) {
+        res.exif.status = OMC_EXIF_NOMEM;
+        return res;
+    }
+    entry_start = store->entry_count;
+    exif_work.value = w->metadata;
+    exif_work.value_capacity = w->metadata_capacity;
+    *source_result = omc_exif_dec_source(range, store, block, w->ifds,
+                                          w->ifd_capacity, &exif_work, state,
+                                          &opts->io, &opts->decode.exif);
+    res.exif = source_result->decoded;
+    omc_read_clear_casio_simple_context(store, entry_start);
+    omc_read_clear_pentax_simple_context(store, entry_start);
+    omc_read_clear_ricoh_simple_context(store, entry_start);
+    omc_read_clear_motorola_simple_context(store, entry_start);
+    omc_read_clear_nikon_main_simple_context(store, entry_start);
+    omc_read_remap_ricoh_padded_type2_ifd(store, entry_start);
+    omc_read_remap_kodak_simple_ifd(store, entry_start);
+    omc_read_adjust_sigma_simple(store, entry_start);
+    omc_read_adjust_samsung_simple(store, entry_start);
+    omc_read_prune_nikon_preview_simple(store, entry_start);
+    if (res.exif.status == OMC_EXIF_OK || res.exif.status == OMC_EXIF_TRUNCATED)
+        omc_read_decode_tiff_embedded(&opts->decode, store, block, entry_start, &res);
+    res.entries_added = (omc_u32)(store->entry_count - entry_start);
     return res;
 }

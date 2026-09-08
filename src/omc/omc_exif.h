@@ -4,6 +4,7 @@
 #include "omc/omc_base.h"
 #include "omc/omc_store.h"
 #include "omc/omc_types.h"
+#include "omc/omc_source.h"
 
 OMC_EXTERN_C_BEGIN
 
@@ -73,6 +74,29 @@ typedef struct omc_exif_res {
     omc_u64 limit_ifd_offset;
     omc_u16 limit_tag;
 } omc_exif_res;
+
+typedef struct omc_exif_source_workspace {
+    omc_u8* value;
+    omc_size value_capacity;
+} omc_exif_source_workspace;
+
+typedef struct omc_exif_source_res {
+    omc_exif_res decoded;
+    omc_u64 value_scratch_needed;
+    omc_size value_scratch_used;
+    omc_u32 nested_payloads_skipped;
+} omc_exif_source_res;
+
+/* Appends through the shared TIFF decoder. Callback reads use one value buffer
+ * (combined parameter buffers for GeoTIFF), independent of source offsets.
+ * Decode and I/O failures retain partial results. Inspect state and residuals.
+ * All buffers and the store must be disjoint from source/workspace storage. */
+OMC_API omc_exif_source_res
+omc_exif_dec_source(const omc_source_range* range, omc_store* store,
+                    omc_block_id source_block, omc_exif_ifd_ref* out_ifds,
+                    omc_u32 ifd_cap, const omc_exif_source_workspace* workspace,
+                    omc_source_state* state, const omc_source_limits* io_limits,
+                    const omc_exif_opts* opts);
 
 OMC_API void
 omc_exif_opts_init(omc_exif_opts* opts);

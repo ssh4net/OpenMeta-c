@@ -1,3 +1,4 @@
+#include "read/omc_read_internal.h"
 #include "omc/omc_scan.h"
 
 #include <string.h>
@@ -831,7 +832,7 @@ omc_scan_meas_jpeg(const omc_u8* bytes, omc_size size)
 }
 
 omc_scan_res
-omc_scan_tiff(const omc_u8* bytes, omc_size size,
+omc_scan_tiff_header(const omc_u8* bytes, omc_size size, omc_u64 file_size,
               omc_blk_ref* out_blocks, omc_u32 out_cap)
 {
     omc_scan_sink sink;
@@ -905,7 +906,7 @@ omc_scan_tiff(const omc_u8* bytes, omc_size size,
         }
     }
 
-    if (first_ifd >= (omc_u64)size) {
+    if (first_ifd >= file_size) {
         sink.result.status = OMC_SCAN_MALFORMED;
         return sink.result;
     }
@@ -914,13 +915,20 @@ omc_scan_tiff(const omc_u8* bytes, omc_size size,
     block.format = OMC_SCAN_FMT_TIFF;
     block.kind = OMC_BLK_EXIF;
     block.outer_offset = 0U;
-    block.outer_size = (omc_u64)size;
+    block.outer_size = file_size;
     block.data_offset = 0U;
-    block.data_size = (omc_u64)size;
+    block.data_size = file_size;
     block.id = 0U;
     omc_scan_sink_emit(&sink, &block);
 
     return sink.result;
+}
+
+omc_scan_res
+omc_scan_tiff(const omc_u8* bytes, omc_size size,
+              omc_blk_ref* out_blocks, omc_u32 out_cap)
+{
+    return omc_scan_tiff_header(bytes, size, size, out_blocks, out_cap);
 }
 
 omc_scan_res

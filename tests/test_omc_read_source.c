@@ -6,7 +6,8 @@
 typedef struct host {
     omc_u8 bytes[1024];
     omc_size available;
-    omc_u64 base;
+    omc_u64 base, gap;
+    omc_size split;
     omc_size forbidden_begin, forbidden_end;
     int short_read;
 } host;
@@ -23,8 +24,15 @@ read_at(void *context, omc_u64 offset, omc_u8 *destination, omc_size size)
     host *h = (host *)context;
     omc_source_io_res r;
     omc_size p;
-    assert(offset >= h->base && offset - h->base <= h->available);
-    p = (omc_size)(offset - h->base);
+    omc_u64 relative;
+    assert(offset >= h->base);
+    relative = offset - h->base;
+    if (h->gap && relative >= h->split) {
+        assert(relative >= h->split + h->gap);
+        relative -= h->gap;
+    } else if (h->gap) assert(size <= h->split - relative);
+    assert(relative <= h->available);
+    p = (omc_size)relative;
     assert(size <= h->available - p);
     assert(!size || p >= h->forbidden_end || p + size <= h->forbidden_begin);
     r.code = OMC_SOURCE_IO_OK;
@@ -225,6 +233,45 @@ compare(host *h, int jpeg)
     omc_store_fini(&expected);
 }
 static void
+sparse_tiff(host *h, int big, int little, unsigned magic)
+{
+    work w;
+    omc_store expected, actual;
+    omc_source_range range;
+    omc_source_state state;
+    omc_read_source_opts opts;
+    omc_read_source_res r;
+    omc_exif_res e;
+    omc_size first = big ? 16U : 8U;
+    omc_size make_field = first + (big ? 8U : 2U) + 4U * (big ? 20U : 12U) + (big ? 12U : 8U);
+    make_tiff(h, big, little);
+    put(h->bytes + 2U, magic, 2U, little);
+    init_work(&w);
+    omc_store_init(&expected);
+    omc_store_init(&actual);
+    omc_read_source_opts_init(&opts);
+    e = omc_exif_dec(h->bytes, h->available, &expected, OMC_INVALID_BLOCK_ID,
+                      w.ifds, 32U, &opts.decode.exif);
+    assert(e.status == OMC_EXIF_OK);
+    h->split = first;
+    h->gap = (omc_u64)(big ? 8U : 2U) << 30U;
+    put(h->bytes + (big ? 8U : 4U), first + h->gap, big ? 8U : 4U, little);
+    put(h->bytes + make_field, 168U + h->gap, big ? 8U : 4U, little);
+    range.source = omc_source_callback(h->base + h->gap + h->available, h, read_at, 0);
+    range.source_offset = h->base;
+    range.size = h->gap + h->available;
+    w.w.metadata_capacity = 12U;
+    omc_source_state_init(&state);
+    r = omc_read_source(&range, &actual, &w.w, &state, &opts);
+    assert(r.status == OMC_READ_SOURCE_OK && r.decoded.exif.status == OMC_EXIF_OK);
+    assert(r.value_scratch_needed == 0U && r.scratch_used == 12U);
+    assert(w.ifds[0].offset == first + h->gap && state.bytes_requested < 256U);
+    equal_store(&expected, &actual);
+    omc_store_fini(&expected);
+    omc_store_fini(&actual);
+}
+
+static void
 failures(host *h)
 {
     work w;
@@ -240,7 +287,7 @@ failures(host *h)
     range.source = omc_source_callback(h->base + 4096U, h, read_at, 0);
     range.source_offset = h->base;
     range.size = 4096U;
-    w.w.metadata_capacity = 100U;
+    w.w.metadata_capacity = 4U;
     omc_source_state_init(&state);
     res = omc_read_source(&range, &store, &w.w, &state, &opts);
     assert(res.status == OMC_READ_SOURCE_LIMIT && store.entry_count == 0U);
@@ -251,6 +298,20 @@ failures(host *h)
     assert(res.status == OMC_READ_SOURCE_IO && state.code == OMC_SOURCE_SHORT_READ &&
            store.entry_count == 0U);
     h->short_read = 0;
+    /* A cyclic next-IFD link is visited once. Values over the byte limit
+     * retain their key and truncation flag without requesting their bytes. */
+    put(h->bytes + 82U, 8U, 4U, 1);
+    h->forbidden_begin = 168U;
+    h->forbidden_end = 180U;
+    opts.decode.exif.limits.max_value_bytes = 8U;
+    omc_source_state_init(&state);
+    res = omc_read_source(&range, &store, &w.w, &state, &opts);
+    assert(res.status == OMC_READ_SOURCE_OK && res.decoded.exif.ifds_needed == 1U);
+    assert(store.entry_count == 6U && store.entries[4].value.kind == OMC_VAL_EMPTY &&
+           (store.entries[4].flags & OMC_ENTRY_FLAG_TRUNCATED));
+    omc_store_reset(&store);
+    make_tiff(h, 0, 1);
+    omc_read_source_opts_init(&opts);
     omc_source_state_init(&state);
     opts.io.max_requests = 1U;
     res = omc_read_source(&range, &store, &w.w, &state, &opts);
@@ -261,7 +322,9 @@ failures(host *h)
     h->available = make_nikon_tiff(h->bytes);
     opts.decode.exif.decode_makernote = 1;
     res = omc_read_source(&range, &store, &w.w, &state, &opts);
-    assert(res.status == OMC_READ_SOURCE_UNSUPPORTED && store.entry_count == 0U);
+    assert(res.status == OMC_READ_SOURCE_OK && res.nested_payloads_skipped == 0U &&
+           store.entry_count > 3U);
+    omc_store_reset(&store);
     opts.decode.exif.decode_makernote = 0;
     omc_source_state_init(&state);
     res = omc_read_source(&range, &store, &w.w, &state, &opts);
@@ -285,6 +348,11 @@ main(void)
         for (little = 0; little < 2; ++little) {
             make_tiff(&h, big, little);
             compare(&h, 0);
+            sparse_tiff(&h, big, little, big ? 43U : 42U);
+            if (!big) {
+                sparse_tiff(&h, 0, little, 0x55U);
+                sparse_tiff(&h, 0, little, 0x4F52U);
+            }
         }
     make_jpeg(&h);
     compare(&h, 1);

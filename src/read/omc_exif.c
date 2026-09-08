@@ -23,7 +23,20 @@ typedef struct omc_exif_task {
 
 typedef struct omc_exif_ctx {
     const omc_u8* bytes;
-    omc_size size;
+    omc_u64 size;
+    const omc_source_range* source;
+    omc_source_state* input;
+    const omc_source_limits* io_limits;
+    omc_exif_source_workspace workspace;
+    omc_exif_source_res* source_result;
+    omc_u64 raw_source_offset;
+    omc_u8 inline_value[8];
+    omc_u64 visited_offsets[OMC_EXIF_TASK_CAP];
+    omc_u8 visited_masks[OMC_EXIF_TASK_CAP];
+    omc_u32 visited_count;
+    omc_s64 value_base;
+    int source_single_ifd;
+    const char* source_ifd_token;
     omc_store* store;
     omc_block_id source_block;
     int measure_only;
@@ -45,6 +58,7 @@ typedef struct omc_exif_geotiff_tag_ref {
     omc_u32 count32;
     const omc_u8* raw;
     omc_u64 raw_size;
+    omc_u64 source_offset;
 } omc_exif_geotiff_tag_ref;
 
 static void
@@ -213,6 +227,43 @@ omc_exif_read_u64(omc_exif_cfg cfg, const omc_u8* bytes, omc_size size,
     return 1;
 }
 
+/* Structural values are copied to a small local buffer; resolving a tag
+ * value never invalidates a directory entry or another structural field. */
+static int
+omc_exif_input_read(const omc_exif_ctx* ctx, omc_u64 offset,
+                     omc_u8* out, omc_size size)
+{
+    if (offset > ctx->size || size > ctx->size - offset)
+        return 0;
+    if (ctx->source != NULL)
+        return omc_source_read(ctx->source, offset, out, size, ctx->input,
+                                 ctx->io_limits) == OMC_SOURCE_OK;
+    if (size != 0U)
+        memcpy(out, ctx->bytes + (omc_size)offset, size);
+    return 1;
+}
+static int
+omc_exif_input_u16(const omc_exif_ctx* ctx, omc_u64 offset, omc_u16* value)
+{
+    omc_u8 bytes[2];
+    return omc_exif_input_read(ctx, offset, bytes, sizeof(bytes)) &&
+           omc_exif_read_u16(ctx->cfg, bytes, sizeof(bytes), 0U, value);
+}
+static int
+omc_exif_input_u32(const omc_exif_ctx* ctx, omc_u64 offset, omc_u32* value)
+{
+    omc_u8 bytes[4];
+    return omc_exif_input_read(ctx, offset, bytes, sizeof(bytes)) &&
+           omc_exif_read_u32(ctx->cfg, bytes, sizeof(bytes), 0U, value);
+}
+static int
+omc_exif_input_u64(const omc_exif_ctx* ctx, omc_u64 offset, omc_u64* value)
+{
+    omc_u8 bytes[8];
+    return omc_exif_input_read(ctx, offset, bytes, sizeof(bytes)) &&
+           omc_exif_read_u64(ctx->cfg, bytes, sizeof(bytes), 0U, value);
+}
+
 static int
 omc_exif_mul_u64(omc_u64 a, omc_u64 b, omc_u64* out_value)
 {
@@ -258,7 +309,7 @@ omc_exif_elem_size(omc_u16 type, omc_u32* out_size)
 }
 
 static int
-omc_exif_resolve_raw(const omc_exif_ctx* ctx, omc_u64 entry_value_off,
+omc_exif_resolve_raw(omc_exif_ctx* ctx, omc_u64 entry_value_off,
                      omc_u16 type, omc_u64 count,
                      const omc_u8** out_ptr, omc_u64* out_size)
 {
@@ -278,33 +329,57 @@ omc_exif_resolve_raw(const omc_exif_ctx* ctx, omc_u64 entry_value_off,
         return 0;
     }
 
-    if (total_size <= ctx->cfg.inline_size) {
-        *out_ptr = ctx->bytes + (omc_size)entry_value_off;
-        *out_size = total_size;
-        return 1;
-    }
-
-    if (!ctx->cfg.big_tiff) {
-        omc_u32 off32;
-
-        if (!omc_exif_read_u32(ctx->cfg, ctx->bytes, ctx->size,
-                               entry_value_off, &off32)) {
-            return 0;
-        }
-        value_offset = off32;
-    } else {
-        if (!omc_exif_read_u64(ctx->cfg, ctx->bytes, ctx->size,
-                               entry_value_off, &value_offset)) {
+    value_offset = entry_value_off;
+    if (total_size > ctx->cfg.inline_size) {
+        if (!ctx->cfg.big_tiff) {
+            omc_u32 off32;
+            if (!omc_exif_input_u32(ctx, entry_value_off, &off32))
+                return 0;
+            value_offset = off32;
+        } else if (!omc_exif_input_u64(ctx, entry_value_off, &value_offset)) {
             return 0;
         }
     }
-
-    if (value_offset > (omc_u64)ctx->size
-        || total_size > ((omc_u64)ctx->size - value_offset)) {
+    if (ctx->source != NULL && total_size > ctx->cfg.inline_size) {
+        if (ctx->value_base < 0) {
+            omc_u64 delta = (omc_u64)(-(ctx->value_base + 1)) + 1U;
+            if (value_offset < delta) return 0;
+            value_offset -= delta;
+        } else {
+            if (value_offset > ~(omc_u64)0 - (omc_u64)ctx->value_base) return 0;
+            value_offset += (omc_u64)ctx->value_base;
+        }
+    }
+    if (value_offset > ctx->size || total_size > ctx->size - value_offset)
         return 0;
+    ctx->raw_source_offset = value_offset;
+    if (ctx->source != NULL) {
+        omc_u8* destination;
+        if (total_size > ctx->opts.limits.max_value_bytes) {
+            *out_ptr = NULL;
+            *out_size = total_size;
+            return 1;
+        }
+        destination = ctx->inline_value;
+        if (total_size > ctx->cfg.inline_size) {
+            if (total_size > ctx->workspace.value_capacity) {
+                if (total_size > ctx->source_result->value_scratch_needed)
+                    ctx->source_result->value_scratch_needed = total_size;
+                *out_ptr = NULL;
+                *out_size = total_size;
+                return 1;
+            }
+            destination = ctx->workspace.value;
+            if (total_size > ctx->source_result->value_scratch_used)
+                ctx->source_result->value_scratch_used = (omc_size)total_size;
+        }
+        if (!omc_exif_input_read(ctx, value_offset, destination,
+                                  (omc_size)total_size))
+            return 0;
+        *out_ptr = destination;
+    } else {
+        *out_ptr = ctx->bytes + (omc_size)value_offset;
     }
-
-    *out_ptr = ctx->bytes + (omc_size)value_offset;
     *out_size = total_size;
     return 1;
 }
@@ -538,12 +613,12 @@ omc_exif_find_outer_ifd0_ascii(const omc_exif_ctx* ctx, omc_u16 tag,
     if (ctx->cfg.big_tiff || ctx->size < 8U) {
         return 0;
     }
-    if (!omc_exif_read_u32(ctx->cfg, ctx->bytes, ctx->size, 4U, &ifd0_off32)) {
+    if (!omc_exif_input_u32(ctx, 4U, &ifd0_off32)) {
         return 0;
     }
 
     ifd0_off = (omc_u64)ifd0_off32;
-    if (!omc_exif_read_u16(ctx->cfg, ctx->bytes, ctx->size, ifd0_off,
+    if (!omc_exif_input_u16(ctx, ifd0_off,
                            &entry_count)) {
         return 0;
     }
@@ -557,12 +632,10 @@ omc_exif_find_outer_ifd0_ascii(const omc_exif_ctx* ctx, omc_u16 tag,
         omc_u32 text_size;
 
         entry_off = ifd0_off + 2U + ((omc_u64)i * 12U);
-        if (!omc_exif_read_u16(ctx->cfg, ctx->bytes, ctx->size, entry_off,
+        if (!omc_exif_input_u16(ctx, entry_off,
                                &entry_tag)
-            || !omc_exif_read_u16(ctx->cfg, ctx->bytes, ctx->size,
-                                  entry_off + 2U, &type16)
-            || !omc_exif_read_u32(ctx->cfg, ctx->bytes, ctx->size,
-                                  entry_off + 4U, &count32)) {
+            || !omc_exif_input_u16(ctx, entry_off + 2U, &type16)
+            || !omc_exif_input_u32(ctx, entry_off + 4U, &count32)) {
             return 0;
         }
         if (entry_tag != tag || type16 != 2U || count32 == 0U) {
@@ -571,8 +644,7 @@ omc_exif_find_outer_ifd0_ascii(const omc_exif_ctx* ctx, omc_u16 tag,
 
         if (count32 <= 4U) {
             text_off32 = (omc_u32)(entry_off + 8U);
-        } else if (!omc_exif_read_u32(ctx->cfg, ctx->bytes, ctx->size,
-                                      entry_off + 8U, &text_off32)) {
+        } else if (!omc_exif_input_u32(ctx, entry_off + 8U, &text_off32)) {
             return 0;
         }
 
@@ -1757,6 +1829,9 @@ omc_exif_make_token(omc_exif_ctx* ctx, omc_exif_ifd_kind kind, omc_u32 index,
     omc_size prefix_len;
     omc_size digits_len;
 
+    if (ctx->source_ifd_token != NULL)
+        return omc_exif_store_cstr_len(ctx, ctx->source_ifd_token,
+                                        strlen(ctx->source_ifd_token), out_ref);
     literal = (const char*)0;
     prefix = (const char*)0;
     prefix_len = 0U;
@@ -1862,23 +1937,28 @@ static int
 omc_exif_parse_header(omc_exif_ctx* ctx)
 {
     omc_u16 version;
+    omc_u8 signature[2];
 
     if (ctx->size < 8U) {
         ctx->res.status = OMC_EXIF_MALFORMED;
         return 0;
     }
 
-    if (ctx->bytes[0] == (omc_u8)'I' && ctx->bytes[1] == (omc_u8)'I') {
+    if (!omc_exif_input_read(ctx, 0U, signature, 2U)) {
+        ctx->res.status = OMC_EXIF_MALFORMED;
+        return 0;
+    }
+    if (signature[0] == (omc_u8)'I' && signature[1] == (omc_u8)'I') {
         ctx->cfg.little_endian = 1;
-    } else if (ctx->bytes[0] == (omc_u8)'M'
-               && ctx->bytes[1] == (omc_u8)'M') {
+    } else if (signature[0] == (omc_u8)'M'
+               && signature[1] == (omc_u8)'M') {
         ctx->cfg.little_endian = 0;
     } else {
         ctx->res.status = OMC_EXIF_UNSUPPORTED;
         return 0;
     }
 
-    if (!omc_exif_read_u16(ctx->cfg, ctx->bytes, ctx->size, 2U, &version)) {
+    if (!omc_exif_input_u16(ctx, 2U, &version)) {
         ctx->res.status = OMC_EXIF_MALFORMED;
         return 0;
     }
@@ -1892,7 +1972,7 @@ omc_exif_parse_header(omc_exif_ctx* ctx)
         ctx->cfg.next_size = 4U;
         ctx->cfg.inline_size = 4U;
 
-        if (!omc_exif_read_u32(ctx->cfg, ctx->bytes, ctx->size, 4U,
+        if (!omc_exif_input_u32(ctx, 4U,
                                &first_ifd32)) {
             ctx->res.status = OMC_EXIF_MALFORMED;
             return 0;
@@ -1915,11 +1995,11 @@ omc_exif_parse_header(omc_exif_ctx* ctx)
             ctx->res.status = OMC_EXIF_MALFORMED;
             return 0;
         }
-        if (!omc_exif_read_u16(ctx->cfg, ctx->bytes, ctx->size, 4U,
+        if (!omc_exif_input_u16(ctx, 4U,
                                &off_size)
-            || !omc_exif_read_u16(ctx->cfg, ctx->bytes, ctx->size, 6U,
+            || !omc_exif_input_u16(ctx, 6U,
                                   &reserved)
-            || !omc_exif_read_u64(ctx->cfg, ctx->bytes, ctx->size, 8U,
+            || !omc_exif_input_u64(ctx, 8U,
                                   &ctx->cfg.first_ifd)) {
             ctx->res.status = OMC_EXIF_MALFORMED;
             return 0;
@@ -1974,8 +2054,9 @@ omc_exif_add_entry(omc_exif_ctx* ctx, const omc_byte_ref* token_ref,
         return OMC_EXIF_LIMIT;
     }
 
-    if ((type == 2U || type == 129U || type == 7U || count > 1U)
-        && total_size > ctx->opts.limits.max_value_bytes) {
+    if ((ctx->source != NULL && raw == NULL)
+        || ((type == 2U || type == 129U || type == 7U || count > 1U)
+            && total_size > ctx->opts.limits.max_value_bytes)) {
         entry.flags |= OMC_ENTRY_FLAG_TRUNCATED;
         entry.value.kind = OMC_VAL_EMPTY;
         omc_exif_maybe_mark_contextual_name(ctx, &entry);
@@ -2475,6 +2556,15 @@ omc_exif_init_child_cfg(omc_exif_ctx* child, const omc_exif_ctx* parent,
     memset(child, 0, sizeof(*child));
     child->bytes = bytes;
     child->size = size;
+    if (bytes == NULL && parent->source != NULL) {
+        child->size = parent->size;
+        child->source = parent->source;
+        child->input = parent->input;
+        child->io_limits = parent->io_limits;
+        child->workspace = parent->workspace;
+        child->source_result = parent->source_result;
+        child->value_base = parent->value_base;
+    }
     child->store = parent->store;
     child->source_block = parent->source_block;
     child->measure_only = parent->measure_only;
@@ -2544,7 +2634,7 @@ omc_exif_decode_ifd_blob_cfg(omc_exif_ctx* parent, const omc_u8* bytes,
     omc_exif_ctx child;
     omc_exif_task task;
 
-    if (bytes == (const omc_u8*)0 || opts == (const omc_exif_opts*)0) {
+    if ((bytes == NULL && parent->source == NULL) || opts == NULL) {
         return 1;
     }
     if (ifd_off >= size || size > (omc_u64)(~(omc_size)0)) {
@@ -13792,6 +13882,10 @@ omc_exif_decode_ricoh_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
 }
 
 static int
+omc_exif_decode_source_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
+                                 omc_u64 raw_size);
+
+static int
 omc_exif_decode_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
                           omc_u64 raw_size)
 {
@@ -13801,6 +13895,8 @@ omc_exif_decode_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
     if (ctx == (omc_exif_ctx*)0 || raw == (const omc_u8*)0 || raw_size == 0U) {
         return 1;
     }
+    if (ctx->source != NULL)
+        return omc_exif_decode_source_makernote(ctx, raw, raw_size);
     if (raw < ctx->bytes || raw > (ctx->bytes + ctx->size)) {
         return 1;
     }
@@ -13927,6 +14023,26 @@ omc_exif_process_ifd(omc_exif_ctx* ctx, omc_exif_task task)
     omc_exif_geotiff_tag_ref geotiff_ascii;
     omc_u32 i;
 
+    if (ctx->source != NULL) {
+        omc_u8 mask = (omc_u8)(1U << (unsigned)task.kind);
+        for (i = 0U; i < ctx->visited_count; ++i) {
+            if (ctx->visited_offsets[i] != task.offset) continue;
+            if ((ctx->visited_masks[i] & mask) != 0U ||
+                !((task.kind == OMC_EXIF_GPS_IFD && ctx->visited_masks[i] == 8U) ||
+                  (task.kind == OMC_EXIF_INTEROP_IFD && ctx->visited_masks[i] == 4U)))
+                return 1;
+            break;
+        }
+        if (i == ctx->visited_count) {
+            if (i == OMC_EXIF_TASK_CAP) {
+                omc_exif_mark_limit(ctx, OMC_EXIF_LIM_MAX_IFDS, task.offset, 0U);
+                return 0;
+            }
+            ctx->visited_offsets[i] = task.offset;
+            ctx->visited_count++;
+        }
+        ctx->visited_masks[i] |= mask;
+    }
     if (ctx->res.ifds_needed >= ctx->opts.limits.max_ifds) {
         omc_exif_mark_limit(ctx, OMC_EXIF_LIM_MAX_IFDS, task.offset, 0U);
         return 0;
@@ -13941,14 +14057,14 @@ omc_exif_process_ifd(omc_exif_ctx* ctx, omc_exif_task task)
     if (!ctx->cfg.big_tiff) {
         omc_u16 count16;
 
-        if (!omc_exif_read_u16(ctx->cfg, ctx->bytes, ctx->size, task.offset,
+        if (!omc_exif_input_u16(ctx, task.offset,
                                &count16)) {
             ctx->res.status = OMC_EXIF_MALFORMED;
             return 0;
         }
         entry_count64 = count16;
     } else {
-        if (!omc_exif_read_u64(ctx->cfg, ctx->bytes, ctx->size, task.offset,
+        if (!omc_exif_input_u64(ctx, task.offset,
                                &entry_count64)) {
             ctx->res.status = OMC_EXIF_MALFORMED;
             return 0;
@@ -14012,9 +14128,9 @@ omc_exif_process_ifd(omc_exif_ctx* ctx, omc_exif_task task)
         omc_exif_status estatus;
 
         entry_off = entry_table_off + ((omc_u64)i * ctx->cfg.entry_size);
-        if (!omc_exif_read_u16(ctx->cfg, ctx->bytes, ctx->size, entry_off,
+        if (!omc_exif_input_u16(ctx, entry_off,
                                &tag)
-            || !omc_exif_read_u16(ctx->cfg, ctx->bytes, ctx->size, entry_off + 2U,
+            || !omc_exif_input_u16(ctx, entry_off + 2U,
                                   &type)) {
             ctx->res.status = OMC_EXIF_MALFORMED;
             return 0;
@@ -14023,16 +14139,14 @@ omc_exif_process_ifd(omc_exif_ctx* ctx, omc_exif_task task)
         if (!ctx->cfg.big_tiff) {
             omc_u32 count32;
 
-            if (!omc_exif_read_u32(ctx->cfg, ctx->bytes, ctx->size,
-                                   entry_off + 4U, &count32)) {
+            if (!omc_exif_input_u32(ctx, entry_off + 4U, &count32)) {
                 ctx->res.status = OMC_EXIF_MALFORMED;
                 return 0;
             }
             count = count32;
             value_off = entry_off + 8U;
         } else {
-            if (!omc_exif_read_u64(ctx->cfg, ctx->bytes, ctx->size,
-                                   entry_off + 4U, &count)) {
+            if (!omc_exif_input_u64(ctx, entry_off + 4U, &count)) {
                 ctx->res.status = OMC_EXIF_MALFORMED;
                 return 0;
             }
@@ -14040,7 +14154,7 @@ omc_exif_process_ifd(omc_exif_ctx* ctx, omc_exif_task task)
         }
 
         if (!omc_exif_resolve_raw(ctx, value_off, type, count, &raw, &raw_size)) {
-            ctx->res.status = OMC_EXIF_MALFORMED;
+            omc_exif_update_status(&ctx->res, OMC_EXIF_MALFORMED);
             return 0;
         }
 
@@ -14051,18 +14165,21 @@ omc_exif_process_ifd(omc_exif_ctx* ctx, omc_exif_task task)
                 geotiff_dir.count32 = (omc_u32)count;
                 geotiff_dir.raw = raw;
                 geotiff_dir.raw_size = raw_size;
+                geotiff_dir.source_offset = ctx->raw_source_offset;
             } else if (tag == 0x87B0U) {
                 geotiff_double.present = 1;
                 geotiff_double.type = type;
                 geotiff_double.count32 = (omc_u32)count;
                 geotiff_double.raw = raw;
                 geotiff_double.raw_size = raw_size;
+                geotiff_double.source_offset = ctx->raw_source_offset;
             } else if (tag == 0x87B1U) {
                 geotiff_ascii.present = 1;
                 geotiff_ascii.type = type;
                 geotiff_ascii.count32 = (omc_u32)count;
                 geotiff_ascii.raw = raw;
                 geotiff_ascii.raw_size = raw_size;
+                geotiff_ascii.source_offset = ctx->raw_source_offset;
             }
         }
 
@@ -14090,6 +14207,8 @@ omc_exif_process_ifd(omc_exif_ctx* ctx, omc_exif_task task)
             ctx->res.entries_decoded += 1U;
         }
 
+        if (ctx->source != NULL && raw == NULL) continue;
+
         if (ctx->opts.decode_printim && tag == 0xC4A5U && raw_size != 0U
             && raw_size <= ctx->opts.limits.max_value_bytes) {
             if (!omc_exif_decode_printim(ctx, raw, raw_size)) {
@@ -14099,6 +14218,11 @@ omc_exif_process_ifd(omc_exif_ctx* ctx, omc_exif_task task)
         if (ctx->opts.decode_makernote && tag == 0x927CU && raw_size != 0U
             && raw_size <= ctx->opts.limits.max_value_bytes) {
             if (!omc_exif_decode_makernote(ctx, raw, raw_size)) {
+                if (ctx->source != NULL && ctx->res.status == OMC_EXIF_OK &&
+                    ctx->input->code == OMC_SOURCE_OK) {
+                    ctx->source_result->nested_payloads_skipped++;
+                    ctx->res.status = OMC_EXIF_UNSUPPORTED;
+                }
                 return 0;
             }
         }
@@ -14152,6 +14276,46 @@ omc_exif_process_ifd(omc_exif_ctx* ctx, omc_exif_task task)
     }
 
     if (ctx->opts.decode_geotiff) {
+        if (ctx->source != NULL) {
+            omc_exif_geotiff_tag_ref* refs[3];
+            omc_u64 needed;
+            omc_size used;
+            unsigned n;
+            refs[0] = &geotiff_dir;
+            refs[1] = &geotiff_double;
+            refs[2] = &geotiff_ascii;
+            needed = 0U;
+            for (n = 0U; n < 3U; ++n) {
+                if (refs[n]->raw_size > ~(omc_u64)0 - needed) {
+                    ctx->res.status = OMC_EXIF_LIMIT;
+                    return 0;
+                }
+                if (refs[n]->raw_size > ctx->opts.limits.max_value_bytes) {
+                    refs[n]->present = 0;
+                    refs[n]->raw_size = 0U;
+                }
+                needed += refs[n]->raw_size;
+            }
+            if (needed > ctx->workspace.value_capacity) {
+                if (needed > ctx->source_result->value_scratch_needed)
+                    ctx->source_result->value_scratch_needed = needed;
+                ctx->res.status = OMC_EXIF_LIMIT;
+                return 0;
+            }
+            used = 0U;
+            if (needed > ctx->source_result->value_scratch_used)
+                ctx->source_result->value_scratch_used = (omc_size)needed;
+            for (n = 0U; n < 3U; ++n) {
+                if (refs[n]->raw_size != 0U) {
+                    refs[n]->raw = ctx->workspace.value + used;
+                    if (!omc_exif_input_read(ctx, refs[n]->source_offset,
+                                              ctx->workspace.value + used,
+                                              (omc_size)refs[n]->raw_size))
+                        return 0;
+                    used += (omc_size)refs[n]->raw_size;
+                }
+            }
+        }
         if (!omc_exif_decode_geotiff(ctx, &geotiff_dir, &geotiff_double,
                                      &geotiff_ascii)) {
             return 0;
@@ -14159,20 +14323,20 @@ omc_exif_process_ifd(omc_exif_ctx* ctx, omc_exif_task task)
     }
 
     next_ifd_off = entry_table_off + table_bytes;
-    if (task.kind == OMC_EXIF_IFD) {
+    if (task.kind == OMC_EXIF_IFD && !ctx->source_single_ifd) {
         omc_u64 next_offset;
 
         if (!ctx->cfg.big_tiff) {
             omc_u32 next32;
 
-            if (!omc_exif_read_u32(ctx->cfg, ctx->bytes, ctx->size, next_ifd_off,
+            if (!omc_exif_input_u32(ctx, next_ifd_off,
                                    &next32)) {
                 ctx->res.status = OMC_EXIF_MALFORMED;
                 return 0;
             }
             next_offset = next32;
         } else {
-            if (!omc_exif_read_u64(ctx->cfg, ctx->bytes, ctx->size, next_ifd_off,
+            if (!omc_exif_input_u64(ctx, next_ifd_off,
                                    &next_offset)) {
                 ctx->res.status = OMC_EXIF_MALFORMED;
                 return 0;
@@ -14191,18 +14355,369 @@ omc_exif_process_ifd(omc_exif_ctx* ctx, omc_exif_task task)
     return 1;
 }
 
+/* Source-relative classic MakerNote IFDs reuse the normal value conversion.
+ * Their links are vendor-specific; do not follow a generic next-IFD chain. */
+static int
+omc_exif_source_classic(omc_exif_ctx* parent, const omc_source_range* range,
+                         omc_u64 offset, omc_exif_cfg cfg, omc_s64 value_base,
+                         const char* token)
+{
+    omc_exif_ctx child;
+    omc_exif_task task;
+    omc_exif_init_child_cfg(&child, parent, NULL, 0U, &parent->opts, cfg);
+    child.source = range;
+    child.size = range->size;
+    child.value_base = value_base;
+    child.source_single_ifd = 1;
+    child.source_ifd_token = token;
+    child.cfg.next_size = 0U;
+    child.opts.decode_makernote = 0;
+    child.opts.decode_geotiff = 0;
+    child.opts.decode_printim = 0;
+    child.opts.decode_embedded_containers = 0;
+    task.kind = OMC_EXIF_IFD;
+    task.index = 0U;
+    task.offset = offset;
+    if (!omc_exif_process_ifd(&child, task)) {
+        omc_exif_merge_makernote_child(parent, &child);
+        return 0;
+    }
+    omc_exif_merge_makernote_child(parent, &child);
+    return 1;
+}
+
+static int
+omc_exif_source_nested_tiff(omc_exif_ctx* parent, omc_u64 offset,
+                             const omc_exif_opts* opts)
+{
+    omc_source_range range;
+    omc_exif_ctx child;
+    omc_exif_task task;
+    if (offset >= parent->size)
+        return 0;
+    range = *parent->source;
+    range.source_offset += offset;
+    range.size -= offset;
+    omc_exif_init_child_cfg(&child, parent, NULL, 0U, opts, parent->cfg);
+    child.source = &range;
+    child.size = range.size;
+    if (!omc_exif_parse_header(&child) ||
+        !omc_exif_push_task(&child, OMC_EXIF_IFD, 0U, child.cfg.first_ifd)) {
+        omc_exif_merge_makernote_child(parent, &child);
+        return 0;
+    }
+    while (omc_exif_pop_task(&child, &task))
+        if (!omc_exif_process_ifd(&child, task)) break;
+    omc_exif_merge_makernote_child(parent, &child);
+    return child.res.status != OMC_EXIF_MALFORMED &&
+           child.res.status != OMC_EXIF_LIMIT && child.res.status != OMC_EXIF_NOMEM;
+}
+
+static int
+omc_exif_source_canon(omc_exif_ctx* ctx, omc_u64 offset,
+                       const omc_u8* raw, omc_u64 size)
+{
+    omc_exif_cfg cfg;
+    omc_s64 bases[4], schema;
+    omc_u32 scores[4], best, i, j, min_offset, value, count;
+    omc_u16 entries, type;
+    omc_u32 width;
+    omc_u64 needed, n, resolved;
+    int enabled[4], all_in[4], in;
+    const omc_entry* schema_entry;
+    cfg = omc_exif_make_classic_cfg(ctx->cfg.little_endian);
+    if (!omc_exif_read_u16(cfg, raw, (omc_size)size, 0U, &entries) ||
+        entries > ctx->opts.limits.max_entries_per_ifd ||
+        2U + (omc_u64)entries * 12U > size) {
+        cfg.little_endian = !cfg.little_endian;
+        if (!omc_exif_read_u16(cfg, raw, (omc_size)size, 0U, &entries) ||
+            entries > ctx->opts.limits.max_entries_per_ifd ||
+            2U + (omc_u64)entries * 12U > size) return 0;
+    }
+    needed = 2U + (omc_u64)entries * 12U + 4U;
+    min_offset = ~(omc_u32)0;
+    for (i = 0U; i < entries; ++i) {
+        n = 2U + (omc_u64)i * 12U;
+        (void)omc_exif_read_u16(cfg, raw, (omc_size)size, n + 2U, &type);
+        (void)omc_exif_read_u32(cfg, raw, (omc_size)size, n + 4U, &count);
+        (void)omc_exif_read_u32(cfg, raw, (omc_size)size, n + 8U, &value);
+        if (omc_exif_elem_size(type, &width) && (omc_u64)width * count > 4U &&
+            value >= needed && value < min_offset) min_offset = value;
+    }
+    memset(bases, 0, sizeof(bases));
+    memset(scores, 0, sizeof(scores));
+    memset(enabled, 0, sizeof(enabled));
+    enabled[0] = 1;
+    if (offset <= (~(omc_u64)0 >> 1U)) {
+        enabled[1] = 1;
+        bases[1] = (omc_s64)offset;
+        if (min_offset != ~(omc_u32)0 && offset <= (~(omc_u64)0 >> 1U) - needed) {
+            enabled[2] = 1;
+            bases[2] = (omc_s64)(offset + needed) - min_offset;
+        }
+        schema_entry = omc_exif_find_first_entry(ctx->store, "exififd", 0xEA1DU);
+        if (schema_entry != NULL && schema_entry->value.kind == OMC_VAL_SCALAR &&
+            schema_entry->value.elem_type == OMC_ELEM_I32) {
+            schema = schema_entry->value.u.i64;
+            if (schema <= 0 || offset <= (~(omc_u64)0 >> 1U) - (omc_u64)schema) {
+                enabled[3] = 1;
+                bases[3] = (omc_s64)offset + schema;
+            }
+        }
+    }
+    for (j = 0U; j < 4U; ++j) all_in[j] = enabled[j];
+    for (i = 0U; i < entries; ++i) {
+        n = 2U + (omc_u64)i * 12U;
+        (void)omc_exif_read_u16(cfg, raw, (omc_size)size, n + 2U, &type);
+        (void)omc_exif_read_u32(cfg, raw, (omc_size)size, n + 4U, &count);
+        (void)omc_exif_read_u32(cfg, raw, (omc_size)size, n + 8U, &value);
+        if (!omc_exif_elem_size(type, &width)) continue;
+        n = (omc_u64)width * count;
+        if (n <= 4U || n > ctx->opts.limits.max_value_bytes) continue;
+        for (j = 0U; j < 4U; ++j) {
+            if (!enabled[j]) continue;
+            if (bases[j] < 0) {
+                omc_u64 delta = (omc_u64)(-(bases[j] + 1)) + 1U;
+                if (value < delta) { all_in[j] = 0; continue; }
+                resolved = value - delta;
+            } else {
+                resolved = (omc_u64)bases[j] + value;
+            }
+            if (resolved > ctx->size || n > ctx->size - resolved) {
+                all_in[j] = 0; continue;
+            }
+            scores[j]++;
+            in = resolved >= offset && resolved - offset <= size &&
+                 n <= size - (resolved - offset);
+            if (in) {
+                scores[j] += 2U;
+                if (resolved - offset >= needed) scores[j]++;
+            } else all_in[j] = 0;
+        }
+    }
+    best = 0U;
+    for (j = 1U; j < 4U; ++j)
+        if (enabled[j] && (scores[j] > scores[best] ||
+            (scores[j] == scores[best] && all_in[j] && !all_in[best]))) best = j;
+    if (!omc_exif_source_classic(ctx, ctx->source, offset, cfg, bases[best],
+                                   "mk_canon0")) return 0;
+    return omc_exif_decode_canon_postpass(ctx);
+}
+
+static int
+omc_exif_source_olympus_children(omc_exif_ctx* ctx, omc_u64 ifd,
+                                  omc_exif_cfg cfg, int camera_settings)
+{
+    omc_u8 entry[12], count_bytes[2];
+    omc_u16 count, tag, type;
+    omc_u32 n, value, i, width, index;
+    const char* name;
+    char token[96];
+    if (!omc_exif_input_read(ctx, ifd, count_bytes, 2U) ||
+        !omc_exif_read_u16(cfg, count_bytes, 2U, 0U, &count)) return 0;
+    if (count > ctx->opts.limits.max_entries_per_ifd) return 0;
+    index = 0U;
+    for (i = 0U; i < count; ++i) {
+        if (!omc_exif_input_read(ctx, ifd + 2U + (omc_u64)i * 12U, entry, 12U)) return 0;
+        (void)omc_exif_read_u16(cfg, entry, 12U, 0U, &tag);
+        (void)omc_exif_read_u16(cfg, entry, 12U, 2U, &type);
+        (void)omc_exif_read_u32(cfg, entry, 12U, 4U, &n);
+        (void)omc_exif_read_u32(cfg, entry, 12U, 8U, &value);
+        name = camera_settings ? omc_exif_olympus_camerasettings_subtable_name(tag)
+                               : omc_exif_olympus_main_subtable_name(tag);
+        if (name == NULL || value >= ctx->size) continue;
+        if (!((type == 4U || type == 13U) && n == 1U) &&
+            (!omc_exif_elem_size(type, &width) || (omc_u64)width * n <= 4U)) continue;
+        if (!omc_exif_make_subifd_name("mk_olympus", name,
+                strcmp(name, "fetags") == 0 ? index++ : 0U, token, sizeof(token))) return 0;
+        if (!omc_exif_source_classic(ctx, ctx->source, value, cfg, 0, token)) return 0;
+        if (!camera_settings && strcmp(name, "camerasettings") == 0 &&
+            !omc_exif_source_olympus_children(ctx, value, cfg, 1)) return 0;
+    }
+    return 1;
+}
+
+static int
+omc_exif_source_casio(omc_exif_ctx* ctx, omc_u64 offset,
+                       const omc_u8* raw, omc_u64 size)
+{
+    omc_exif_ctx child;
+    omc_exif_opts opts;
+    omc_exif_cfg cfg;
+    omc_byte_ref token;
+    omc_u32 count, i, count32;
+    omc_u16 count16, tag, type;
+    omc_u8 entry[12];
+    const omc_u8* value;
+    omc_u64 value_size;
+    omc_exif_status status;
+    int legacy;
+    cfg = omc_exif_make_classic_cfg(0);
+    if (!omc_exif_read_u32(cfg, raw, (omc_size)size, 4U, &count) ||
+        count == 0U || count > ctx->opts.limits.max_entries_per_ifd ||
+        8U + (omc_u64)count * 12U > size) {
+        cfg.little_endian = 1;
+        if (!omc_exif_read_u16(cfg, raw, (omc_size)size, 6U, &count16)) return 0;
+        count = count16;
+        if (count == 0U || count > ctx->opts.limits.max_entries_per_ifd ||
+            8U + (omc_u64)count * 12U > size) return 0;
+    }
+    legacy = omc_exif_casio_has_legacy_main_compat(raw, size, cfg, count, 8U);
+    opts = ctx->opts;
+    omc_exif_set_casio_tokens(&opts);
+    omc_exif_init_child_cfg(&child, ctx, NULL, (omc_size)ctx->size, &opts, cfg);
+    if (omc_exif_make_token(&child, OMC_EXIF_IFD, 0U, &token) != OMC_EXIF_OK) return 0;
+    for (i = 0U; i < count; ++i) {
+        if (!omc_exif_input_read(ctx, offset + 8U + (omc_u64)i * 12U, entry, 12U)) return 0;
+        (void)omc_exif_read_u16(cfg, entry, 12U, 0U, &tag);
+        (void)omc_exif_read_u16(cfg, entry, 12U, 2U, &type);
+        (void)omc_exif_read_u32(cfg, entry, 12U, 4U, &count32);
+        if (!omc_exif_resolve_raw(&child, offset + 16U + (omc_u64)i * 12U,
+                                    type, count32, &value, &value_size)) {
+            omc_exif_merge_makernote_child(ctx, &child);
+            return 0;
+        }
+        if (type == 3U && count32 > 1U)
+            status = omc_exif_casio_add_u16_array_entry(&child, &token, tag,
+                        count32, value, value_size, i, OMC_ENTRY_FLAG_NONE);
+        else
+            status = omc_exif_add_entry(&child, &token, tag, type, count32,
+                                          value, value_size, i, OMC_ENTRY_FLAG_NONE);
+        if (status != OMC_EXIF_OK) {
+            omc_exif_update_status(&ctx->res, status);
+            return 0;
+        }
+        child.res.entries_decoded++;
+        if (legacy) omc_exif_casio_mark_last_legacy_entry(&child, tag);
+    }
+    omc_exif_merge_makernote_child(ctx, &child);
+    return omc_exif_casio_decode_binary_subdirs(ctx);
+}
+
+static int
+omc_exif_decode_source_makernote(omc_exif_ctx* ctx, const omc_u8* raw,
+                                 omc_u64 raw_size)
+{
+    omc_exif_mn_vendor vendor;
+    omc_exif_ctx local;
+    omc_exif_opts opts;
+    omc_exif_cfg cfg;
+    omc_source_range nested;
+    omc_u64 offset, header, local_ifd, limit;
+    omc_u32 ifd32;
+    omc_u16 count;
+    omc_size before;
+    int endian;
+    vendor = omc_exif_detect_makernote_vendor(ctx, raw, raw_size);
+    offset = ctx->raw_source_offset;
+    cfg = omc_exif_make_classic_cfg(ctx->cfg.little_endian);
+    if (vendor == OMC_EXIF_MN_CANON)
+        return omc_exif_source_canon(ctx, offset, raw, raw_size);
+    if (vendor == OMC_EXIF_MN_NIKON) {
+        opts = ctx->opts;
+        opts.decode_makernote = 0;
+        opts.decode_geotiff = 0;
+        opts.decode_printim = 0;
+        opts.decode_embedded_containers = 0;
+        omc_exif_set_nikon_tokens(&opts);
+        if (omc_exif_find_tiff_header(raw, raw_size, 0U, 128U, &header)) {
+            if (!omc_exif_source_nested_tiff(ctx, offset + header, &opts)) return 0;
+        } else {
+            local_ifd = raw_size >= 10U && memcmp(raw, "Nikon\0", 6U) == 0 &&
+                        raw[6U] == 1U && raw[7U] == 0U ? 8U : 0U;
+            if (!omc_exif_source_classic(ctx, ctx->source, offset + local_ifd,
+                                           cfg, 0, "mk_nikon0")) return 0;
+        }
+        /* Nested value reads reused the value scratch. Restore the note for
+         * the existing bounded preview and binary postpasses. */
+        if (!omc_exif_input_read(ctx, offset, ctx->workspace.value,
+                                  (omc_size)raw_size)) return 0;
+        return omc_exif_decode_nikon_postpass(ctx, ctx->workspace.value, raw_size);
+    }
+    if (vendor == OMC_EXIF_MN_SONY || vendor == OMC_EXIF_MN_PANASONIC) {
+        limit = vendor == OMC_EXIF_MN_SONY ? 256U : 512U;
+        if (limit > raw_size) limit = raw_size;
+        for (local_ifd = 0U; local_ifd + 2U <= limit; local_ifd += 2U) {
+            for (endian = 0; endian < 2; ++endian) {
+                cfg.little_endian = endian ? !ctx->cfg.little_endian : ctx->cfg.little_endian;
+                if (!omc_exif_read_u16(cfg, raw, (omc_size)raw_size, local_ifd, &count) ||
+                    count == 0U || count > ctx->opts.limits.max_entries_per_ifd ||
+                    (omc_u64)count * 12U > raw_size - local_ifd - 2U) continue;
+                before = ctx->store->entry_count;
+                if (!omc_exif_source_classic(ctx, ctx->source, offset + local_ifd,
+                        cfg, 0, vendor == OMC_EXIF_MN_SONY ? "mk_sony0" : "mk_panasonic0")) return 0;
+                if (vendor == OMC_EXIF_MN_SONY) return omc_exif_decode_sony_postpass(ctx);
+                return omc_exif_decode_panasonic_binary_subdirs(ctx, before, cfg.little_endian);
+            }
+        }
+    }
+    if (vendor == OMC_EXIF_MN_FUJI && raw_size >= 12U &&
+        (memcmp(raw, "FUJIFILM", 8U) == 0 || memcmp(raw, "GENERALE", 8U) == 0)) {
+        cfg = omc_exif_make_classic_cfg(1);
+        (void)omc_exif_read_u32(cfg, raw, (omc_size)raw_size, 8U, &ifd32);
+        nested = *ctx->source;
+        nested.source_offset += offset;
+        nested.size -= offset;
+        return omc_exif_source_classic(ctx, &nested, ifd32, cfg, 0, "mk_fuji0");
+    }
+    if (vendor == OMC_EXIF_MN_OLYMPUS && raw_size >= 8U &&
+        (memcmp(raw, "OLYMP\0", 6U) == 0 || memcmp(raw, "EPSON\0", 6U) == 0 ||
+         memcmp(raw, "MINOL\0", 6U) == 0)) {
+        if (!omc_exif_source_classic(ctx, ctx->source, offset + 8U, cfg, 0,
+                                       "mk_olympus0")) return 0;
+        return omc_exif_source_olympus_children(ctx, offset + 8U, cfg, 0);
+    }
+    if (vendor == OMC_EXIF_MN_CASIO && raw_size >= 8U &&
+        (memcmp(raw, "QVC\0", 4U) == 0 || memcmp(raw, "DCI\0", 4U) == 0))
+        return omc_exif_source_casio(ctx, offset, raw, raw_size);
+    /* Payload-local layouts retain their existing bounded decoders. Source
+     * layouts with external references are dispatched above or added below. */
+    omc_exif_init_child_cfg(&local, ctx, raw, (omc_size)raw_size, &ctx->opts, ctx->cfg);
+    before = ctx->store->entry_count;
+    if (!omc_exif_decode_makernote(&local, raw, raw_size)) {
+        omc_exif_merge_makernote_child(ctx, &local);
+        return 0;
+    }
+    omc_exif_merge_makernote_child(ctx, &local);
+    if (vendor == OMC_EXIF_MN_RICOH) {
+        omc_size end = ctx->store->entry_count;
+        omc_size i;
+        for (i = before; i < end; ++i) {
+            const omc_entry* e = &ctx->store->entries[i];
+            if (omc_exif_entry_ifd_equals(ctx->store, e, "mk_ricoh0") &&
+                e->key.u.exif_tag.tag == 0x4001U && e->value.kind == OMC_VAL_SCALAR &&
+                e->value.elem_type == OMC_ELEM_U32 && e->value.u.u64 < ctx->size &&
+                !omc_exif_source_classic(ctx, ctx->source, e->value.u.u64, cfg, 0,
+                                            "mk_ricoh_thetasubdir_0")) return 0;
+        }
+    }
+    if (ctx->store->entry_count == before && vendor == OMC_EXIF_MN_UNKNOWN)
+        ctx->source_result->nested_payloads_skipped++;
+    return 1;
+}
+
 static omc_exif_res
 omc_exif_run(const omc_u8* tiff_bytes, omc_size tiff_size, omc_store* store,
              omc_block_id source_block, omc_exif_ifd_ref* out_ifds,
              omc_u32 ifd_cap,
-             const omc_exif_opts* opts, int measure_only)
+             const omc_exif_opts* opts, int measure_only,
+             const omc_source_range* source,
+             const omc_exif_source_workspace* workspace,
+             omc_source_state* input, const omc_source_limits* io_limits,
+             omc_exif_source_res* source_result)
 {
     omc_exif_ctx ctx;
     omc_exif_task task;
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.bytes = tiff_bytes;
-    ctx.size = tiff_size;
+    ctx.size = source != NULL ? source->size : tiff_size;
+    ctx.source = source;
+    ctx.input = input;
+    ctx.io_limits = io_limits;
+    ctx.source_result = source_result;
+    if (workspace != NULL)
+        ctx.workspace = *workspace;
     ctx.store = store;
     ctx.source_block = source_block;
     ctx.measure_only = measure_only;
@@ -14229,7 +14744,7 @@ omc_exif_run(const omc_u8* tiff_bytes, omc_size tiff_size, omc_store* store,
         ctx.opts.limits.max_value_bytes = 16U * 1024U * 1024U;
     }
 
-    if (tiff_bytes == (const omc_u8*)0) {
+    if (source == NULL && tiff_bytes == (const omc_u8*)0) {
         ctx.res.status = OMC_EXIF_MALFORMED;
         return ctx.res;
     }
@@ -14285,7 +14800,7 @@ omc_exif_dec(const omc_u8* tiff_bytes, omc_size tiff_size,
 {
     return omc_exif_run(tiff_bytes, tiff_size, store, source_block, out_ifds,
                         ifd_cap, opts,
-                        0);
+                        0, NULL, NULL, NULL, NULL, NULL);
 }
 
 omc_exif_res
@@ -14294,5 +14809,52 @@ omc_exif_meas(const omc_u8* tiff_bytes, omc_size tiff_size,
 {
     return omc_exif_run(tiff_bytes, tiff_size, (omc_store*)0,
                         OMC_INVALID_BLOCK_ID,
-                        (omc_exif_ifd_ref*)0, 0U, opts, 1);
+                        (omc_exif_ifd_ref*)0, 0U, opts, 1, NULL, NULL, NULL, NULL, NULL);
+}
+
+omc_exif_source_res
+omc_exif_dec_source(const omc_source_range* range, omc_store* store,
+                    omc_block_id source_block, omc_exif_ifd_ref* out_ifds,
+                    omc_u32 ifd_cap, const omc_exif_source_workspace* workspace,
+                    omc_source_state* state, const omc_source_limits* io_limits,
+                    const omc_exif_opts* opts)
+{
+    omc_exif_source_res res;
+    memset(&res, 0, sizeof(res));
+    if (!omc_source_range_valid(range) || store == NULL || workspace == NULL ||
+        state == NULL || (ifd_cap && out_ifds == NULL) ||
+        (workspace->value_capacity && workspace->value == NULL)) {
+        res.decoded.status = OMC_EXIF_MALFORMED;
+        return res;
+    }
+    if (state->code != OMC_SOURCE_OK) {
+        res.decoded.status = OMC_EXIF_TRUNCATED;
+        return res;
+    }
+    if (range->source.contiguous_data != NULL) {
+        res.decoded = omc_exif_dec(range->source.contiguous_data +
+                                    (omc_size)range->source_offset,
+                                    (omc_size)range->size, store, source_block,
+                                    out_ifds, ifd_cap, opts);
+    } else {
+        res.decoded = omc_exif_run(NULL, 0U, store, source_block, out_ifds,
+                                    ifd_cap, opts, 0, range, workspace, state,
+                                    io_limits, &res);
+    }
+    if (state->code != OMC_SOURCE_OK) {
+        switch (state->code) {
+        case OMC_SOURCE_REQUEST_TOO_LARGE:
+        case OMC_SOURCE_REQUEST_LIMIT:
+        case OMC_SOURCE_BYTE_LIMIT:
+        case OMC_SOURCE_SCRATCH_TOO_SMALL:
+            res.decoded.status = OMC_EXIF_LIMIT; break;
+        case OMC_SOURCE_SHORT_READ:
+        case OMC_SOURCE_IO_FAILURE:
+        case OMC_SOURCE_CHANGED:
+        case OMC_SOURCE_CANCELLED:
+            res.decoded.status = OMC_EXIF_TRUNCATED; break;
+        default: res.decoded.status = OMC_EXIF_MALFORMED; break;
+        }
+    }
+    return res;
 }
