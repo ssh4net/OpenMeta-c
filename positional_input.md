@@ -27,7 +27,7 @@ lifetime. Argument/range checks and preparatory view failures identify the
 range-relative request. Exact-read budget failures and dispatched I/O failures
 identify the absolute backing-source offset.
 
-## Reader and payload APIs at 0.7.0
+## Reader and payload APIs at 0.8.0
 
 `omc_scan_source()` shares the memory scanners' framing, item and extent rules.
 Pass `OMC_SCAN_FMT_UNKNOWN` for format selection or select a supported family.
@@ -69,10 +69,12 @@ Supported high-level callback families:
 - JP2/JXL: box and UUID metadata, ICC, EXIF, XMP and compressed metadata.
   Skip codestream boxes. Compression remains optional.
 - BMFF HEIF/AVIF/CR3: bounded `iinf`, `iloc`, `iref`, `dref`, property and item
-  tables with construction methods 0/1/2 and remapped extents. Existing bounded
-  structural interpretation is shared. Richer C++ semantic output differences
-  remain in RD5; source conversion does not remove them.
+  tables with construction methods 0/1/2 and remapped extents. Scene/component,
+  grid/overlay/identity/tile and primary/display summaries share memory decoding.
+  CR3 CMT3 uses typed Canon decoding when MakerNotes are enabled.
 
+- Standalone XMP: a bounded prefix probe followed by one packet in metadata
+  scratch. XMP input, namespace, attribute and arena limits remain enforced.
 - GIF: comment, XMP and ICC application sub-blocks share payload assembly.
   Image sub-block bodies are skipped using their declared lengths.
 - EXR: `omc_exr_dec_source()` traverses multipart headers and decodes one
@@ -132,3 +134,26 @@ The final RD4 run fixes an RD3 failure in the compression-disabled build:
 a later unsupported backend no longer hides an earlier payload-capacity failure
 from the high-level source transaction. The saved RD3 log was 41/42, despite the
 previous passing note. Current validation includes this regression.
+
+
+## RD6 resource and platform checkpoint
+
+Version 0.8.0 matches 208 public C++ reading cases through positional input and
+all 69 selected corpus files. Native Windows x64 and Win32 pass the 38 direct
+C targets without compression backends. Win32 retains size-conversion warnings
+in EXIF helpers. See [read_decode_parity.md](read_decode_parity.md)
+for the full gate scope and the 138 memory/callback corpus executions.
+
+A Phase One MakerNote spanning a 2 GiB image gap requires 21 requests, 162 bytes
+and 32 bytes of metadata scratch. The shared reader fetches its header,
+directory and individual values without materializing the intervening image.
+The existing 5 GiB TIFF/BigTIFF/JPEG sparse cases retain 12/12/36-byte scratch.
+Callbacks reject gap and image-body reads in these fixtures.
+
+These access counters exclude decoder stack and owning-store allocations.
+Clang 20 `-O3` reports a 199832-byte BMFF frame and a 59912-byte JUMBF frame;
+maximum call-chain stack use is not measured. Explicit caller structural
+workspace is still required before small-stack embedded qualification.
+XMP and JUMBF measurement also allocate temporary stores; they are not
+allocation-free sizing APIs. Current 32-bit Windows success does not qualify a
+microcontroller ABI or memory budget.

@@ -263,9 +263,141 @@ test_decode_structured_resource_paths(void)
     omc_store_fini(&store);
 }
 
+static void test_xml_entities_and_limits(void)
+{
+    static const char packet[] =
+        "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>"
+        "<rdf:Description xmlns:v='urn:v' xmlns:a='urn:a' rdf:about='about&amp;id'>"
+        "<v:Text>A&amp;B<!--split--><![CDATA[<C>&]]>&#x1F600;</v:Text>"
+        "<v:Nested><rdf:Description><a:Child "
+        "rdf:resource='a&amp;b'/></rdf:Description></v:Nested>"
+        "<v:Empty><rdf:Bag/></v:Empty><v:List><rdf:Alt>"
+        "<rdf:li xml:lang=' en-US '>one</rdf:li><rdf:li xml:lang='en_US'>two</rdf:li>"
+        "</rdf:Alt></v:List></rdf:Description></rdf:RDF>";
+    omc_store store;
+    omc_xmp_opts opts;
+    omc_xmp_res r;
+    omc_u32 i;
+    omc_store_init(&store);
+    omc_xmp_opts_init(&opts);
+    r = omc_xmp_dec((const omc_u8 *)packet, sizeof(packet) - 1U, &store, 17U,
+                    OMC_ENTRY_FLAG_DERIVED, &opts);
+    assert(r.status == OMC_XMP_OK && r.entries_decoded == 6U);
+    assert_text_value(&store, find_xmp_entry(&store, "urn:v", "Text"),
+                      "A&B<C>&\360\237\230\200");
+    assert_text_value(
+        &store, find_xmp_entry(&store, "urn:v", "Nested/nsu_75726e3a61:Child"), "a&b");
+    assert_text_value(&store, find_xmp_entry(&store, "urn:v", "Empty"), "");
+    assert_text_value(&store, find_xmp_entry(&store, "urn:v", "List[@xml:lang=en-US]"),
+                      "one");
+    assert_text_value(&store, find_xmp_entry(&store, "urn:v", "List[2]"), "two");
+    for (i = 0U; i < store.entry_count; ++i) {
+        assert(store.entries[i].origin.block == 17U);
+        assert(store.entries[i].origin.order_in_block == i);
+        assert(store.entries[i].origin.wire_count == store.entries[i].value.count);
+    }
+    omc_store_fini(&store);
+    omc_store_init(&store);
+    opts.limits.max_input_bytes = 10U;
+    r = omc_xmp_dec((const omc_u8 *)packet, sizeof(packet) - 1U, &store, 0U, 0U, &opts);
+    assert(r.status == OMC_XMP_LIMIT && store.entry_count == 0U &&
+           store.arena.size == 0U);
+    omc_xmp_opts_init(&opts);
+    opts.limits.max_namespace_bytes = 3U;
+    r = omc_xmp_dec((const omc_u8 *)packet, sizeof(packet) - 1U, &store, 0U, 0U, &opts);
+    assert(r.status == OMC_XMP_LIMIT && store.entry_count == 0U &&
+           store.arena.size == 0U);
+    omc_xmp_opts_init(&opts);
+    opts.limits.max_arena_bytes = 8U;
+    r = omc_xmp_dec((const omc_u8 *)packet, sizeof(packet) - 1U, &store, 0U, 0U, &opts);
+    assert(r.status == OMC_XMP_LIMIT && store.entry_count == 0U &&
+           store.arena.size == 0U);
+    omc_xmp_opts_init(&opts);
+    opts.limits.max_properties = 1U;
+    r = omc_xmp_meas((const omc_u8 *)packet, sizeof(packet) - 1U, &opts);
+    assert(r.status == OMC_XMP_LIMIT && r.entries_decoded == 1U);
+    omc_store_fini(&store);
+}
+
+static void test_malformed_xml(void)
+{
+    static const char prefix[] = "<rdf:RDF "
+                                 "xmlns:rdf='http://www.w3.org/1999/02/"
+                                 "22-rdf-syntax-ns#'><rdf:Description xmlns:v='urn:v'>";
+    static const char suffix[] = "</rdf:Description></rdf:RDF>";
+    static const char *const invalid[] = {"<v:A>text</v:B>",
+                                          "<v:A>&unknown;</v:A>",
+                                          "<v:A>&#0;</v:A>",
+                                          "<v:A>&#x110000;</v:A>",
+                                          "<v:A>&#xD800;</v:A>",
+                                          "<v:A>&amp</v:A>",
+                                          "<v:A>\300\200</v:A>",
+                                          "<v:A>\355\240\200</v:A>",
+                                          "<v:A>]]></v:A>",
+                                          "<v:A rdf:resource='<'/>",
+                                          "<v:A v:a='1' v:a='2'/>",
+                                          "<v:A v:a='1'v:b='2'/>",
+                                          "<unbound:A/>",
+                                          "<v:/>",
+                                          "<v:A><!--bad--comment--></v:A>",
+                                          "<v:A>\001</v:A>"};
+    char packet[512];
+    omc_size i;
+    omc_store store;
+    omc_xmp_opts opts;
+    omc_xmp_res r;
+    for (i = 0U; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+        strcpy(packet, prefix);
+        strcat(packet, invalid[i]);
+        strcat(packet, suffix);
+        omc_store_init(&store);
+        omc_xmp_opts_init(&opts);
+        r = omc_xmp_dec((const omc_u8 *)packet, strlen(packet), &store, 0U, 0U, &opts);
+        assert(r.status == OMC_XMP_MALFORMED);
+        omc_store_fini(&store);
+        omc_store_init(&store);
+        opts.malformed_mode = OMC_XMP_MALFORMED_TRUNCATED;
+        r = omc_xmp_dec((const omc_u8 *)packet, strlen(packet), &store, 0U, 0U, &opts);
+        assert(r.status == OMC_XMP_TRUNCATED);
+        omc_store_fini(&store);
+    }
+}
+
+static void test_large_attribute_table_and_explicit_limit(void)
+{
+    char packet[4096];
+    char attribute[32];
+    omc_u32 i;
+    omc_xmp_res result;
+    omc_xmp_opts opts;
+    omc_store store;
+    strcpy(packet, "<rdf:RDF "
+                   "xmlns:rdf='http://www.w3.org/1999/02/"
+                   "22-rdf-syntax-ns#'><rdf:Description xmlns:p='urn:large'");
+    for (i = 0U; i < 100U; ++i) {
+        sprintf(attribute, " p:a%u='value'", (unsigned)i);
+        strcat(packet, attribute);
+    }
+    strcat(packet, "/></rdf:RDF>");
+    omc_store_init(&store);
+    omc_xmp_opts_init(&opts);
+    result = omc_xmp_dec((const omc_u8 *)packet, strlen(packet), &store, 0U,
+                         OMC_ENTRY_FLAG_NONE, &opts);
+    assert(result.status == OMC_XMP_OK);
+    assert(result.entries_decoded == 100U);
+    assert(store.entry_count == 100U);
+    omc_store_fini(&store);
+    opts.limits.max_attributes_per_element = 64U;
+    result = omc_xmp_meas((const omc_u8 *)packet, strlen(packet), &opts);
+    assert(result.status == OMC_XMP_LIMIT);
+}
+
 int
 main(void)
 {
+    test_large_attribute_table_and_explicit_limit();
+    test_xml_entities_and_limits();
+    test_malformed_xml();
     test_limit_on_overflowing_depth_cap();
     test_limit_on_overflowing_path_cap();
     test_decode_xmp_subset();

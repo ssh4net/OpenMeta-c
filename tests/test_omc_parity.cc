@@ -1,11 +1,12 @@
-#include <openmeta/exr_decode.h>
 #include "omc_test_raw_fixture.h"
 #include <openmeta/exif_tag_names.h>
+#include <openmeta/exr_decode.h>
 #include <openmeta/meta_key.h>
 #include <openmeta/meta_store.h>
 #include <openmeta/meta_value.h>
 #include <openmeta/metadata_transfer.h>
 #include <openmeta/simple_meta.h>
+#include <openmeta/xmp_decode.h>
 
 extern "C" {
 #include "omc/omc_arena.h"
@@ -19,9 +20,9 @@ extern "C" {
 #include "omc/omc_val.h"
 }
 
+#include "omc/omc_read_source.h"
 #include "omc_test_assert.h"
 #include "omc_test_chunk_fixture.h"
-#include "omc/omc_read_source.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -30,6 +31,9 @@ extern "C" {
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
+#include <map>
 #include <span>
 #include <string>
 #include <utility>
@@ -41,9 +45,15 @@ bool run_omc_chunk_parity();
 bool run_omc_box_source_parity();
 bool run_omc_raw_source_parity();
 
+#include "bmff_reference_fixtures.h"
+#include "xmp_reference_fixtures.h"
+
 namespace {
 
 using ByteVec = std::vector<unsigned char>;
+
+#include "read_decode_makernote_fixtures.h"
+#include "read_decode_vendor_fixtures.h"
 
 static constexpr std::size_t k_transfer_fixture_file_capacity    = 16384U;
 static constexpr std::size_t k_transfer_fixture_payload_capacity = 8192U;
@@ -9423,7 +9433,28 @@ canonical_omc_value(const omc_store* store, const omc_val* value)
         default: out += std::to_string((unsigned long long)value->u.u64); break;
         }
         break;
-    case OMC_VAL_ARRAY:
+    case OMC_VAL_ARRAY: {
+        std::string hex = omc_ref_hex(store, value->u.ref);
+        const omc_u16 host_probe = 1U;
+        const bool host_le = *reinterpret_cast<const omc_u8 *>(&host_probe) != 0U;
+        const bool wire_le = value->byte_order == OMC_BYTE_ORDER_LITTLE;
+        unsigned width = omc_elem_size(value->elem_type);
+        if (value->elem_type == OMC_ELEM_URATIONAL ||
+            value->elem_type == OMC_ELEM_SRATIONAL)
+            width = 4U;
+        if (width > 1U && value->byte_order != OMC_BYTE_ORDER_NATIVE &&
+            wire_le != host_le) {
+            for (size_t off = 0; off + width * 2U <= hex.size(); off += width * 2U)
+                for (unsigned i = 0; i < width / 2U; ++i) {
+                    std::swap(hex[off + i * 2U], hex[off + (width - i - 1U) * 2U]);
+                    std::swap(hex[off + i * 2U + 1U],
+                              hex[off + (width - i - 1U) * 2U + 1U]);
+                }
+        }
+        out += "|hex=";
+        out += hex;
+        break;
+    }
     case OMC_VAL_BYTES:
         out += "|hex=";
         out += omc_ref_hex(store, value->u.ref);
@@ -9712,6 +9743,12 @@ struct TransferPersistParitySummary final {
     std::vector<std::string> sidecar_records;
 };
 
+static bool g_read_bmff_inventory = false;
+static bool g_read_inventory = false;
+static bool g_file_inventory = false;
+static bool g_read_source_inventory = false;
+static unsigned g_read_cases = 0U;
+static unsigned g_read_passed = 0U;
 static bool g_tiff_source_inventory = false;
 static bool g_container_source_inventory = false;
 static bool g_remaining_source_inventory = false;
@@ -9746,13 +9783,15 @@ read_omc_records(const ByteVec& file_bytes, const ReadCaseOptions& options)
     omc_read_opts opts;
     std::array<omc_blk_ref, 128> blocks {};
     std::array<omc_exif_ifd_ref, 128> ifds {};
-    std::array<omc_u8, 65536> payload {};
+    std::vector<omc_u8> payload(g_file_inventory ? 8U * 1024U * 1024U : 65536U);
     std::array<omc_u32, 256> scratch {};
     std::vector<std::string> out;
     omc_size i;
 
     omc_store_init(&store);
     omc_read_opts_init(&opts);
+    if (g_read_inventory)
+        opts.bmff.limits.max_entries = 16384U;
     if (options.decode_makernote) {
         opts.exif.decode_makernote = 1;
     }
@@ -9766,7 +9805,7 @@ read_omc_records(const ByteVec& file_bytes, const ReadCaseOptions& options)
         }
     }
     if (options.positional) {
-        std::array<omc_u8, 65536> values{};
+        std::vector<omc_u8> values(g_file_inventory ? 8U * 1024U * 1024U : 65536U);
         omc_read_source_workspace w{values.data(), values.size(), blocks.data(),
             static_cast<omc_u32>(blocks.size()), ifds.data(),
             static_cast<omc_u32>(ifds.size()), payload.data(), payload.size(),
@@ -9781,6 +9820,13 @@ read_omc_records(const ByteVec& file_bytes, const ReadCaseOptions& options)
         source_opts.decode = opts;
         const auto source_res = omc_read_source(&range, &store, &w, &state, &source_opts);
         res = source_res.decoded;
+        if (g_file_inventory)
+            std::printf(
+                "READ_IO\t%llu\t%llu\t%zu\t%llu\n",
+                static_cast<unsigned long long>(state.requests_issued),
+                static_cast<unsigned long long>(state.bytes_completed),
+                source_res.scratch_used,
+                static_cast<unsigned long long>(source_res.value_scratch_needed));
         if (source_res.status != OMC_READ_SOURCE_OK || source_res.nested_payloads_skipped) {
             std::fprintf(stderr, "source status=%d exif=%d input=%d needed=%llu skipped=%u\n",
                 source_res.status, res.exif.status, state.code,
@@ -9797,9 +9843,17 @@ read_omc_records(const ByteVec& file_bytes, const ReadCaseOptions& options)
     }
     if (res.scan.status == OMC_SCAN_MALFORMED) {
         std::fprintf(stderr, "omc scan failed with malformed status\n");
-        std::exit(1);
+        if (!g_read_inventory)
+            std::exit(1);
+        out.push_back("SCAN_MALFORMED");
     }
 
+    if (g_file_inventory)
+        std::printf("READ_C_STATUS\tscan=%d\texif=%d\tbmff=%d\txmp=%d\tjumbf=%"
+                    "d\tentries=%zu\tarena=%zu\n",
+                    res.scan.status, res.exif.status, res.bmff.status, res.xmp.status,
+                    res.jumbf.status, static_cast<std::size_t>(store.entry_count),
+                    static_cast<std::size_t>(store.arena.size));
     out.reserve((std::size_t)store.entry_count);
     for (i = 0U; i < store.entry_count; ++i) {
         out.push_back(canonical_omc_entry(&store, &store.entries[i]));
@@ -9843,7 +9897,7 @@ read_cpp_records(const ByteVec& file_bytes, const ReadCaseOptions& options)
     openmeta::SimpleMetaDecodeOptions opts {};
     std::array<openmeta::ContainerBlockRef, 128> blocks {};
     std::array<openmeta::ExifIfdRef, 128> ifds {};
-    std::array<std::byte, 65536> payload {};
+    std::vector<std::byte> payload(g_file_inventory ? 8U * 1024U * 1024U : 65536U);
     std::array<std::uint32_t, 256> scratch {};
     openmeta::SimpleMetaResult res;
     std::vector<std::string> out;
@@ -9881,7 +9935,9 @@ read_cpp_records(const ByteVec& file_bytes, const ReadCaseOptions& options)
     }
     if (res.scan.status == openmeta::ScanStatus::Malformed) {
         std::fprintf(stderr, "openmeta scan failed with malformed status\n");
-        std::exit(1);
+        if (!g_read_inventory)
+            std::exit(1);
+        out.push_back("SCAN_MALFORMED");
     }
 
     out.reserve(store.entries().size());
@@ -10020,6 +10076,29 @@ compare_records(const char* case_name, const std::vector<std::string>& omc,
     std::fprintf(stderr, "  omc entries: %zu\n", omc.size());
     std::fprintf(stderr, "  cpp entries: %zu\n", cpp.size());
 
+    if (g_file_inventory) {
+        std::vector<std::string> only_c, only_cpp;
+        std::set_difference(omc.begin(), omc.end(), cpp.begin(), cpp.end(),
+                            std::back_inserter(only_c));
+        std::set_difference(cpp.begin(), cpp.end(), omc.begin(), omc.end(),
+                            std::back_inserter(only_cpp));
+        std::map<std::string, std::pair<unsigned, unsigned>> groups;
+        const auto group = [](const std::string &record) {
+            const auto end = record.find("|tag=");
+            if (end != std::string::npos)
+                return record.substr(0, end);
+            const auto fields = record.find("||");
+            return record.substr(0, std::min(fields, size_t(200)));
+        };
+        for (const auto &record : only_c)
+            ++groups[group(record)].first;
+        for (const auto &record : only_cpp)
+            ++groups[group(record)].second;
+        for (const auto &[name, counts] : groups)
+            std::printf("READ_DIFF_GROUP\t%s\tC=%u\tCPP=%u\n", name.c_str(),
+                        counts.first, counts.second);
+    }
+
     i     = 0U;
     j     = 0U;
     shown = 0U;
@@ -10042,6 +10121,48 @@ compare_records(const char* case_name, const std::vector<std::string>& omc,
     return false;
 }
 
+static bool run_xmp_packet(const char *name, const std::string &xml)
+{
+    omc_store c;
+    openmeta::MetaStore cpp;
+    omc_store_init(&c);
+    const auto cr = omc_xmp_dec(reinterpret_cast<const omc_u8 *>(xml.data()),
+                                xml.size(), &c, 0U, OMC_ENTRY_FLAG_NONE, nullptr);
+    const auto pr = openmeta::decode_xmp_packet(
+        std::span<const std::byte>(reinterpret_cast<const std::byte *>(xml.data()),
+                                   xml.size()),
+        cpp);
+    std::vector<std::string> cv, pv;
+    for (omc_size i = 0U; i < c.entry_count; ++i) {
+        const auto &e = c.entries[i];
+        cv.push_back(canonical_omc_entry(&c, &e) +
+                     "|order=" + std::to_string(e.origin.order_in_block) +
+                     "|wire_count=" + std::to_string(e.origin.wire_count));
+    }
+    for (const auto &e : cpp.entries()) {
+        pv.push_back(canonical_cpp_entry(cpp, e) +
+                     "|order=" + std::to_string(e.origin.order_in_block) +
+                     "|wire_count=" + std::to_string(e.origin.wire_count));
+    }
+    const auto measured =
+        omc_xmp_meas(reinterpret_cast<const omc_u8 *>(xml.data()), xml.size(), nullptr);
+    bool ok = cr.status == OMC_XMP_OK && pr.status == openmeta::XmpDecodeStatus::Ok &&
+              measured.status == cr.status &&
+              measured.entries_decoded == cr.entries_decoded;
+    if (!ok)
+        std::fprintf(stderr, "%s status C=%d CPP=%d\n", name, cr.status,
+                     static_cast<int>(pr.status));
+    ok = compare_records(name, cv, pv) && ok;
+    omc_store_fini(&c);
+    std::printf("XMP_CASE\t%s\t%s\n", name, ok ? "PASS" : "FAIL");
+    return ok;
+}
+
+static bool run_xmp_reference_cases()
+{
+    return omc_xmp_reference_fixtures::run(run_xmp_packet);
+}
+
 static bool
 run_case(const char* case_name, const ByteVec& file_bytes,
          const ReadCaseOptions& options)
@@ -10050,6 +10171,47 @@ run_case(const char* case_name, const ByteVec& file_bytes,
     std::vector<std::string> cpp;
 
     ReadCaseOptions use_options = options;
+    if (g_read_inventory) {
+        if (g_read_bmff_inventory && std::strncmp(case_name, "bmff_", 5U) != 0)
+            return true;
+        /* Raw JUMBF is a payload API, not a simple-reader input. Exercise it
+         * inside a WebP C2PA carrier so both readers actually decode it. */
+        ByteVec input = file_bytes;
+        if (std::strncmp(case_name, "jumbf_", 6U) == 0) {
+            input = {'R', 'I', 'F', 'F', 0,   0,   0,   0,
+                     'W', 'E', 'B', 'P', 'C', '2', 'P', 'A'};
+            const auto append_le = [&](std::uint32_t n) {
+                for (unsigned shift = 0U; shift < 32U; shift += 8U)
+                    input.push_back(static_cast<omc_u8>(n >> shift));
+            };
+            append_le(static_cast<std::uint32_t>(file_bytes.size()));
+            input.insert(input.end(), file_bytes.begin(), file_bytes.end());
+            if (file_bytes.size() & 1U)
+                input.push_back(0U);
+            const auto length = static_cast<std::uint32_t>(input.size() - 8U);
+            for (unsigned i = 0U; i < 4U; ++i)
+                input[4U + i] = static_cast<omc_u8>(length >> (8U * i));
+        }
+        use_options.positional = g_read_source_inventory;
+        omc = read_omc_records(input, use_options);
+        cpp = read_cpp_records(input, options);
+        {
+            const auto old_size = omc.size();
+            erase_records_with_prefix(&omc, "JumbfField|field=c2pa.signature.");
+            if (old_size != omc.size())
+                std::printf("READ_EXTENSION\t%s\tc2pa.signature.*\t%zu\n", case_name,
+                            old_size - omc.size());
+        }
+        const bool matched = compare_records(case_name, omc, cpp);
+        ++g_read_cases;
+        if (matched)
+            ++g_read_passed;
+        std::printf("READ_CASE\t%s\t%s\t%s\n", case_name,
+                    g_read_source_inventory ? "callback" : "memory",
+                    matched ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        return matched;
+    }
     if (g_remaining_source_inventory) {
         const bool match = file_bytes.size() >= 14U &&
             ((file_bytes[0] == 0x76U && file_bytes[1] == 0x2fU) ||
@@ -11602,25 +11764,80 @@ main(int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--bench") == 0) {
         return run_benchmarks();
     }
+    if (argc == 3 && (std::strcmp(argv[1], "--read-file") == 0 ||
+                      std::strcmp(argv[1], "--read-file-source") == 0)) {
+        g_file_inventory = true;
+        g_read_inventory = true;
+        g_read_source_inventory = std::strcmp(argv[1], "--read-file-source") == 0;
+        std::ifstream input(argv[2], std::ios::binary);
+        if (!input) {
+            std::fprintf(stderr, "Cannot open input\n");
+            return 2;
+        }
+        input.seekg(0, std::ios::end);
+        const std::streamoff size = input.tellg();
+        if (size < 0 || static_cast<unsigned long long>(size) > 0x7fffffffULL) {
+            std::fprintf(stderr, "Input exceeds the 2 GiB corpus harness bound\n");
+            return 2;
+        }
+        ByteVec bytes(static_cast<size_t>(size));
+        input.seekg(0, std::ios::beg);
+        if (!input.read(reinterpret_cast<char *>(bytes.data()), size)) {
+            std::fprintf(stderr, "Cannot read complete input\n");
+            return 2;
+        }
+        return run_case(argv[2], bytes, true) ? 0 : 1;
+    }
+    if (argc == 2 && std::strcmp(argv[1], "--read-xmp") == 0)
+        return run_xmp_reference_cases() ? 0 : 1;
+    g_read_bmff_inventory =
+        argc == 2 && (std::strcmp(argv[1], "--read-bmff") == 0 ||
+                      std::strcmp(argv[1], "--read-bmff-source") == 0);
+    g_read_source_inventory =
+        argc == 2 && (std::strcmp(argv[1], "--read-source") == 0 ||
+                      std::strcmp(argv[1], "--read-bmff-source") == 0);
+    g_read_inventory = g_read_bmff_inventory || g_read_source_inventory ||
+                       (argc == 2 && std::strcmp(argv[1], "--read") == 0);
     g_remaining_source_inventory = argc == 2 && std::strcmp(argv[1], "--rd4") == 0;
     g_container_source_inventory = argc == 2 && std::strcmp(argv[1], "--rd3") == 0;
     g_tiff_source_inventory = argc == 2 && std::strcmp(argv[1], "--rd2") == 0;
-    if (argc != 1 && !g_remaining_source_inventory && !g_tiff_source_inventory && !g_container_source_inventory && !(argc == 2 && std::strcmp(argv[1], "--all") == 0)) {
-        std::fprintf(stderr, "usage: %s [--bench|--core-authoring|--core-source|--read-chunks|--rd2|--rd3|--rd4|--all]\n", argv[0]);
+    if (argc != 1 && !g_read_inventory && !g_remaining_source_inventory &&
+        !g_tiff_source_inventory && !g_container_source_inventory &&
+        !(argc == 2 && std::strcmp(argv[1], "--all") == 0)) {
+        std::fprintf(stderr,
+                     "usage: %s "
+                     "[--bench|--core-authoring|--core-source|--read-chunks|--rd2|--"
+                     "rd3|--rd4|--read|--read-source|--read-bmff|--read-bmff-source|--"
+                     "read-xmp|--read-file PATH|--read-file-source PATH|--all]\n",
+                     argv[0]);
         return 2;
     }
 
-    ok = g_container_source_inventory ? run_omc_box_source_parity() : run_omc_authoring_parity();
-    if (g_remaining_source_inventory) ok = run_omc_raw_source_parity() && ok;
-    ok = run_omc_source_parity() && ok;
-    ok = run_omc_chunk_parity() && ok;
+    ok = true;
+    if (!g_read_inventory) {
+        ok = g_container_source_inventory ? run_omc_box_source_parity()
+                                          : run_omc_authoring_parity();
+        if (g_remaining_source_inventory)
+            ok = run_omc_raw_source_parity() && ok;
+        ok = run_omc_source_parity() && ok;
+        ok = run_omc_chunk_parity() && ok;
+    }
+    if (g_read_inventory) {
+        ok = omc_bmff_reference_fixtures::run(
+                 [](const char *name, const std::vector<std::byte> &bytes) {
+                     const auto *data = reinterpret_cast<const omc_u8 *>(bytes.data());
+                     return run_case(name, ByteVec(data, data + bytes.size()), false);
+                 }) &&
+             ok;
+    }
     ok = run_chunk_decode_cases() && ok;
     ok = run_case("jpeg_comment", build_jpeg_comment_fixture(), false) && ok;
     ok = run_case("jpeg_all", build_jpeg_all_fixture(), false) && ok;
     ok = run_case("jpeg_irb_fields", build_jpeg_irb_fields_fixture(), false)
          && ok;
     ok = run_case("png_text", build_png_text_fixture(), false) && ok;
-    ok = run_bmff_package_route_mix_parity_case() && ok;
+    if (!g_read_inventory)
+        ok = run_bmff_package_route_mix_parity_case() && ok;
     if (argc == 2 && std::strcmp(argv[1], "--all") == 0) {
         /* Explicit complete lane: retains mismatches until ported. */
         {
@@ -16589,7 +16806,7 @@ main(int argc, char** argv)
     ok = run_case("bmff_primary_uri_item_info",
                   build_bmff_primary_uri_item_info_fixture(), false)
          && ok;
-    if (g_remaining_source_inventory) {
+    if (g_remaining_source_inventory || g_read_inventory) {
         const auto convert = [](const std::vector<std::byte>& bytes) {
             return ByteVec(reinterpret_cast<const unsigned char*>(bytes.data()),
                            reinterpret_cast<const unsigned char*>(bytes.data()) + bytes.size());
@@ -16912,6 +17129,79 @@ main(int argc, char** argv)
                   build_tiff_nikon_main_single_long_fixture("E700", 0x000AU, 0U),
                   true)
          && ok;
+    if (g_read_inventory && !g_read_bmff_inventory) {
+        static const char *makes[] = {"Phase One", "Unlisted", "Canon", "SONY"};
+        static const char *names[] = {
+            "rd5_phaseone_sensorcal", "rd5_unknown_unreadable",
+            "rd5_canon_signed_offsets", "rd5_sony_ignored_next_ifd"};
+        omc_u8 note[128];
+        for (unsigned i = 0U; i < 4U; ++i) {
+            const auto size = omc_rd5_makernote_fixture(note, i);
+            ok = run_case(names[i],
+                          build_tiff_with_make_makernote_fixture(makes[i], note, size),
+                          true) &&
+                 ok;
+        }
+        {
+            static const char *vendor_makes[] = {"Canon", "SONY", "NIKON", "NIKON"};
+            static const char *vendor_models[] = {"Canon EOS-1D X", "ILCE-6700",
+                                                  "NIKON D90", "NIKON D90"};
+            static const char *vendor_names[] = {
+                "rd6_canon_groups_camera_ifd", "rd6_sony_9050d_faces",
+                "rd6_nikon_shot_encrypted", "rd6_nikon_shot_fallback"};
+            omc_u8 vendor_note[512];
+            for (unsigned i = 0U; i < 4U; ++i) {
+                const auto size = omc_rd6_vendor_fixture(vendor_note, i);
+                ok = run_case(vendor_names[i],
+                              build_tiff_with_make_model_makernote_fixture(
+                                  vendor_makes[i], vendor_models[i], vendor_note, size),
+                              true) &&
+                     ok;
+            }
+            const auto size = omc_rd6_vendor_fixture(vendor_note, 4U);
+            ok = run_case("rd6_cr3_cmt3", ByteVec(vendor_note, vendor_note + size),
+                          true) &&
+                 ok;
+        }
+        for (const char *version : {"0200", "0201"}) {
+            ByteVec raw(64U, 0U);
+            std::memcpy(raw.data(), version, 4U);
+            for (unsigned i = 4U; i < raw.size(); ++i)
+                raw[i] = static_cast<omc_u8>(i);
+            const auto name = std::string("rd5_nikon_af_") + version;
+            ok = run_case(name.c_str(),
+                          build_tiff_nikon_single_main_bytes_fixture(
+                              "Nikon", 0xB7U, raw.data(), raw.size()),
+                          true) &&
+                 ok;
+        }
+        for (const char *version : {"0400", "0402", "0403"}) {
+            ByteVec raw(768U, 0U);
+            std::memcpy(raw.data(), version, 4U);
+            const unsigned offset =
+                version[3] == '0' ? 0x18AU : (version[3] == '2' ? 0x18BU : 0x2ACU);
+            std::memcpy(raw.data() + offset, "Example Lens", 12U);
+            const auto name = std::string("rd5_nikon_lens_") + version;
+            ok = run_case(name.c_str(),
+                          build_tiff_nikon_single_main_bytes_fixture(
+                              "Nikon", 0x98U, raw.data(), raw.size()),
+                          true) &&
+                 ok;
+        }
+        for (const char *version : {"0100", "0200", "0300"}) {
+            ByteVec raw(80U, 0U);
+            std::memcpy(raw.data(), version, 4U);
+            const auto name = std::string("rd5_nikon_picture_") + version;
+            ok = run_case(name.c_str(),
+                          build_tiff_nikon_single_main_bytes_fixture(
+                              "Nikon", 0x23U, raw.data(), raw.size()),
+                          true) &&
+                 ok;
+        }
+    }
+    if (g_read_inventory)
+        std::printf("READ_TOTAL\tcases=%u\texact=%u\tfailed=%u\n", g_read_cases,
+                    g_read_passed, g_read_cases - g_read_passed);
     if (g_remaining_source_inventory)
         std::fprintf(stderr, "RD4 source cases: %u\n", g_remaining_source_cases);
     if (g_container_source_inventory)

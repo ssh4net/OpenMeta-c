@@ -10055,13 +10055,15 @@ test_read_bmff_fields(void)
     assert(find_bmff_field_text(&store, "primary.auxl_semantic", "depth")
            != (const omc_entry*)0);
 
-    primary_dimg_item_id = find_bmff_field(&store, "primary.dimg_item_id");
+    /* Outgoing dimg references identify construction sources. */
+    assert(find_bmff_field(&store, "primary.dimg_item_id") == (const omc_entry *)0);
+    primary_dimg_item_id = find_bmff_field(&store, "primary.source_image_item_id");
     assert(primary_dimg_item_id != (const omc_entry*)0);
     assert(primary_dimg_item_id->value.u.u64 == 3U);
 
     primary_thmb_item_id = find_bmff_field(&store, "primary.thmb_item_id");
-    assert(primary_thmb_item_id != (const omc_entry*)0);
-    assert(primary_thmb_item_id->value.u.u64 == 1U);
+    /* This fixture has an outgoing thmb edge, not a thumbnail of primary. */
+    assert(primary_thmb_item_id == (const omc_entry *)0);
 
     primary_alpha_item_id = find_bmff_field(&store, "primary.alpha_item_id");
     assert(primary_alpha_item_id != (const omc_entry*)0);
@@ -10076,22 +10078,19 @@ test_read_bmff_fields(void)
     primary_depth_count = find_bmff_field(&store, "primary.depth_count");
     assert(primary_depth_count != (const omc_entry*)0);
     assert(primary_depth_count->value.u.u64 == 1U);
-    assert(count_bmff_field_scalar_value(&store,
-                                         "primary.linked_item_role_count", 4U)
-           == 1U);
-    assert(count_bmff_field(&store, "primary.linked_item_id") == 4U);
+    assert(count_bmff_field_scalar_value(&store, "primary.linked_item_role_count",
+                                         2U) == 1U);
+    assert(count_bmff_field(&store, "primary.linked_item_id") == 2U);
     assert(count_bmff_field_scalar_value(&store, "primary.linked_item_type",
-                                         fourcc('E', 'x', 'i', 'f'))
-           == 2U);
+                                         fourcc('E', 'x', 'i', 'f')) == 1U);
     assert(count_bmff_field_scalar_value(&store, "primary.linked_item_type",
-                                         fourcc('m', 'i', 'm', 'e'))
-           == 2U);
-    assert(count_bmff_field(&store, "primary.linked_item_type_name") == 4U);
+                                         fourcc('m', 'i', 'm', 'e')) == 1U);
+    assert(count_bmff_field(&store, "primary.linked_item_type_name") == 2U);
     assert(find_bmff_field_text(&store, "primary.linked_item_type_name", "Exif")
            != (const omc_entry*)0);
     assert(find_bmff_field_text(&store, "primary.linked_item_type_name", "mime")
            != (const omc_entry*)0);
-    assert(count_bmff_field(&store, "primary.linked_item_semantic") == 4U);
+    assert(count_bmff_field(&store, "primary.linked_item_semantic") == 2U);
     assert(find_bmff_field_text(&store, "primary.linked_item_semantic", "exif")
            != (const omc_entry*)0);
     assert(find_bmff_field_text(&store, "primary.linked_item_semantic", "jumbf")
@@ -10104,10 +10103,10 @@ test_read_bmff_fields(void)
            != (const omc_entry*)0);
     assert(find_bmff_field_text(&store, "primary.linked_item_role", "depth")
            != (const omc_entry*)0);
-    assert(find_bmff_field_text(&store, "primary.linked_item_role", "derived")
-           != (const omc_entry*)0);
-    assert(find_bmff_field_text(&store, "primary.linked_item_role", "thumbnail")
-           != (const omc_entry*)0);
+    assert(find_bmff_field_text(&store, "primary.linked_item_role", "derived") ==
+           (const omc_entry *)0);
+    assert(find_bmff_field_text(&store, "primary.linked_item_role", "thumbnail") ==
+           (const omc_entry *)0);
 
     assert(count_bmff_field(&store, "aux.item_id") == 2U);
     aux_item_count = find_bmff_field(&store, "aux.item_count");

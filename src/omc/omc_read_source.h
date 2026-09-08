@@ -41,7 +41,9 @@ typedef struct omc_read_source_res {
 OMC_API void omc_read_source_opts_init(omc_read_source_opts *opts);
 /* Borrowed fixed-size source and caller-owned workspace. Callback conversion
  * supports JPEG, PNG, WebP, GIF, JP2, JXL, BMFF, TIFF/BigTIFF/DNG,
- * EXR headers, CRW/CIFF and declared RAF/X3F metadata.
+ * EXR headers, standalone XMP, CRW/CIFF and declared RAF/X3F metadata.
+ * Standalone XMP uses a 512-byte prefix probe and requires the packet to fit
+ * metadata scratch and the configured XMP input limit.
  * JPEG stops at SOS/EOI. Chunk/box scanners skip image and media bodies.
  * Metadata is decoded one logical payload at a time; compressed input uses
  * metadata as a bounded feed buffer. PNG text framing must also fit metadata.

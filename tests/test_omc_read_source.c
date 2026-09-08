@@ -1,5 +1,7 @@
 #include "omc/omc_read_source.h"
 #include "omc_test_assert.h"
+#include "read_decode_makernote_fixtures.h"
+#include "read_decode_vendor_fixtures.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -341,11 +343,176 @@ failures(host *h)
     assert(res.status == OMC_READ_SOURCE_OK && res.decoded.scan.status == OMC_SCAN_OK);
     omc_store_fini(&store);
 }
+static void check_xmp_sidecar(void)
+{
+    static const char xml[] =
+        "<x:xmpmeta xmlns:x='adobe:ns:meta/'><rdf:RDF "
+        "xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'><rdf:Description "
+        "xmlns:v='urn:v'><v:A>A&amp;B</v:A></rdf:Description></rdf:RDF></x:xmpmeta>";
+    host h;
+    work w;
+    omc_source_range range;
+    omc_source_state state;
+    omc_read_source_opts opts;
+    omc_read_source_res r;
+    omc_store store;
+    omc_size old_entries;
+    omc_size old_arena;
+    memset(&h, 0, sizeof(h));
+    memcpy(h.bytes, xml, sizeof(xml) - 1U);
+    h.available = sizeof(xml) - 1U;
+    h.base = 37U;
+    range.source = omc_source_callback(h.base + h.available, &h, read_at, 0U);
+    range.source_offset = h.base;
+    range.size = h.available;
+    init_work(&w);
+    memset(&state, 0, sizeof(state));
+    omc_read_source_opts_init(&opts);
+    omc_store_init(&store);
+    r = omc_read_source(&range, &store, &w.w, &state, &opts);
+    assert(r.status == OMC_READ_SOURCE_OK && r.decoded.xmp.status == OMC_XMP_OK);
+    assert(store.entry_count == 1U && r.scratch_used == h.available);
+    assert(store.entries[0].value.count == 3U &&
+           store.entries[0].origin.wire_count == 3U);
+    assert(store.blocks[0].data_offset == 0U &&
+           store.blocks[0].data_size == h.available);
+    old_entries = store.entry_count;
+    old_arena = store.arena.size;
+    w.w.metadata_capacity = h.available - 1U;
+    memset(&state, 0, sizeof(state));
+    r = omc_read_source(&range, &store, &w.w, &state, &opts);
+    assert(r.status == OMC_READ_SOURCE_LIMIT && r.value_scratch_needed == h.available);
+    assert(store.entry_count == old_entries && store.arena.size == old_arena);
+    w.w.metadata_capacity = sizeof(w.metadata);
+    opts.decode.xmp.limits.max_input_bytes = 32U;
+    memset(&state, 0, sizeof(state));
+    r = omc_read_source(&range, &store, &w.w, &state, &opts);
+    assert(r.status == OMC_READ_SOURCE_LIMIT && store.entry_count == old_entries &&
+           store.arena.size == old_arena);
+    omc_read_source_opts_init(&opts);
+    opts.decode.xmp.limits.max_value_bytes = 2U;
+    memset(&state, 0, sizeof(state));
+    r = omc_read_source(&range, &store, &w.w, &state, &opts);
+    assert(r.status == OMC_READ_SOURCE_LIMIT && store.entry_count == old_entries &&
+           store.arena.size == old_arena);
+    omc_read_source_opts_init(&opts);
+    h.short_read = 1;
+    memset(&state, 0, sizeof(state));
+    r = omc_read_source(&range, &store, &w.w, &state, &opts);
+    assert(r.status == OMC_READ_SOURCE_IO && store.entry_count == old_entries &&
+           store.arena.size == old_arena);
+    omc_store_fini(&store);
+}
+
+static void sparse_phaseone(host *h)
+{
+    work w;
+    omc_store store;
+    omc_source_range range;
+    omc_source_state state;
+    omc_read_source_opts opts;
+    omc_read_source_res result;
+    omc_size i;
+    int found;
+    memset(h, 0, sizeof(*h));
+    h->base = 37U;
+    h->available = 192U;
+    h->split = 96U;
+    h->gap = (omc_u64)2U << 30U;
+    h->bytes[0] = 'I';
+    h->bytes[1] = 'I';
+    put(h->bytes + 2U, 42U, 2U, 1);
+    put(h->bytes + 4U, 8U, 4U, 1);
+    put(h->bytes + 8U, 1U, 2U, 1);
+    entry(h->bytes + 10U, 0, 1, 0x927CU, 7U, h->gap + 128U, 64U);
+    (void)omc_rd5_makernote_fixture(h->bytes + 64U, 0U);
+    put(h->bytes + 72U, h->gap + 32U, 4U, 1);
+    put(h->bytes + 64U + 0x54U, h->gap + 0x60U, 4U, 1);
+    range.source = omc_source_callback(h->base + h->gap + h->available, h, read_at, 0);
+    range.source_offset = h->base;
+    range.size = h->gap + h->available;
+    init_work(&w);
+    w.w.metadata_capacity = 64U;
+    omc_store_init(&store);
+    omc_source_state_init(&state);
+    omc_read_source_opts_init(&opts);
+    opts.decode.exif.decode_makernote = 1;
+    result = omc_read_source(&range, &store, &w.w, &state, &opts);
+    assert(result.status == OMC_READ_SOURCE_OK);
+    assert(result.decoded.exif.status == OMC_EXIF_OK);
+    assert(result.value_scratch_needed == 0U && state.bytes_requested < 512U);
+    found = 0;
+    for (i = 0U; i < store.entry_count; ++i)
+        if (store.entries[i].key.kind == OMC_KEY_EXIF_TAG &&
+            store.entries[i].key.u.exif_tag.tag == 0x400U) {
+            assert(store.entries[i].value.kind == OMC_VAL_SCALAR &&
+                   store.entries[i].value.u.u64 == 7U);
+            found = 1;
+        }
+    assert(found);
+    printf("RD6 PhaseOne 2GiB gap: requests=%u bytes=%lu scratch=%lu\n",
+           (unsigned)state.requests_issued, (unsigned long)state.bytes_requested,
+           (unsigned long)result.scratch_used);
+    omc_store_fini(&store);
+}
+
+static void check_cmt3(void)
+{
+    host h;
+    work w;
+    omc_source_range range;
+    omc_source_state state;
+    omc_read_source_opts opts;
+    omc_read_source_res result;
+    omc_store store;
+    omc_size i, saved_count;
+    int found;
+    memset(&h, 0, sizeof(h));
+    h.available = omc_rd6_vendor_fixture(h.bytes, 4U);
+    h.base = 37U;
+    range.source = omc_source_callback(h.base + h.available, &h, read_at, 0U);
+    range.source_offset = h.base;
+    range.size = h.available;
+    init_work(&w);
+    omc_source_state_init(&state);
+    omc_read_source_opts_init(&opts);
+    opts.decode.exif.decode_makernote = 1;
+    omc_store_init(&store);
+    result = omc_read_source(&range, &store, &w.w, &state, &opts);
+    assert(result.status == OMC_READ_SOURCE_OK);
+    found = 0;
+    for (i = 0U; i < store.entry_count; ++i) {
+        const omc_entry *e = &store.entries[i];
+        if (e->key.kind == OMC_KEY_EXIF_TAG && e->key.u.exif_tag.tag == 0x10U) {
+            assert(e->value.kind == OMC_VAL_SCALAR && e->value.u.u64 == 0x80000331U);
+            found = 1;
+        }
+    }
+    assert(found);
+    saved_count = store.entry_count;
+    h.short_read = 1;
+    omc_source_state_init(&state);
+    result = omc_read_source(&range, &store, &w.w, &state, &opts);
+    assert(result.status == OMC_READ_SOURCE_IO && store.entry_count == saved_count);
+    h.short_read = 0;
+    omc_store_reset(&store);
+    opts.decode.exif.decode_makernote = 0;
+    omc_source_state_init(&state);
+    result = omc_read_source(&range, &store, &w.w, &state, &opts);
+    assert(result.status == OMC_READ_SOURCE_OK);
+    for (i = 0U; i < store.entry_count; ++i)
+        assert(store.entries[i].key.kind != OMC_KEY_EXIF_TAG);
+    omc_store_fini(&store);
+}
+
 int
 main(void)
 {
     host h;
     int big, little;
+    check_cmt3();
+    sparse_phaseone(&h);
+    check_xmp_sidecar();
     for (big = 0; big < 2; ++big)
         for (little = 0; little < 2; ++little) {
             make_tiff(&h, big, little);

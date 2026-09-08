@@ -72,27 +72,36 @@ value layout changes in version 0.2.0; consumers must rebuild.
 The historical full differential harness remains a failing inventory. Its
 previously disabled transfer/persist block is now available through
 `omc_test_parity --all`. Nested structured XMP and broader transfer lifecycle
-cases still differ. Default parity now includes nine BMFF fixtures with
-remaining primitive and richer C++ summary differences. The focused gates do
-not suppress or relabel those failures. The initial positional batch is now implemented; see the current checkpoint below.
+cases still differ. The original default parity inventory contained nine BMFF fixtures with
+primitive and richer summary differences. Version 0.8.0 closes those reports;
+see the current checkpoint below for the remaining broad inventory.
 
 See [authoring.md](authoring.md) for contracts and bounded coverage. The matrix
 below retains source-review detail where broader acceptance remains open.
 
-## Current Reading/Decoding Checkpoint: Version 0.7.0
+## Current Reading/Decoding Checkpoint: Version 0.8.0
 
-The [reading/decoding plan](read_decode_parity.md) pins C++ 0.4.127 and orders
-the remaining convergence work. Its first batch adds PNG/WebP callback reads,
-split JUMBF carriers, four JUMBF output corrections and working Brotli discovery.
-RD2 adds direct TIFF values, raw header variants and source MakerNote routes,
-with 80 TIFF differential fixtures. RD3 adds reusable source scanners/payload
-extraction and JP2/JXL/BMFF input. RD4 adds GIF, EXR, CIFF and native/declared
-RAF/X3F input, with 18 decoded-record and five scanner/payload C++ comparisons.
-Release and dependency-disabled direct/focused gates each pass 44/44; the
-sanitizer direct gate passes 38/38. RD4 also fixes the RD3 dependency-disabled
-capacity failure documented in the detailed plan. The nine default BMFF failures
-and 266 broad mismatch reports remain unchanged. RD5 decoder deltas and RD6
-stage acceptance remain open.
+The [reading/decoding plan](read_decode_parity.md) records all RD0–RD6 batches
+against C++ 0.4.127. RD5 adds the remaining bounded BMFF scene/derived-image
+summaries, structured XMP, JUMBF semantics and corpus-discovered MakerNote fixes.
+CMT3, standalone XMP and sparse Phase One metadata share positional input paths.
+RD6 adds a reproducible corpus runner, native Windows x64/Win32 and resource
+measurements. Rich interpretation and non-fuzzy queries remain in the C target.
+
+Release with and without zlib/Brotli passes 50/50 targets; sanitizer and native
+Windows x64/Win32 each pass 38/38 direct targets. The reading inventory matches
+208/208 cases in each access mode; the BMFF subset matches 68/68 and ordered XMP
+matches 35/35. The selected 69-file corpus matches 138/138 memory/callback runs.
+The historical default parity target now passes. The broad transfer/persist
+inventory retains 257 reports and remains separate from reading-stage progress.
+
+These are measured case results, not universal stage percentages. Uncovered
+vendor/model variants, complete C2PA verification and Unicode XML-name/UTF-16
+support remain explicit limits. BMFF currently has a 199832-byte compiled stack
+frame, so small-stack embedded acceptance requires a caller-workspace batch.
+See the detailed checkpoint for dependency, corpus, platform and resource scope.
+Version 0.8.0 extends `omc_xmp_limits`; consumers must rebuild and initialize
+options with the public initializer.
 
 ## Prior Core Checkpoint: Version 0.3.0
 
@@ -260,9 +269,9 @@ Presence alone does not establish complete reference parity:
 | --- | --- | --- | --- |
 | R1 | Store, keys, values, origins, edits | `omc_store.h`, `omc_val.h`, `omc_edit.h`; add/set/tombstone and reserve operations | Present and tested: typed makers, array byte order, candidate publication on commit/compact, and failure preservation. |
 | R2 | Contiguous scan, payload assembly, decode | `omc_scan.h`, `omc_pay.h`, `omc_read.h`; direct EXIF/XMP/ICC/IPTC/IRB/JUMBF/EXR tests | Present, broad bounded coverage. Promote C++ differences by fixture; no universal camera/read-parity claim. |
-| R3 | MakerNote/native RAW and modern-container enrichment | `src/read/omc_exif.c`, `omc_bmff.c`, naming and read tests | Partial against the newer C++ tree. Preserve raw/unknown values; port safety-relevant facts and small proven read deltas before long-tail descriptive enrichment. |
-| R4 | BMFF derived fields | Item semantics, properties, `ipma` associations and `grpl` summaries in `omc_bmff.c` | Partial. Deeper scene/component, derived-image and display-transform metadata semantics are C targets. Port bounded records and derivations without C++ ownership containers. Read-side summaries do not imply writer remapping. |
-| R5 | Positional source, read budgets, source ranges/windows | `omc_source.h`, `omc_read_source.h`, direct and focused C++ source tests | Implemented fixed-size memory/callback sources, exact reads, sticky budgets, ranges/windows, and bounded JPEG/TIFF/BigTIFF/DNG/PNG/WebP collection. Remaining readers and source-native TIFF/MakerNote values are staged work; see `read_decode_parity.md`. |
+| R3 | MakerNote/native RAW and modern-container enrichment | `src/read/omc_exif.c`, `omc_bmff.c`, naming and read tests | Bounded parity verified against the pin for the public inventory and selected corpus, including CMT3, vendor offsets and model-selected derived tables. Uncovered model/subtable variants remain planned; preserve raw/unknown values. |
+| R4 | BMFF derived fields | Item semantics, properties, `ipma` associations and `grpl` summaries in `omc_bmff.c` | Implemented bounded scene/component, grid/overlay/identity/tile, primary/display-transform and property/reference summaries. 68 memory and callback cases match the pin. Read-side summaries do not imply writer remapping or unbounded graph support. |
+| R5 | Positional source, read budgets, source ranges/windows | `omc_source.h`, `omc_read_source.h`, direct and focused C++ source tests | Implemented fixed-size memory/callback sources, exact reads, sticky budgets, shared scanners/payload extraction, direct TIFF/MakerNote values, modern containers, native RAW and standalone XMP. Explicit undeclared RAW-search and embedded-memory limits remain; see `read_decode_parity.md`. |
 | R6 | Runtime capabilities, preview, CCM/DNG helpers | `omc_capabilities.h`, `omc_preview.h`, `omc_ccm_query.h` and direct tests | Present bounded helpers. Capabilities must report actual C support and enabled compression features. |
 | R7 | Detached entry/store validation | `omc_validate.h` exposes file/read diagnostics and CCM checks | Implemented initial detached schema in `omc_store_validate.h`; bounded diagnostics, wire/value checks, singleton and image-context tests. |
 | R8 | Decoded snapshots, source provenance and persistence | C callers retain stores/bytes; transfer packages retain output source ranges | Missing named snapshot API; Conditional. C++ snapshot v1 exists. Positional input does not require its owning or serialized snapshot object first. |

@@ -189,10 +189,13 @@ make_claim_jumb_box(omc_u8* out, const char* label, const omc_u8* claim_cbor,
     return make_jumb_box_with_label(out, label, cbor_box, cbor_box_size);
 }
 
+static const char *g_last_jumbf_field;
+
 static const omc_entry*
 find_jumbf_field(const omc_store* store, const char* field)
 {
     omc_size i;
+    g_last_jumbf_field = field;
 
     for (i = 0U; i < store->entry_count; ++i) {
         const omc_entry* entry;
@@ -280,6 +283,8 @@ assert_bytes_entry_equals(const omc_store* store, const omc_entry* entry,
 static void
 assert_scalar_u64_equals(const omc_entry* entry, omc_u64 expected)
 {
+    if (!entry || entry->value.u.u64 != expected)
+        fprintf(stderr, "FIELD %s\n", g_last_jumbf_field);
     OMC_TEST_REQUIRE(entry != (const omc_entry*)0);
     OMC_TEST_REQUIRE_U64_EQ(entry->value.kind, OMC_VAL_SCALAR);
     OMC_TEST_CHECK_U64_EQ(entry->value.u.u64, expected);
@@ -761,10 +766,7 @@ test_jumbf_extracts_cose_signature_fields(void)
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store, "c2pa.semantic.signature_count"),
                              1U);
-    assert_text_entry_equals(&store,
-                             find_jumbf_field(
-                                 &store, "c2pa.semantic.signature.0.algorithm"),
-                             "es256");
+    assert(find_jumbf_field(&store, "c2pa.semantic.signature.0.algorithm") == NULL);
     assert_text_entry_equals(&store,
                              find_jumbf_field(&store,
                                               "c2pa.signature.0.algorithm"),
@@ -1880,7 +1882,7 @@ test_jumbf_emits_c2pa_ingredient_signature_topology_fields(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 3U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "a");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"a", sizeof("a") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "ingredients");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 2U);
@@ -1896,7 +1898,7 @@ test_jumbf_emits_c2pa_ingredient_signature_topology_fields(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "b");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"b", sizeof("b") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 2U);
@@ -1907,7 +1909,7 @@ test_jumbf_emits_c2pa_ingredient_signature_topology_fields(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "c");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"c", sizeof("c") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 1U);
@@ -2093,26 +2095,20 @@ test_jumbf_emits_c2pa_ingredient_signature_topology_fields(void)
                                  "c2pa.semantic.manifest.0."
                                  "explicit_reference_signature_count"),
                              1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.manifest.0."
-                                 "explicit_reference_unresolved_signature_count"),
-                             0U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.manifest.0."
-                                 "explicit_reference_ambiguous_signature_count"),
-                             0U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.manifest.0."
-                                 "explicit_reference_index_hits"),
-                             1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.manifest.0."
-                                 "explicit_reference_label_hits"),
-                             0U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(
+            &store, "c2pa.semantic.manifest.0.explicit_reference_unresolved_count"),
+        0U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store,
+                         "c2pa.semantic.manifest.0.explicit_reference_ambiguous_count"),
+        0U);
+    assert(find_jumbf_field(&store,
+                            "c2pa.semantic.manifest.0.explicit_reference_index_hits") ==
+           (const omc_entry *)0);
+    assert(find_jumbf_field(&store,
+                            "c2pa.semantic.manifest.0.explicit_reference_label_hits") ==
+           (const omc_entry *)0);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.manifest.0."
@@ -2179,10 +2175,9 @@ test_jumbf_emits_c2pa_ingredient_signature_topology_fields(void)
                                  "ingredient_linked_signature_explicit_reference_"
                                  "thumbnail_url_count"),
                              1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.claim.0.referenced_by_signature_count"),
-                             1U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store, "c2pa.semantic.claim.0.referenced_by_signature_count"),
+        2U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.claim.0."
@@ -2749,7 +2744,7 @@ test_jumbf_emits_c2pa_explicit_reference_status_fields(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "a");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"a", sizeof("a") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 2U);
@@ -2760,7 +2755,7 @@ test_jumbf_emits_c2pa_explicit_reference_status_fields(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 3U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "b");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"b", sizeof("b") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "ingredients");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 3U);
@@ -2789,7 +2784,7 @@ test_jumbf_emits_c2pa_explicit_reference_status_fields(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 1U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "c");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"c", sizeof("c") - 1U);
 
     jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
     omc_store_init(&store);
@@ -2816,10 +2811,8 @@ test_jumbf_emits_c2pa_explicit_reference_status_fields(void)
                                  &store,
                                  "c2pa.semantic.explicit_reference_index_hits"),
                              3U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.explicit_reference_label_hits"),
-                             0U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store, "c2pa.semantic.explicit_reference_label_hits"), 1U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.reference_key_hits"),
@@ -2841,26 +2834,20 @@ test_jumbf_emits_c2pa_explicit_reference_status_fields(void)
                                  "c2pa.semantic.manifest.0."
                                  "explicit_reference_signature_count"),
                              2U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.manifest.0."
-                                 "explicit_reference_unresolved_signature_count"),
-                             1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.manifest.0."
-                                 "explicit_reference_ambiguous_signature_count"),
-                             1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.manifest.0."
-                                 "explicit_reference_index_hits"),
-                             3U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.manifest.0."
-                                 "explicit_reference_label_hits"),
-                             0U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(
+            &store, "c2pa.semantic.manifest.0.explicit_reference_unresolved_count"),
+        1U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store,
+                         "c2pa.semantic.manifest.0.explicit_reference_ambiguous_count"),
+        1U);
+    assert(find_jumbf_field(&store,
+                            "c2pa.semantic.manifest.0.explicit_reference_index_hits") ==
+           (const omc_entry *)0);
+    assert(find_jumbf_field(&store,
+                            "c2pa.semantic.manifest.0.explicit_reference_label_hits") ==
+           (const omc_entry *)0);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic."
@@ -3081,10 +3068,10 @@ test_jumbf_emits_c2pa_explicit_reference_status_fields(void)
                                  &store,
                                  "c2pa.semantic.signature.1.explicit_reference_index_hits"),
                              2U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.signature.1.explicit_reference_label_hits"),
-                             0U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store,
+                         "c2pa.semantic.signature.1.explicit_reference_label_hits"),
+        1U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.1.reference_key_hits"),
@@ -3132,339 +3119,337 @@ test_jumbf_emits_c2pa_ingredient_explicit_reference_status_topology_fields(
     static const omc_u8 k_claim1[] = { 0xA1U, 0x61U, 0x62U, 0x02U };
     static const omc_u8 k_claim2[] = { 0xA1U, 0x61U, 0x63U, 0x03U };
     static const test_u64_field_expect k_expected[] = {
-        { "c2pa.semantic.explicit_reference_signature_count", 2U },
-        { "c2pa.semantic.explicit_reference_unresolved_signature_count", 1U },
-        { "c2pa.semantic.explicit_reference_ambiguous_signature_count", 1U },
-        { "c2pa.semantic.ingredient_signature_count", 2U },
-        { "c2pa.semantic.ingredient_linked_claim_count", 1U },
-        { "c2pa.semantic.ingredient_linked_claim_direct_source_count", 1U },
-        { "c2pa.semantic.ingredient_linked_claim_cross_source_count", 0U },
-        { "c2pa.semantic.ingredient_linked_claim_mixed_source_count", 0U },
-        { "c2pa.semantic.ingredient_linked_claim_explicit_reference_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_claim_explicit_reference_direct_source_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_claim_explicit_reference_cross_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_claim_explicit_reference_mixed_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_claim_explicit_reference_unresolved_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_claim_explicit_reference_unresolved_"
-          "direct_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_claim_explicit_reference_unresolved_"
-          "cross_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_claim_explicit_reference_unresolved_"
-          "mixed_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_claim_explicit_reference_ambiguous_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_claim_explicit_reference_ambiguous_"
-          "direct_source_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_claim_explicit_reference_ambiguous_"
-          "cross_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_claim_explicit_reference_ambiguous_"
-          "mixed_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_explicit_reference_unresolved_signature_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_explicit_reference_ambiguous_signature_count",
-          1U },
-        { "c2pa.semantic.manifest.0.ingredient_signature_count", 2U },
-        { "c2pa.semantic.manifest.0.ingredient_linked_claim_count", 1U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_direct_source_count",
-          1U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_cross_source_count",
-          0U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_mixed_source_count",
-          0U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_explicit_reference_count",
-          1U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_explicit_reference_direct_source_count",
-          1U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_explicit_reference_cross_source_count",
-          0U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_explicit_reference_mixed_source_count",
-          0U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_explicit_reference_unresolved_count",
-          0U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_explicit_reference_unresolved_"
-          "direct_source_count",
-          0U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_explicit_reference_unresolved_"
-          "cross_source_count",
-          0U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_explicit_reference_unresolved_"
-          "mixed_source_count",
-          0U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_explicit_reference_ambiguous_count",
-          1U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_explicit_reference_ambiguous_"
-          "direct_source_count",
-          1U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_explicit_reference_ambiguous_"
-          "cross_source_count",
-          0U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_linked_claim_explicit_reference_ambiguous_"
-          "mixed_source_count",
-          0U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_explicit_reference_unresolved_signature_count",
-          1U },
-        { "c2pa.semantic.manifest.0."
-          "ingredient_explicit_reference_ambiguous_signature_count",
-          1U },
-        { "c2pa.semantic.claim.0.linked_ingredient_signature_count", 0U },
-        { "c2pa.semantic.claim.1.linked_ingredient_signature_count", 1U },
-        { "c2pa.semantic.claim.1."
-          "linked_direct_ingredient_signature_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_cross_ingredient_signature_count",
-          0U },
-        { "c2pa.semantic.claim.1.linked_ingredient_title_count", 1U },
-        { "c2pa.semantic.claim.1.linked_ingredient_relationship_count", 1U },
-        { "c2pa.semantic.claim.1.linked_ingredient_thumbnail_url_count", 1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_signature_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_direct_signature_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_cross_signature_count",
-          0U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_title_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_relationship_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_thumbnail_url_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_relationship_kind_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_relationship.componentOf_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_relationship_kind_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_relationship."
-          "componentOf_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_unresolved_signature_count",
-          0U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_unresolved_"
-          "direct_signature_count",
-          0U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_unresolved_"
-          "cross_signature_count",
-          0U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_unresolved_title_count",
-          0U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_unresolved_"
-          "relationship_count",
-          0U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_unresolved_"
-          "thumbnail_url_count",
-          0U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_unresolved_"
-          "relationship_kind_count",
-          0U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_ambiguous_signature_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_ambiguous_"
-          "direct_signature_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_ambiguous_"
-          "cross_signature_count",
-          0U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_ambiguous_title_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_ambiguous_"
-          "relationship_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_ambiguous_"
-          "thumbnail_url_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_ambiguous_"
-          "relationship_kind_count",
-          1U },
-        { "c2pa.semantic.claim.1."
-          "linked_ingredient_explicit_reference_ambiguous_"
-          "relationship.componentOf_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_direct_claim_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_cross_claim_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_direct_source_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_cross_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_mixed_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_direct_title_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_cross_title_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_"
-          "direct_relationship_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_"
-          "cross_relationship_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_"
-          "direct_thumbnail_url_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_"
-          "cross_thumbnail_url_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_title_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_unresolved_"
-          "direct_claim_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_unresolved_"
-          "cross_claim_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_unresolved_"
-          "direct_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_unresolved_"
-          "cross_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_unresolved_"
-          "mixed_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_unresolved_"
-          "title_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_unresolved_"
-          "relationship_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_unresolved_"
-          "relationship_kind_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_unresolved_"
-          "thumbnail_url_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_ambiguous_"
-          "direct_claim_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_ambiguous_"
-          "cross_claim_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_ambiguous_"
-          "direct_source_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_ambiguous_"
-          "cross_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_ambiguous_"
-          "mixed_source_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_ambiguous_"
-          "direct_title_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_ambiguous_"
-          "cross_title_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_ambiguous_"
-          "direct_relationship_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_ambiguous_"
-          "cross_relationship_count",
-          0U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_ambiguous_"
-          "direct_thumbnail_url_count",
-          1U },
-        { "c2pa.semantic."
-          "ingredient_linked_signature_explicit_reference_ambiguous_"
-          "cross_thumbnail_url_count",
-          0U }
-    };
+        {"c2pa.semantic.explicit_reference_signature_count", 2U},
+        {"c2pa.semantic.explicit_reference_unresolved_signature_count", 1U},
+        {"c2pa.semantic.explicit_reference_ambiguous_signature_count", 1U},
+        {"c2pa.semantic.ingredient_signature_count", 2U},
+        {"c2pa.semantic.ingredient_linked_claim_count", 1U},
+        {"c2pa.semantic.ingredient_linked_claim_direct_source_count", 1U},
+        {"c2pa.semantic.ingredient_linked_claim_cross_source_count", 0U},
+        {"c2pa.semantic.ingredient_linked_claim_mixed_source_count", 0U},
+        {"c2pa.semantic.ingredient_linked_claim_explicit_reference_count", 1U},
+        {"c2pa.semantic."
+         "ingredient_linked_claim_explicit_reference_direct_source_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_claim_explicit_reference_cross_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_claim_explicit_reference_mixed_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_claim_explicit_reference_unresolved_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_claim_explicit_reference_unresolved_"
+         "direct_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_claim_explicit_reference_unresolved_"
+         "cross_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_claim_explicit_reference_unresolved_"
+         "mixed_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_claim_explicit_reference_ambiguous_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_claim_explicit_reference_ambiguous_"
+         "direct_source_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_claim_explicit_reference_ambiguous_"
+         "cross_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_claim_explicit_reference_ambiguous_"
+         "mixed_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_explicit_reference_unresolved_signature_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_explicit_reference_ambiguous_signature_count",
+         1U},
+        {"c2pa.semantic.manifest.0.ingredient_signature_count", 2U},
+        {"c2pa.semantic.manifest.0.ingredient_linked_claim_count", 1U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_direct_source_count",
+         1U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_cross_source_count",
+         0U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_mixed_source_count",
+         0U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_explicit_reference_count",
+         1U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_explicit_reference_direct_source_count",
+         1U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_explicit_reference_cross_source_count",
+         0U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_explicit_reference_mixed_source_count",
+         0U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_explicit_reference_unresolved_count",
+         0U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_explicit_reference_unresolved_"
+         "direct_source_count",
+         0U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_explicit_reference_unresolved_"
+         "cross_source_count",
+         0U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_explicit_reference_unresolved_"
+         "mixed_source_count",
+         0U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_explicit_reference_ambiguous_count",
+         1U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_explicit_reference_ambiguous_"
+         "direct_source_count",
+         1U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_explicit_reference_ambiguous_"
+         "cross_source_count",
+         0U},
+        {"c2pa.semantic.manifest.0."
+         "ingredient_linked_claim_explicit_reference_ambiguous_"
+         "mixed_source_count",
+         0U},
+        {"c2pa.semantic.manifest.0.ingredient_explicit_reference_unresolved_signature_"
+         "count",
+         1U},
+        {"c2pa.semantic.manifest.0.ingredient_explicit_reference_ambiguous_signature_"
+         "count",
+         1U},
+        {"c2pa.semantic.claim.0.linked_ingredient_signature_count", 0U},
+        {"c2pa.semantic.claim.1.linked_ingredient_signature_count", 1U},
+        {"c2pa.semantic.claim.1."
+         "linked_direct_ingredient_signature_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_cross_ingredient_signature_count",
+         0U},
+        {"c2pa.semantic.claim.1.linked_ingredient_title_count", 1U},
+        {"c2pa.semantic.claim.1.linked_ingredient_relationship_count", 1U},
+        {"c2pa.semantic.claim.1.linked_ingredient_thumbnail_url_count", 1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_signature_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_direct_signature_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_cross_signature_count",
+         0U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_title_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_relationship_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_thumbnail_url_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_relationship_kind_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_relationship.componentOf_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_relationship_kind_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_relationship."
+         "componentOf_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_unresolved_signature_count",
+         0U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_unresolved_"
+         "direct_signature_count",
+         0U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_unresolved_"
+         "cross_signature_count",
+         0U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_unresolved_title_count",
+         0U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_unresolved_"
+         "relationship_count",
+         0U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_unresolved_"
+         "thumbnail_url_count",
+         0U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_unresolved_"
+         "relationship_kind_count",
+         0U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_ambiguous_signature_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_ambiguous_"
+         "direct_signature_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_ambiguous_"
+         "cross_signature_count",
+         0U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_ambiguous_title_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_ambiguous_"
+         "relationship_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_ambiguous_"
+         "thumbnail_url_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_ambiguous_"
+         "relationship_kind_count",
+         1U},
+        {"c2pa.semantic.claim.1."
+         "linked_ingredient_explicit_reference_ambiguous_"
+         "relationship.componentOf_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_direct_claim_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_cross_claim_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_direct_source_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_cross_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_mixed_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_direct_title_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_cross_title_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_"
+         "direct_relationship_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_"
+         "cross_relationship_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_"
+         "direct_thumbnail_url_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_"
+         "cross_thumbnail_url_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_title_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_unresolved_"
+         "direct_claim_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_unresolved_"
+         "cross_claim_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_unresolved_"
+         "direct_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_unresolved_"
+         "cross_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_unresolved_"
+         "mixed_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_unresolved_"
+         "title_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_unresolved_"
+         "relationship_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_unresolved_"
+         "relationship_kind_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_unresolved_"
+         "thumbnail_url_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_ambiguous_"
+         "direct_claim_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_ambiguous_"
+         "cross_claim_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_ambiguous_"
+         "direct_source_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_ambiguous_"
+         "cross_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_ambiguous_"
+         "mixed_source_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_ambiguous_"
+         "direct_title_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_ambiguous_"
+         "cross_title_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_ambiguous_"
+         "direct_relationship_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_ambiguous_"
+         "cross_relationship_count",
+         0U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_ambiguous_"
+         "direct_thumbnail_url_count",
+         1U},
+        {"c2pa.semantic."
+         "ingredient_linked_signature_explicit_reference_ambiguous_"
+         "cross_thumbnail_url_count",
+         0U}};
     omc_u8 cbor_payload[2048];
     omc_size cbor_size;
     omc_u8 jumbf[2304];
@@ -3564,7 +3549,7 @@ test_jumbf_emits_c2pa_explicit_reference_multi_claim_prefixes(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "a");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"a", sizeof("a") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 4U);
@@ -3579,15 +3564,15 @@ test_jumbf_emits_c2pa_explicit_reference_multi_claim_prefixes(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 1U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "b");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"b", sizeof("b") - 1U);
 
     append_cbor_map(cbor_payload, &cbor_size, 1U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "c");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"c", sizeof("c") - 1U);
 
     append_cbor_map(cbor_payload, &cbor_size, 1U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "d");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"d", sizeof("d") - 1U);
 
     jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
     omc_store_init(&store);
@@ -3691,7 +3676,7 @@ test_jumbf_emits_c2pa_explicit_reference_href_map_field(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "a");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"a", sizeof("a") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 2U);
@@ -3706,7 +3691,7 @@ test_jumbf_emits_c2pa_explicit_reference_href_map_field(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 1U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "b");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"b", sizeof("b") - 1U);
 
     jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
     omc_store_init(&store);
@@ -3780,7 +3765,7 @@ test_jumbf_emits_c2pa_explicit_reference_nested_claim_id_field(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "a");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"a", sizeof("a") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 2U);
@@ -3793,7 +3778,7 @@ test_jumbf_emits_c2pa_explicit_reference_nested_claim_id_field(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 1U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "b");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"b", sizeof("b") - 1U);
 
     jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
     omc_store_init(&store);
@@ -3854,7 +3839,7 @@ test_jumbf_emits_c2pa_explicit_reference_link_map_field(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "a");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"a", sizeof("a") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 2U);
@@ -3869,7 +3854,7 @@ test_jumbf_emits_c2pa_explicit_reference_link_map_field(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 1U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "b");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"b", sizeof("b") - 1U);
 
     jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
     omc_store_init(&store);
@@ -3939,7 +3924,7 @@ test_jumbf_emits_c2pa_explicit_reference_multi_signature_claim_ref_id_determinis
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "a");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"a", sizeof("a") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 4U);
@@ -3955,7 +3940,7 @@ test_jumbf_emits_c2pa_explicit_reference_multi_signature_claim_ref_id_determinis
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "b");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"b", sizeof("b") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 2U);
@@ -3971,7 +3956,7 @@ test_jumbf_emits_c2pa_explicit_reference_multi_signature_claim_ref_id_determinis
 
     append_cbor_map(cbor_payload, &cbor_size, 1U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "c");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"c", sizeof("c") - 1U);
 
     jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
     omc_store_init(&store);
@@ -4052,7 +4037,7 @@ test_jumbf_emits_c2pa_explicit_reference_multi_signature_claim_ref_id_unresolved
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "a");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"a", sizeof("a") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 2U);
@@ -4063,7 +4048,7 @@ test_jumbf_emits_c2pa_explicit_reference_multi_signature_claim_ref_id_unresolved
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "b");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"b", sizeof("b") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 2U);
@@ -4076,7 +4061,7 @@ test_jumbf_emits_c2pa_explicit_reference_multi_signature_claim_ref_id_unresolved
 
     append_cbor_map(cbor_payload, &cbor_size, 1U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "c");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"c", sizeof("c") - 1U);
 
     jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
     omc_store_init(&store);
@@ -4160,7 +4145,7 @@ test_jumbf_emits_c2pa_explicit_reference_scoped_prefix_does_not_cross_match_inde
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "a");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"a", sizeof("a") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 11U);
     for (i = 0U; i < 11U; ++i) {
@@ -4179,7 +4164,7 @@ test_jumbf_emits_c2pa_explicit_reference_scoped_prefix_does_not_cross_match_inde
 
     append_cbor_map(cbor_payload, &cbor_size, 1U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "b");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"b", sizeof("b") - 1U);
 
     jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
     omc_store_init(&store);
@@ -4249,7 +4234,7 @@ test_jumbf_plain_signature_url_does_not_trigger_explicit_reference(void)
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "a");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"a", sizeof("a") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 2U);
@@ -4307,7 +4292,7 @@ test_jumbf_emits_c2pa_explicit_reference_nested_map_index_label_href_conflict_is
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "a");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"a", sizeof("a") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 2U);
@@ -4326,7 +4311,7 @@ test_jumbf_emits_c2pa_explicit_reference_nested_map_index_label_href_conflict_is
 
     append_cbor_map(cbor_payload, &cbor_size, 1U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "b");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"b", sizeof("b") - 1U);
 
     jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
     omc_store_init(&store);
@@ -4339,32 +4324,27 @@ test_jumbf_emits_c2pa_explicit_reference_nested_map_index_label_href_conflict_is
                                  &store,
                                  "c2pa.semantic.explicit_reference_signature_count"),
                              1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.explicit_reference_index_hits"),
-                             1U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store, "c2pa.semantic.explicit_reference_index_hits"), 2U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_label_hits"),
                              0U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.explicit_reference_ambiguous_signature_count"),
-                             0U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store,
+                         "c2pa.semantic.explicit_reference_ambiguous_signature_count"),
+        1U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_unresolved_signature_count"),
                              0U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.signature.0."
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store, "c2pa.semantic.signature.0."
                                  "explicit_reference_resolved_claim_count"),
+        2U);
+    assert_scalar_u64_equals(find_jumbf_field(&store, "c2pa.semantic.signature.0."
+                                                      "explicit_reference_ambiguous"),
                              1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.signature.0."
-                                 "explicit_reference_ambiguous"),
-                             0U);
 
     omc_store_fini(&store);
 }
@@ -4390,7 +4370,7 @@ test_jumbf_emits_c2pa_explicit_reference_nested_map_index_label_href_consistent(
 
     append_cbor_map(cbor_payload, &cbor_size, 2U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "a");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"a", sizeof("a") - 1U);
     append_cbor_text(cbor_payload, &cbor_size, "signatures");
     append_cbor_array(cbor_payload, &cbor_size, 1U);
     append_cbor_map(cbor_payload, &cbor_size, 2U);
@@ -4410,7 +4390,7 @@ test_jumbf_emits_c2pa_explicit_reference_nested_map_index_label_href_consistent(
 
     append_cbor_map(cbor_payload, &cbor_size, 1U);
     append_cbor_text(cbor_payload, &cbor_size, "claim");
-    append_cbor_text(cbor_payload, &cbor_size, "b");
+    append_cbor_bytes(cbor_payload, &cbor_size, (const omc_u8 *)"b", sizeof("b") - 1U);
 
     jumbf_size = make_jumbf_with_cbor(jumbf, cbor_payload, cbor_size);
     omc_store_init(&store);
@@ -4689,18 +4669,16 @@ test_jumbf_emits_c2pa_explicit_reference_mixed_index_label_uri_deterministic(voi
                                  &store,
                                  "c2pa.semantic.explicit_reference_unresolved_signature_count"),
                              0U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.explicit_reference_ambiguous_signature_count"),
-                             0U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store,
+                         "c2pa.semantic.explicit_reference_ambiguous_signature_count"),
+        1U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_index_hits"),
                              1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.explicit_reference_label_hits"),
-                             0U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store, "c2pa.semantic.explicit_reference_label_hits"), 2U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.reference_key_hits"),
@@ -4709,45 +4687,45 @@ test_jumbf_emits_c2pa_explicit_reference_mixed_index_label_uri_deterministic(voi
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_index_hits"),
                              1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.signature.0.explicit_reference_label_hits"),
-                             0U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store,
+                         "c2pa.semantic.signature.0.explicit_reference_label_hits"),
+        2U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_present"),
                              1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.signature.0.explicit_reference_resolved_claim_count"),
-                             1U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(
+            &store,
+            "c2pa.semantic.signature.0.explicit_reference_resolved_claim_count"),
+        3U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_unresolved"),
                              0U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.signature.0.explicit_reference_ambiguous"),
-                             0U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.signature.0.linked_claim_count"),
-                             1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.signature.0.cross_claim_link_count"),
-                             1U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store,
+                         "c2pa.semantic.signature.0.explicit_reference_ambiguous"),
+        1U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store, "c2pa.semantic.signature.0.linked_claim_count"), 3U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store, "c2pa.semantic.signature.0.cross_claim_link_count"),
+        3U);
     assert_text_entry_contains(
         &store,
         find_jumbf_field(&store,
                          "c2pa.semantic.signature.0.linked_claim.0.prefix"),
         "claims[1]");
-    assert(find_jumbf_field(&store,
-                            "c2pa.semantic.signature.0.linked_claim.1.prefix")
-           == (const omc_entry*)0);
-    assert(find_jumbf_field(&store,
-                            "c2pa.semantic.signature.0.linked_claim.2.prefix")
-           == (const omc_entry*)0);
+    assert_text_entry_contains(
+        &store,
+        find_jumbf_field(&store, "c2pa.semantic.signature.0.linked_claim.1.prefix"),
+        "claims[2]");
+    assert_text_entry_contains(
+        &store,
+        find_jumbf_field(&store, "c2pa.semantic.signature.0.linked_claim.2.prefix"),
+        "claims[3]");
 
     omc_store_fini(&store);
 }
@@ -4832,14 +4810,12 @@ test_jumbf_emits_c2pa_explicit_reference_index_label_uri_conflict_is_ambiguous(v
                                  &store,
                                  "c2pa.semantic.explicit_reference_index_hits"),
                              1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.explicit_reference_label_hits"),
-                             0U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.explicit_reference_ambiguous_signature_count"),
-                             0U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store, "c2pa.semantic.explicit_reference_label_hits"), 2U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store,
+                         "c2pa.semantic.explicit_reference_ambiguous_signature_count"),
+        1U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.explicit_reference_unresolved_signature_count"),
@@ -4848,14 +4824,15 @@ test_jumbf_emits_c2pa_explicit_reference_index_label_uri_conflict_is_ambiguous(v
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_present"),
                              1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.signature.0.explicit_reference_resolved_claim_count"),
-                             1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store,
-                                 "c2pa.semantic.signature.0.explicit_reference_ambiguous"),
-                             0U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(
+            &store,
+            "c2pa.semantic.signature.0.explicit_reference_resolved_claim_count"),
+        2U);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store,
+                         "c2pa.semantic.signature.0.explicit_reference_ambiguous"),
+        1U);
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
                                  "c2pa.semantic.signature.0.explicit_reference_unresolved"),
@@ -5605,9 +5582,7 @@ test_jumbf_verify_requested_percent_encoded_claim_ref_detached_payload_resolutio
     omc_store_fini(&store);
 }
 
-static void
-test_jumbf_verify_requested_percent_encoded_jumbf_label_detached_payload_resolution(
-    void)
+static void test_jumbf_encoded_label_conflict_preserves_detached_payload(void)
 {
     static const omc_u8 k_claim_bad[] = { 0xA1U, 0x61U, 'a', 0x01U };
     static const omc_u8 k_claim_good[] = { 0xA1U, 0x61U, 'a', 0x2AU };
@@ -5694,12 +5669,15 @@ test_jumbf_verify_requested_percent_encoded_jumbf_label_detached_payload_resolut
     assert_scalar_u8_equals(find_jumbf_field(&store,
                                              "c2pa.verify.signatures_present"),
                             1U);
-    assert_scalar_u64_equals(find_jumbf_field(
-                                 &store, "c2pa.signature.0.payload_is_null"),
-                             0U);
-    assert_bytes_entry_equals(
-        &store, find_jumbf_field(&store, "c2pa.signature.0.payload_bytes"),
-        k_claim_good, sizeof(k_claim_good));
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store, "c2pa.signature.0.payload_is_null"), 1U);
+    /* Both the plain and encoded references participate; disagreement must
+     * not select an arbitrary detached verification payload. */
+    assert(find_jumbf_field(&store, "c2pa.signature.0.payload_bytes") == NULL);
+    assert_scalar_u64_equals(
+        find_jumbf_field(&store,
+                         "c2pa.semantic.signature.0.explicit_reference_ambiguous"),
+        1U);
 
     omc_store_fini(&store);
 }
@@ -6010,7 +5988,7 @@ main(void)
     test_jumbf_verify_requested_unresolved_detached_payload_ref_skips_fallback();
     test_jumbf_verify_requested_hyphen_reference_unresolved_skips_fallback();
     test_jumbf_verify_requested_percent_encoded_claim_ref_detached_payload_resolution();
-    test_jumbf_verify_requested_percent_encoded_jumbf_label_detached_payload_resolution();
+    test_jumbf_encoded_label_conflict_preserves_detached_payload();
     test_jumbf_verify_require_resolved_references_unresolved_disabled_by_build();
     test_jumbf_verify_require_resolved_references_ambiguous_disabled_by_build();
     test_jumbf_verify_require_resolved_references_disabled_policy_does_not_fail();

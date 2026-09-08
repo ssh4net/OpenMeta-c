@@ -324,3 +324,163 @@ Artifacts: `/tmp/openmeta-rd4-release-tests.log`,
 `/tmp/openmeta-rd4-default-parity.log` and `/tmp/openmeta-rd4-all-parity.log`.
 The test-only RAW fixture subset is pinned locally in `tests/omc_test_raw_fixture.h`
 so the gate does not depend on changing C++ test files or private APIs.
+
+## RD5/RD6 Checkpoint: Version 0.8.0
+
+The five authorized batches now have implemented and tested reading/decoding
+slices against the same C++ 0.4.127 pin. These results supersede RD4's open
+nine-fixture default BMFF inventory. They do not establish universal camera,
+XML, C2PA, interpretation, transfer, or writing parity.
+
+| Batch | Implemented behavior | Regression evidence |
+| --- | --- | --- |
+| RD5A | Separate memory and callback inventories; basic BMFF property, reference and carrier summaries | Complete decoded records, including duplicate multiplicity and flags; original scanner/payload coordinates remain separate gates |
+| RD5B | BMFF scene/component membership; primary/display transforms; grid, overlay, identity and tile derivation; item-location methods 0/1/2; property and reference summaries | 68 BMFF cases in each access mode, including malformed references, recursive derivations and limits |
+| RD5C | Structured RDF paths, inherited namespaces, nested descriptions, arrays and language alternatives; attribute/resource properties; UTF-8 entities and XML structural checks | 35 ordered XMP packets plus direct malformed, input, depth, attribute, namespace, path, value and arena-limit tests |
+| RD5D | JUMBF/C2PA field and reference summaries; typed MakerNote fallback and unreadable entries; Canon groups/CameraInfo/CMT3; Nikon ShotInfo/preview aliases; Sony model-selected tables/faces; Phase One and Olympus source offsets | Full reading inventory and synthetic regressions for corpus-discovered paths; both contiguous and callback input |
+| RD6 | Reproducible private-corpus runner, compression configurations, sanitizer/native platform gates and fixed-resource measurements | Results and remaining acceptance limits below |
+
+The reading harness compares sorted keys, value kinds, element types, counts,
+values, duplicate records and flags. The XMP gate additionally compares order
+and relevant wire counts. C-only low-level `c2pa.signature.*` fields remain an
+explicit reported extension; those fields alone are excluded from C++ equality.
+There are no Sony duplicate waivers. JUMBF fixtures run inside real WebP C2PA
+carriers so the high-level readers actually decode the payloads. The broad
+`--all` inventory remains separate from this reading-only denominator.
+
+The shared BMFF decoder covers property-table summaries, associations and
+essential flags, primary references and image roles, display dimensions,
+rotation/mirroring, clean aperture, pixel aspect and color summaries. Derived
+items use bounded extents and cycle/depth/work checks. Tile data-reference URLs
+are metadata; the library does not fetch them. Internal descriptor, property,
+scene and extent caps remain explicit limits; this is not an unbounded graph API.
+
+XMP remains a C parser without an Expat dependency. It canonicalizes recognized
+namespace prefixes and gives unknown URIs deterministic `nsu_` tokens. It keeps
+empty and resource-valued properties, nested paths, indexed arrays and language
+qualifiers. Direct tests exercise invalid nesting, duplicate expanded attributes,
+unbound prefixes, malformed entities, invalid UTF-8 and configured limits.
+The parser still uses an ASCII XML-name grammar; full Unicode XML names and
+UTF-16 inputs are not accepted parity claims.
+
+Standalone callback XMP uses a bounded prefix probe, then requires the packet
+to fit caller metadata scratch and `max_input_bytes`. It has no image-sized
+fallback allocation. Source I/O, capacity and decoder resource failures retain
+the caller's populated store. Standalone ICC, IPTC, IRB and JUMBF inputs are not
+automatically treated as images: use their payload APIs or supported carriers,
+as required by the pinned C++ simple reader.
+
+EXIF preserves zero-count numeric arrays and unreadable optional directory
+values. Canon CameraInfo uses the bounded best-IFD candidate instead of assuming
+an offset-zero little-endian table. FilterInfo traverses all groups. CR3 CMT3
+uses the same typed Canon decoder for memory and callbacks, with MakerNotes
+explicitly enabled. Nikon preview decoding uses the EXIF MakerNote's TIFF base;
+Sony tables use model-specific layouts and preserve reference duplicates.
+The Olympus `CAMER` source signature and Phase One large sparse MakerNote path
+now share their reference offset rules. Successful optional probes that emit no
+extra entries no longer report a false skipped-source result.
+
+Public layout change: `omc_xmp_limits` adds namespace, arena and per-element
+attribute limits. Rebuild consumers and initialize options with
+`omc_xmp_opts_init()`. Defaults are 4096 namespace bytes, 64 MiB arena storage
+and 1024 attributes per element; callers can lower them. XMP and JUMBF
+measurement use temporary stores to obtain the same decode status/counters;
+they allocate and are not allocation-free sizing passes. The existing owning
+store retains old arena allocations until reset, so capacity is not a peak-RAM
+measurement.
+
+### Verified results
+
+| Gate | Result |
+| --- | --- |
+| Clang 20 Release, C90, warnings as errors, zlib/Brotli enabled | 50/50 CTest targets passed |
+| Clang 20 Release, zlib/Brotli disabled | 50/50 targets passed |
+| Clang 20 Debug, ASan/UBSan/LeakSanitizer | 38/38 direct targets passed; executed outside the ptrace sandbox |
+| Native Windows MSVC x64, static CRT, compression disabled | 38/38 direct targets passed |
+| Native Windows MSVC Win32, static CRT, compression disabled | 38/38 direct targets passed |
+| Public reading-only inventory | 208/208 exact cases in memory and 208/208 through callbacks |
+| BMFF subset | 68/68 exact cases per access mode |
+| Ordered XMP subset | 35/35 exact packets |
+| Selected corpus | 69 files across 25 extensions; 138/138 memory/callback executions matched, no timeouts or skipped-source results |
+| Historical default differential target | Passes, including the former nine BMFF failures |
+| Broad transfer/persist inventory, `--all` | 257 mismatch reports remain; 82 metadata comparisons and 175 byte/status/path reports |
+
+The corpus includes 67 existing private files and two generated PNG/WebP inputs.
+Selection is a bounded convenience sample, not a randomized or complete vendor
+matrix. All corpus runs used the enabled-compression Release executable and a
+600-second per-execution timeout. A 100% pass rate for these declared cases is
+not a 100% estimate for the reading or decoding stages.
+
+Fixed-resource evidence, Clang 20 `-O3`, x86-64 WSL:
+
+| Fixture / measurement | Observed value |
+| --- | --- |
+| Phase One metadata spanning a 2 GiB image gap | 21 requests, 162 requested bytes, 32 bytes metadata scratch |
+| Classic TIFF at a 5 GiB source size | 33 requests, 110 bytes, 12 bytes scratch |
+| BigTIFF at a 5 GiB source size | 36 requests, 168 bytes, 12 bytes scratch |
+| JPEG/EXIF at a 5 GiB source size | 49 requests, 184 bytes, 36 bytes scratch |
+| Peak RSS of the fixed source-test process (`/usr/bin/time -v`) | 1792 KiB |
+| Largest reported BMFF function stack frame (`-fstack-usage`) | 199832 bytes |
+| Largest reported JUMBF function stack frame | 59912 bytes |
+| Largest reported EXIF function stack frame | 7160 bytes |
+| Largest reported XMP function stack frame | 328 bytes |
+
+Stack figures are individual compiled frames, not maximum call-chain usage.
+The BMFF frame alone excludes small-stack embedded deployment. Moving structural
+scratch into an explicit caller workspace is a separate required embedded batch.
+RSS covers a small synthetic process, not the real corpus or C++ comparison.
+
+WSL artifacts: `/tmp/openmeta-rd6-accept-{release,nodeps,sanitize}-tests.log`,
+`/tmp/openmeta-rd6-accept-read.log`,
+`/tmp/openmeta-rd6-accept-read-source.log`,
+`/tmp/openmeta-rd6-accept-xmp.log`, `/tmp/openmeta-rd6-accept-all.log`,
+`/tmp/openmeta-rd6-accept-source-resources.log` and
+`/tmp/openmeta-rd6-stack/*.su`. Corpus and native logs are kept with the private
+session artifacts and are not distributed test dependencies.
+
+### Acceptance limits
+
+- The selected real-file corpus and synthetic cases define the tested
+  denominator. They do not cover every camera model or every supported
+  MakerNote subtable. In particular, complete Nikon Z8/Z9 ShotInfo/custom-setting
+  variants and other vendor/model-specific postpasses remain follow-up work.
+- C2PA semantic discovery is not complete cryptographic verification, signing,
+  trust-chain acceptance or every manifest/reference-resolution case. OpenSSL
+  integration remains planned separately.
+- Callback RAF/X3F undeclared prefix searches remain explicitly reported.
+  Memory-only fallback discovery is not silently added to positional input.
+- Windows x64 and Win32 exercise the dependency-free C implementation. They
+  do not validate Windows compression backends or C++ differential linking.
+  Win32 emits 15 size-conversion warnings in EXIF helpers; this is not a
+  warning-clean native build claim.
+- Fixed sparse tests prove bounded access across large offsets. They do not
+  establish throughput, whole-corpus peak RAM, thin-stack embedded acceptance,
+  or a microcontroller toolchain qualification.
+- Interpretation, structured non-fuzzy queries, editing, translation and
+  transfer/write lifecycle remain in the overall C target. Passing this read
+  inventory does not close those stages.
+
+### Reproduce the corpus gate
+
+`scripts/read_decode_corpus.py` takes an explicit parity executable and a
+manifest with `extension<TAB>path` rows. Relative paths resolve against the
+manifest directory. Use a fresh output directory; results record executable
+and manifest SHA-256, per-file mode, exit status, elapsed time and log location.
+Python 3.9 or newer is required. Input files are never modified or copied.
+Logs include private paths and must stay outside the public repository and
+release packages. The runner timeout is an operational limit, not decoder
+coverage; rerun timed-out cases with an appropriate recorded limit.
+
+```sh
+python3 OpenMeta-c/scripts/read_decode_corpus.py \
+  --binary /tmp/openmeta-c-read-release-20260908/tests/omc_test_parity \
+  --manifest /path/to/private-selection.tsv \
+  --output /path/to/private-results-new --jobs 2 --timeout 600
+```
+
+The executable also accepts `--read-file PATH` and `--read-file-source PATH`.
+Those harness modes use an 8 MiB metadata/payload workspace and cap loaded test
+inputs at 2 GiB; these are harness constraints, not library file-size limits.
+Use `--read`, `--read-source`, `--read-bmff`, `--read-bmff-source` and `--read-xmp`
+for the public synthetic gates. `--all` intentionally returns failure while
+non-reading lifecycle differences remain in the inventory.

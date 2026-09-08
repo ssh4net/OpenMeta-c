@@ -72,6 +72,7 @@ omc_jumbf_dec(const omc_u8* bytes, omc_size size, omc_store* store,
               omc_block_id source_block, omc_entry_flags flags,
               const omc_jumbf_opts* opts);
 
+/* Uses a temporary bounded store to match decode status and counters. */
 OMC_API omc_jumbf_res
 omc_jumbf_meas(const omc_u8* bytes, omc_size size,
                const omc_jumbf_opts* opts);

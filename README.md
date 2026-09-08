@@ -29,9 +29,17 @@ parity matrix, and acceptance gates. Earlier percentage estimates based on a
 narrower core boundary do not measure this scope. The
 [authoring contract](authoring.md) documents typed construction, detached
 validation, canonical EXIF, and the five explicit reverse-translation groups.
-Version 0.2.0 changes the `omc_val` layout; rebuild consumers.
+Versions 0.2.0 and 0.8.0 change `omc_val` and `omc_xmp_limits`, respectively;
+rebuild consumers and initialize options with their public initializers.
+
+Version 0.8.0 adds bounded BMFF scene/derived-image summaries, structured XMP,
+JUMBF and MakerNote parity fixes, standalone XMP callbacks and Canon CMT3.
+The [reading/decoding checkpoint](read_decode_parity.md) records 208 exact
+public cases per access mode and 138 exact comparisons over 69 selected files.
+These case counts do not imply universal camera or embedded acceptance.
 
 In practice:
+
 - Read-path coverage is broad and regression-tested.
 - Optional parity tests compare selected shared cases against the C++ library.
 - XMP edit and writeback are real for bounded target families.

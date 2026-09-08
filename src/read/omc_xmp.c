@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define OMC_XMP_ATTR_CAP 64U
+#define OMC_XMP_ATTR_CAP 1024U
 
 typedef struct omc_xmp_span {
     omc_u32 off;
@@ -52,7 +52,7 @@ typedef struct omc_xmp_frame {
     int saw_text;
     int had_child;
     int has_path;
-    int parse_type_resource;
+    int emitted_resource;
 } omc_xmp_frame;
 
 typedef struct omc_xmp_ctx {
@@ -66,6 +66,7 @@ typedef struct omc_xmp_ctx {
     omc_xmp_res res;
     omc_u32 order;
     omc_u64 total_value_bytes;
+    omc_xmp_attr *attrs;
     omc_xmp_frame* frames;
     omc_u32 frame_count;
     omc_u32 frame_cap;
@@ -75,6 +76,7 @@ typedef struct omc_xmp_ctx {
     char* frame_path_buf;
     omc_u32 path_cap;
     int saw_xmp_shape;
+    int root_seen;
     omc_u8* input_copy;
 } omc_xmp_ctx;
 
@@ -103,6 +105,12 @@ omc_xmp_opts_apply_defaults(omc_xmp_opts* opts)
     if (opts->limits.max_value_bytes == 0U) {
         opts->limits.max_value_bytes = 8U * 1024U * 1024U;
     }
+    if (opts->limits.max_attributes_per_element == 0U)
+        opts->limits.max_attributes_per_element = OMC_XMP_ATTR_CAP;
+    if (opts->limits.max_namespace_bytes == 0U)
+        opts->limits.max_namespace_bytes = 4096U;
+    if (opts->limits.max_arena_bytes == 0U)
+        opts->limits.max_arena_bytes = 64U * 1024U * 1024U;
     if (opts->limits.max_total_value_bytes == 0U) {
         opts->limits.max_total_value_bytes = 64U * 1024U * 1024U;
     }
@@ -123,6 +131,9 @@ omc_xmp_opts_init(omc_xmp_opts* opts)
     opts->limits.max_path_bytes = 1024U;
     opts->limits.max_value_bytes = 8U * 1024U * 1024U;
     opts->limits.max_total_value_bytes = 64U * 1024U * 1024U;
+    opts->limits.max_attributes_per_element = OMC_XMP_ATTR_CAP;
+    opts->limits.max_namespace_bytes = 4096U;
+    opts->limits.max_arena_bytes = 64U * 1024U * 1024U;
 }
 
 static void
@@ -323,6 +334,8 @@ omc_xmp_parse_name(const omc_xmp_ctx* ctx, omc_u32* io_pos,
         *out_prefix = omc_xmp_span_make(start, 0U);
         *out_local = omc_xmp_span_make(start, pos - start);
     } else {
+        if (colon + 1U >= pos || !omc_xmp_is_name_start(ctx->bytes[colon + 1U]))
+            return 0;
         *out_prefix = omc_xmp_span_make(start, colon - start);
         *out_local = omc_xmp_span_make(colon + 1U, pos - colon - 1U);
     }
@@ -421,7 +434,8 @@ omc_xmp_attr_find_resource(const omc_xmp_ctx* ctx, const omc_xmp_attr* attrs,
         if (attrs[i].is_xmlns || attrs[i].is_default_xmlns) {
             continue;
         }
-        if (!omc_xmp_lookup_ns(ctx, attrs[i].prefix, &attr_ns)) {
+        if (!attrs[i].prefix.len ||
+            !omc_xmp_lookup_ns(ctx, attrs[i].prefix, &attr_ns)) {
             continue;
         }
         if (omc_xmp_span_eq_lit(ctx, attr_ns, k_ns_rdf)
@@ -429,33 +443,6 @@ omc_xmp_attr_find_resource(const omc_xmp_ctx* ctx, const omc_xmp_attr* attrs,
             *out_value = attrs[i].value;
             return 1;
         }
-    }
-    return 0;
-}
-
-static int
-omc_xmp_attr_find_parse_type_resource(const omc_xmp_ctx* ctx,
-                                      const omc_xmp_attr* attrs,
-                                      omc_u32 attr_count)
-{
-    omc_u32 i;
-
-    for (i = 0U; i < attr_count; ++i) {
-        omc_xmp_span attr_ns;
-        omc_xmp_span value_trim;
-
-        if (attrs[i].is_xmlns || attrs[i].is_default_xmlns) {
-            continue;
-        }
-        if (!omc_xmp_lookup_ns(ctx, attrs[i].prefix, &attr_ns)) {
-            continue;
-        }
-        if (!omc_xmp_span_eq_lit(ctx, attr_ns, k_ns_rdf)
-            || !omc_xmp_span_eq_lit(ctx, attrs[i].local, "parseType")) {
-            continue;
-        }
-        omc_xmp_trim_value(ctx, attrs[i].value, &value_trim);
-        return omc_xmp_span_eq_lit(ctx, value_trim, "Resource");
     }
     return 0;
 }
@@ -477,7 +464,17 @@ omc_xmp_attr_find_xml_lang(const omc_xmp_ctx* ctx, const omc_xmp_attr* attrs,
         if (attrs[i].prefix.len == 3U
             && memcmp(ctx->bytes + attrs[i].prefix.off, "xml", 3U) == 0
             && omc_xmp_span_eq_lit(ctx, attrs[i].local, "lang")) {
-            *out_value = attrs[i].value;
+            omc_u32 j;
+            omc_xmp_trim_value(ctx, attrs[i].value, out_value);
+            if (out_value->len == 0U)
+                return 0;
+            for (j = 0U; j < out_value->len; ++j) {
+                omc_u8 c;
+                c = ctx->bytes[out_value->off + j];
+                if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                      (c >= '0' && c <= '9') || c == '-'))
+                    return 0;
+            }
             return 1;
         }
     }
@@ -490,6 +487,162 @@ omc_xmp_frame_has_value_path(omc_xmp_frame_kind kind)
 {
     return kind == OMC_XMP_FRAME_PROPERTY || kind == OMC_XMP_FRAME_LI
            || kind == OMC_XMP_FRAME_STRUCT_FIELD;
+}
+
+/* Decode only the predefined XML entities and character references. No DTD,
+ * external entity, or network resolver is part of the core parser. Spans are
+ * compacted in the owned input copy; unread bytes retain their file offsets. */
+static int omc_xmp_decode_text(omc_xmp_ctx *ctx, omc_xmp_span *span, int attribute,
+                               int cdata)
+{
+    omc_u32 read_pos;
+    omc_u32 write_pos;
+    omc_u32 end;
+    omc_u32 cp;
+    omc_u32 minimum;
+    omc_u32 remaining;
+    omc_u8 c;
+    read_pos = span->off;
+    write_pos = read_pos;
+    end = read_pos + span->len;
+    while (read_pos < end) {
+        c = ctx->bytes[read_pos++];
+        cp = c;
+        if (c == '&' && !cdata) {
+            omc_u32 entity_start;
+            omc_u32 entity_len;
+            entity_start = read_pos;
+            while (read_pos < end && ctx->bytes[read_pos] != ';')
+                ++read_pos;
+            if (read_pos == end)
+                return 0;
+            entity_len = read_pos - entity_start;
+            ++read_pos;
+            if (entity_len && ctx->bytes[entity_start] == '#') {
+                omc_u32 radix;
+                omc_u32 i;
+                radix = 10U;
+                i = entity_start + 1U;
+                if (i < read_pos - 1U && ctx->bytes[i] == 'x') {
+                    radix = 16U;
+                    ++i;
+                }
+                if (i == read_pos - 1U)
+                    return 0;
+                cp = 0U;
+                for (; i < read_pos - 1U; ++i) {
+                    omc_u32 digit;
+                    c = ctx->bytes[i];
+                    if (c >= '0' && c <= '9')
+                        digit = c - '0';
+                    else if (radix == 16U && c >= 'a' && c <= 'f')
+                        digit = c - 'a' + 10U;
+                    else if (radix == 16U && c >= 'A' && c <= 'F')
+                        digit = c - 'A' + 10U;
+                    else
+                        return 0;
+                    if (cp > (0x10FFFFU - digit) / radix)
+                        return 0;
+                    cp = cp * radix + digit;
+                }
+            } else if (entity_len == 3U &&
+                       !memcmp(ctx->bytes + entity_start, "amp", 3U))
+                cp = '&';
+            else if (entity_len == 2U && !memcmp(ctx->bytes + entity_start, "lt", 2U))
+                cp = '<';
+            else if (entity_len == 2U && !memcmp(ctx->bytes + entity_start, "gt", 2U))
+                cp = '>';
+            else if (entity_len == 4U && !memcmp(ctx->bytes + entity_start, "apos", 4U))
+                cp = '\'';
+            else if (entity_len == 4U && !memcmp(ctx->bytes + entity_start, "quot", 4U))
+                cp = '"';
+            else
+                return 0;
+        } else {
+            if (attribute && c == '<')
+                return 0;
+            if (!attribute && !cdata && c == ']' && end - read_pos >= 2U &&
+                ctx->bytes[read_pos] == ']' && ctx->bytes[read_pos + 1U] == '>')
+                return 0;
+            if (c == '\r') {
+                if (read_pos < end && ctx->bytes[read_pos] == '\n')
+                    ++read_pos;
+                cp = '\n';
+            }
+            if (attribute && (cp == '\n' || cp == '\t'))
+                cp = ' ';
+            if (c >= 0x80U) {
+                if (c >= 0xC2U && c <= 0xDFU) {
+                    cp = c & 31U;
+                    remaining = 1U;
+                    minimum = 0x80U;
+                } else if (c >= 0xE0U && c <= 0xEFU) {
+                    cp = c & 15U;
+                    remaining = 2U;
+                    minimum = 0x800U;
+                } else if (c >= 0xF0U && c <= 0xF4U) {
+                    cp = c & 7U;
+                    remaining = 3U;
+                    minimum = 0x10000U;
+                } else
+                    return 0;
+                if (remaining > end - read_pos)
+                    return 0;
+                while (remaining--) {
+                    c = ctx->bytes[read_pos++];
+                    if ((c & 0xC0U) != 0x80U)
+                        return 0;
+                    cp = (cp << 6U) | (c & 63U);
+                }
+                if (cp < minimum)
+                    return 0;
+            }
+        }
+        if (!(cp == 9U || cp == 10U || cp == 13U || (cp >= 0x20U && cp <= 0xD7FFU) ||
+              (cp >= 0xE000U && cp <= 0xFFFDU) || (cp >= 0x10000U && cp <= 0x10FFFFU)))
+            return 0;
+        if (cp < 0x80U)
+            ctx->input_copy[write_pos++] = (omc_u8)cp;
+        else if (cp < 0x800U) {
+            ctx->input_copy[write_pos++] = (omc_u8)(0xC0U | (cp >> 6U));
+            ctx->input_copy[write_pos++] = (omc_u8)(0x80U | (cp & 63U));
+        } else if (cp < 0x10000U) {
+            ctx->input_copy[write_pos++] = (omc_u8)(0xE0U | (cp >> 12U));
+            ctx->input_copy[write_pos++] = (omc_u8)(0x80U | ((cp >> 6U) & 63U));
+            ctx->input_copy[write_pos++] = (omc_u8)(0x80U | (cp & 63U));
+        } else {
+            ctx->input_copy[write_pos++] = (omc_u8)(0xF0U | (cp >> 18U));
+            ctx->input_copy[write_pos++] = (omc_u8)(0x80U | ((cp >> 12U) & 63U));
+            ctx->input_copy[write_pos++] = (omc_u8)(0x80U | ((cp >> 6U) & 63U));
+            ctx->input_copy[write_pos++] = (omc_u8)(0x80U | (cp & 63U));
+        }
+    }
+    span->len = write_pos - span->off;
+    return 1;
+}
+
+static int omc_xmp_append_text(omc_xmp_ctx *ctx, omc_xmp_frame *frame, omc_u32 start,
+                               omc_u32 end, int cdata)
+{
+    omc_xmp_span span;
+    span = omc_xmp_span_make(start, end - start);
+    if (!omc_xmp_decode_text(ctx, &span, 0, cdata))
+        return 0;
+    if (frame && omc_xmp_frame_has_value_path(frame->kind) && !frame->had_child) {
+        if (!frame->saw_text) {
+            frame->text_start = span.off;
+            frame->text_end = span.off;
+            frame->saw_text = 1;
+        }
+        if ((omc_u64)(frame->text_end - frame->text_start) + span.len >
+            ctx->opts.limits.max_value_bytes) {
+            ctx->res.status = OMC_XMP_LIMIT;
+            return 0;
+        }
+        memmove(ctx->input_copy + frame->text_end, ctx->bytes + span.off, span.len);
+        frame->text_end += span.len;
+    }
+    return 1;
 }
 
 static omc_xmp_status
@@ -520,11 +673,16 @@ omc_xmp_add_property(omc_xmp_ctx* ctx, omc_xmp_span schema_ns,
     omc_status st;
     omc_xmp_status status;
 
+    if (schema_ns.len == 0U || path_size == 0U)
+        return OMC_XMP_OK;
     if (ctx->res.entries_decoded >= ctx->opts.limits.max_properties) {
         return OMC_XMP_LIMIT;
     }
-    if (path_size > ctx->opts.limits.max_path_bytes
-        || value_span.len > ctx->opts.limits.max_value_bytes) {
+    if (schema_ns.len > ctx->opts.limits.max_namespace_bytes ||
+        (omc_u64)ctx->store->arena.size + schema_ns.len + path_size + value_span.len >
+            ctx->opts.limits.max_arena_bytes ||
+        path_size > ctx->opts.limits.max_path_bytes ||
+        value_span.len > ctx->opts.limits.max_value_bytes) {
         return OMC_XMP_LIMIT;
     }
     if (ctx->opts.limits.max_total_value_bytes != 0U
@@ -555,7 +713,7 @@ omc_xmp_add_property(omc_xmp_ctx* ctx, omc_xmp_span schema_ns,
         entry.origin.order_in_block = ctx->order;
         entry.origin.wire_type.family = OMC_WIRE_OTHER;
         entry.origin.wire_type.code = 0U;
-        entry.origin.wire_count = 1U;
+        entry.origin.wire_count = value_span.len;
         entry.flags = ctx->base_flags;
         st = omc_store_add_entry(ctx->store, &entry, (omc_entry_id*)0);
         if (st == OMC_STATUS_NO_MEMORY) {
@@ -752,62 +910,121 @@ omc_xmp_frame_set_path_lang(omc_xmp_ctx* ctx, omc_xmp_frame* frame,
     return 1;
 }
 
-static int
-omc_xmp_frame_set_path_child(omc_xmp_ctx* ctx, omc_xmp_frame* frame,
-                             omc_u32 depth, const omc_xmp_frame* parent,
-                             omc_xmp_span child_prefix,
-                             omc_xmp_span child_local,
-                             omc_xmp_span child_ns)
+static const char *omc_xmp_nested_prefix(const omc_xmp_ctx *ctx, omc_xmp_span ns)
 {
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xap/1.0/"))
+        return "xmp";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/tiff/1.0/"))
+        return "tiff";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/exif/1.0/"))
+        return "exif";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/exif/1.0/aux/"))
+        return "aux";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://purl.org/dc/elements/1.1/"))
+        return "dc";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/pdf/1.3/"))
+        return "pdf";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xap/1.0/bj/"))
+        return "xmpBJ";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.useplus.org/ldf/xmp/1.0/"))
+        return "plus";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/camera-raw-settings/1.0/"))
+        return "crs";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/lightroom/1.0/"))
+        return "lr";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xmp/1.0/DynamicMedia/"))
+        return "xmpDM";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xap/1.0/mm/"))
+        return "xmpMM";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xap/1.0/t/pg/"))
+        return "xmpTPg";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xap/1.0/rights/"))
+        return "xmpRights";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xap/1.0/sType/Dimensions#"))
+        return "stDim";
+    if (omc_xmp_span_eq_lit(ctx, ns,
+                            "http://ns.adobe.com/xap/1.0/sType/ResourceEvent#"))
+        return "stEvt";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xap/1.0/sType/Font#"))
+        return "stFnt";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xap/1.0/sType/Job#"))
+        return "stJob";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xap/1.0/sType/ManifestItem#"))
+        return "stMfs";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xap/1.0/sType/ResourceRef#"))
+        return "stRef";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xap/1.0/sType/Version#"))
+        return "stVer";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/xap/1.0/g/"))
+        return "xmpG";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://ns.adobe.com/photoshop/1.0/"))
+        return "photoshop";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"))
+        return "Iptc4xmpCore";
+    if (omc_xmp_span_eq_lit(ctx, ns, "http://iptc.org/std/Iptc4xmpExt/2008-02-29/"))
+        return "Iptc4xmpExt";
+    return (const char *)0;
+}
+
+static int omc_xmp_frame_set_path_child(omc_xmp_ctx *ctx, omc_xmp_frame *frame,
+                                        omc_u32 depth, const omc_xmp_frame *parent,
+                                        omc_xmp_span child_local, omc_xmp_span child_ns)
+{
+    static const char hex[] = "0123456789abcdef";
+    const char *prefix;
     char* dst;
-    const char* src;
+    omc_u32 prefix_len;
     omc_u32 component_len;
     omc_u32 path_len;
     omc_u32 pos;
-    int use_prefix;
-
-    if (parent == (const omc_xmp_frame*)0 || !parent->has_path) {
+    omc_u32 i;
+    int unknown;
+    if (parent == (const omc_xmp_frame *)0 || !parent->has_path)
         return 0;
-    }
-
-    use_prefix = child_prefix.len != 0U
-                 && !omc_xmp_spans_equal(ctx, child_ns, parent->prop_ns_uri);
-    component_len = child_local.len;
-    if (use_prefix) {
-        if (!omc_xmp_u32_add3_fits(child_prefix.len, child_local.len, 1U,
-                                   &component_len)) {
-            ctx->res.status = OMC_XMP_LIMIT;
-            return 0;
+    prefix = (const char *)0;
+    unknown = 0;
+    prefix_len = 0U;
+    if (child_ns.len && !omc_xmp_spans_equal(ctx, child_ns, parent->prop_ns_uri)) {
+        prefix = omc_xmp_nested_prefix(ctx, child_ns);
+        if (prefix)
+            prefix_len = (omc_u32)strlen(prefix);
+        else {
+            unknown = 1;
+            if (!omc_xmp_u32_mul_add_fits(child_ns.len, 2U, 4U, &prefix_len)) {
+                ctx->res.status = OMC_XMP_LIMIT;
+                return 0;
+            }
         }
     }
-
-    if (!omc_xmp_u32_add3_fits(parent->path_len, component_len, 1U,
-                               &path_len)
-        || path_len > ctx->opts.limits.max_path_bytes
-        || path_len > ctx->path_cap) {
+    if (!omc_xmp_u32_add3_fits(prefix_len, child_local.len, prefix_len ? 1U : 0U,
+                               &component_len) ||
+        !omc_xmp_u32_add3_fits(parent->path_len, component_len, 1U, &path_len) ||
+        path_len > ctx->opts.limits.max_path_bytes || path_len > ctx->path_cap) {
         ctx->res.status = OMC_XMP_LIMIT;
         return 0;
     }
-
     dst = omc_xmp_frame_path_slot(ctx, depth);
-    src = ctx->frame_path_buf + parent->path_off;
-    if (parent->path_len != 0U) {
-        memcpy(dst, src, parent->path_len);
-    }
+    memcpy(dst, ctx->frame_path_buf + parent->path_off, parent->path_len);
     pos = parent->path_len;
-    dst[pos] = '/';
-    pos += 1U;
-    if (use_prefix) {
-        memcpy(dst + pos, ctx->bytes + child_prefix.off, child_prefix.len);
-        pos += child_prefix.len;
-        dst[pos] = ':';
-        pos += 1U;
+    dst[pos++] = '/';
+    if (unknown) {
+        memcpy(dst + pos, "nsu_", 4U);
+        pos += 4U;
+        for (i = 0U; i < child_ns.len; ++i) {
+            omc_u8 c;
+            c = ctx->bytes[child_ns.off + i];
+            dst[pos++] = hex[c >> 4U];
+            dst[pos++] = hex[c & 15U];
+        }
+    } else if (prefix_len) {
+        memcpy(dst + pos, prefix, prefix_len);
+        pos += prefix_len;
     }
+    if (prefix_len)
+        dst[pos++] = ':';
     memcpy(dst + pos, ctx->bytes + child_local.off, child_local.len);
-    pos += child_local.len;
-
     frame->path_off = depth * ctx->path_cap;
-    frame->path_len = pos;
+    frame->path_len = path_len;
     frame->has_path = 1;
     return 1;
 }
@@ -860,7 +1077,8 @@ omc_xmp_emit_root_attrs(omc_xmp_ctx* ctx, omc_xmp_span elem_ns,
         if (attrs[i].is_xmlns || attrs[i].is_default_xmlns) {
             continue;
         }
-        if (!omc_xmp_lookup_ns(ctx, attrs[i].prefix, &attr_ns)) {
+        if (!attrs[i].prefix.len ||
+            !omc_xmp_lookup_ns(ctx, attrs[i].prefix, &attr_ns)) {
             continue;
         }
         if (!omc_xmp_spans_equal(ctx, attr_ns, elem_ns)) {
@@ -891,14 +1109,22 @@ omc_xmp_emit_description_attrs(omc_xmp_ctx* ctx, const omc_xmp_attr* attrs,
         if (attrs[i].is_xmlns || attrs[i].is_default_xmlns) {
             continue;
         }
-        if (!omc_xmp_lookup_ns(ctx, attrs[i].prefix, &attr_ns)) {
-            continue;
-        }
-        if (omc_xmp_span_eq_lit(ctx, attr_ns, k_ns_rdf)
-            || omc_xmp_span_eq_lit(ctx, attr_ns, k_ns_xml)) {
+        if (!attrs[i].prefix.len ||
+            !omc_xmp_lookup_ns(ctx, attrs[i].prefix, &attr_ns)) {
             continue;
         }
         omc_xmp_trim_value(ctx, attrs[i].value, &value_trim);
+        if (omc_xmp_span_eq_lit(ctx, attr_ns, k_ns_rdf)) {
+            if (value_trim.len && omc_xmp_span_eq_lit(ctx, attrs[i].local, "about")) {
+                status = omc_xmp_add_property(ctx, attr_ns, (const omc_u8 *)"About", 5U,
+                                              value_trim);
+                if (status != OMC_XMP_OK)
+                    return status;
+            }
+            continue;
+        }
+        if (omc_xmp_span_eq_lit(ctx, attr_ns, k_ns_xml))
+            continue;
         status = omc_xmp_emit_property_from_spans(ctx, attr_ns, attrs[i].local,
                                                   value_trim);
         if (status != OMC_XMP_OK) {
@@ -937,13 +1163,17 @@ omc_xmp_parse_start_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
     omc_u32 pos;
     omc_xmp_span prefix;
     omc_xmp_span local;
-    omc_xmp_attr attrs[OMC_XMP_ATTR_CAP];
+    omc_xmp_attr *attrs;
     omc_u32 attr_count;
     int empty_element;
     omc_xmp_frame frame;
     omc_xmp_frame* parent;
     omc_xmp_span elem_ns;
     omc_u32 ns_mark;
+    omc_u32 i;
+    int in_description;
+    omc_xmp_frame *array;
+    attrs = ctx->attrs;
     pos = *io_pos;
     pos += 1U;
     if (!omc_xmp_parse_name(ctx, &pos, &prefix, &local)) {
@@ -960,7 +1190,9 @@ omc_xmp_parse_start_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
         omc_u8 quote;
         omc_u32 value_start;
         omc_u32 value_end;
+        omc_u32 space_start;
 
+        space_start = pos;
         omc_xmp_skip_space(ctx, &pos);
         if ((omc_size)pos >= ctx->size) {
             return 0;
@@ -978,7 +1210,9 @@ omc_xmp_parse_start_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
             pos += 1U;
             break;
         }
-        if (attr_count >= OMC_XMP_ATTR_CAP) {
+        if (space_start == pos)
+            return 0;
+        if (attr_count >= ctx->opts.limits.max_attributes_per_element) {
             ctx->res.status = OMC_XMP_LIMIT;
             return 0;
         }
@@ -1018,6 +1252,8 @@ omc_xmp_parse_start_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
         attrs[attr_count].local = alocal;
         attrs[attr_count].value =
             omc_xmp_span_make(value_start, value_end - value_start);
+        if (!omc_xmp_decode_text(ctx, &attrs[attr_count].value, 1, 0))
+            return 0;
         attrs[attr_count].is_default_xmlns = 0;
         attrs[attr_count].is_xmlns = 0;
 
@@ -1046,138 +1282,146 @@ omc_xmp_parse_start_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
         attr_count += 1U;
     }
 
+    /* Namespaces apply to the whole start tag, including earlier attributes.
+     * Unprefixed attributes never inherit the default element namespace. */
+    for (i = 0U; i < attr_count; ++i) {
+        omc_u32 j;
+        omc_xmp_span uri;
+        if (!attrs[i].is_xmlns && !attrs[i].is_default_xmlns && attrs[i].prefix.len &&
+            !omc_xmp_span_eq_lit(ctx, attrs[i].prefix, "xml") &&
+            !omc_xmp_lookup_ns(ctx, attrs[i].prefix, &uri))
+            return 0;
+        for (j = 0U; j < i; ++j) {
+            omc_xmp_span other;
+            if (!omc_xmp_spans_equal(ctx, attrs[i].local, attrs[j].local))
+                continue;
+            if (omc_xmp_spans_equal(ctx, attrs[i].prefix, attrs[j].prefix))
+                return 0;
+            if (attrs[i].prefix.len && attrs[j].prefix.len &&
+                omc_xmp_lookup_ns(ctx, attrs[i].prefix, &uri) &&
+                omc_xmp_lookup_ns(ctx, attrs[j].prefix, &other) &&
+                omc_xmp_spans_equal(ctx, uri, other))
+                return 0;
+        }
+    }
+    if (!ctx->frame_count) {
+        if (ctx->root_seen)
+            return 0;
+        ctx->root_seen = 1;
+    }
+    if (ctx->frame_count >= ctx->frame_cap) {
+        ctx->res.status = OMC_XMP_LIMIT;
+        return 0;
+    }
     memset(&frame, 0, sizeof(frame));
     frame.kind = OMC_XMP_FRAME_GENERIC;
     frame.prefix = prefix;
     frame.local = local;
     frame.ns_mark = ns_mark;
-    frame.parse_type_resource =
-        omc_xmp_attr_find_parse_type_resource(ctx, attrs, attr_count);
     omc_xmp_frame_reset_text(&frame);
 
     elem_ns = omc_xmp_span_make(0U, 0U);
     if (prefix.len != 0U && !omc_xmp_lookup_ns(ctx, prefix, &elem_ns)) {
-        elem_ns = omc_xmp_span_make(0U, 0U);
+        return 0;
     } else if (prefix.len == 0U) {
         (void)omc_xmp_lookup_ns(ctx, prefix, &elem_ns);
     }
     frame.ns_uri = elem_ns;
 
     parent = omc_xmp_top_frame(ctx);
+    if (parent) {
+        parent->had_child = 1;
+        if (parent->has_path) {
+            frame.prop_ns_uri = parent->prop_ns_uri;
+            if (!omc_xmp_frame_set_path_from_parent(ctx, &frame, ctx->frame_count,
+                                                    parent))
+                return 0;
+        }
+    }
+    in_description = 0;
+    array = (omc_xmp_frame *)0;
+    for (i = 0U; i < ctx->frame_count; ++i) {
+        if (ctx->frames[i].kind == OMC_XMP_FRAME_DESC)
+            in_description = 1;
+        if (ctx->frames[i].kind == OMC_XMP_FRAME_ARRAY)
+            array = &ctx->frames[i];
+    }
     if (omc_xmp_span_eq_lit(ctx, elem_ns, k_ns_meta)
         && omc_xmp_span_eq_lit(ctx, local, "xmpmeta")) {
         frame.kind = OMC_XMP_FRAME_XMPMETA;
         ctx->saw_xmp_shape = 1;
-        if (!ctx->measure_only) {
-            omc_xmp_status emit_status;
-
-            emit_status = omc_xmp_emit_root_attrs(ctx, elem_ns, attrs,
-                                                  attr_count);
-            if (emit_status != OMC_XMP_OK) {
-                ctx->res.status = emit_status;
-                return 0;
-            }
-        }
-    } else if (omc_xmp_span_eq_lit(ctx, elem_ns, k_ns_rdf)
-               && omc_xmp_span_eq_lit(ctx, local, "RDF")) {
-        frame.kind = OMC_XMP_FRAME_RDF;
-        ctx->saw_xmp_shape = 1;
-    } else if (omc_xmp_span_eq_lit(ctx, elem_ns, k_ns_rdf)
-               && omc_xmp_span_eq_lit(ctx, local, "Description")) {
-        frame.kind = OMC_XMP_FRAME_DESC;
-        ctx->saw_xmp_shape = 1;
-        if (ctx->opts.decode_description_attributes && !ctx->measure_only) {
-            omc_xmp_status emit_status2;
-
-            emit_status2 = omc_xmp_emit_description_attrs(ctx, attrs,
-                                                          attr_count);
-            if (emit_status2 != OMC_XMP_OK) {
-                ctx->res.status = emit_status2;
-                return 0;
-            }
-        }
-    } else if (parent != (omc_xmp_frame*)0
-               && parent->kind == OMC_XMP_FRAME_DESC && elem_ns.len != 0U
-               && !omc_xmp_span_eq_lit(ctx, elem_ns, k_ns_rdf)) {
-        frame.kind = OMC_XMP_FRAME_PROPERTY;
-        frame.prop_ns_uri = elem_ns;
-        frame.prop_name = local;
-        if (!omc_xmp_frame_set_path_from_span(ctx, &frame, ctx->frame_count,
-                                              local)) {
+        ctx->res.status = omc_xmp_emit_root_attrs(ctx, elem_ns, attrs, attr_count);
+        if (ctx->res.status != OMC_XMP_OK)
             return 0;
-        }
-    } else if (parent != (omc_xmp_frame*)0
-               && (parent->kind == OMC_XMP_FRAME_PROPERTY
-                   || parent->kind == OMC_XMP_FRAME_STRUCT_FIELD)
-               && omc_xmp_span_eq_lit(ctx, elem_ns, k_ns_rdf)
-               && (omc_xmp_span_eq_lit(ctx, local, "Seq")
-                   || omc_xmp_span_eq_lit(ctx, local, "Bag")
-                   || omc_xmp_span_eq_lit(ctx, local, "Alt"))) {
-        frame.kind = OMC_XMP_FRAME_ARRAY;
-        frame.prop_ns_uri = parent->prop_ns_uri;
-        frame.prop_name = parent->prop_name;
-        if (!omc_xmp_frame_set_path_from_parent(ctx, &frame, ctx->frame_count,
-                                                parent)) {
-            return 0;
-        }
-        parent->had_child = 1;
-    } else if (parent != (omc_xmp_frame*)0
-               && parent->kind == OMC_XMP_FRAME_ARRAY
-               && omc_xmp_span_eq_lit(ctx, elem_ns, k_ns_rdf)
-               && omc_xmp_span_eq_lit(ctx, local, "li")) {
-        omc_xmp_span lang;
-
-        frame.kind = OMC_XMP_FRAME_LI;
-        frame.prop_ns_uri = parent->prop_ns_uri;
-        frame.prop_name = parent->prop_name;
-        parent->array_index += 1U;
-        frame.current_index = parent->array_index;
-        if (omc_xmp_attr_find_xml_lang(ctx, attrs, attr_count, &lang)) {
-            if (!omc_xmp_frame_set_path_lang(ctx, &frame, ctx->frame_count,
-                                             parent, lang)) {
-                return 0;
-            }
-        } else if (!omc_xmp_frame_set_path_indexed(ctx, &frame,
-                                                   ctx->frame_count, parent,
-                                                   frame.current_index)) {
-            return 0;
-        }
-        parent->had_child = 1;
-    } else if (parent != (omc_xmp_frame*)0
-               && (parent->kind == OMC_XMP_FRAME_PROPERTY
-                   || parent->kind == OMC_XMP_FRAME_STRUCT_FIELD
-                   || parent->kind == OMC_XMP_FRAME_LI)
-               && parent->parse_type_resource && elem_ns.len != 0U
-               && !omc_xmp_span_eq_lit(ctx, elem_ns, k_ns_rdf)) {
-        frame.kind = OMC_XMP_FRAME_STRUCT_FIELD;
-        frame.prop_ns_uri = parent->prop_ns_uri;
-        frame.prop_name = parent->prop_name;
-        if (!omc_xmp_frame_set_path_child(ctx, &frame, ctx->frame_count,
-                                          parent, prefix, local, elem_ns)) {
-            return 0;
-        }
-        parent->had_child = 1;
-    } else if (parent != (omc_xmp_frame*)0) {
-        parent->had_child = 1;
     }
-
-    if (empty_element) {
-        if (omc_xmp_frame_has_value_path(frame.kind)
-            && !frame.parse_type_resource) {
-            omc_xmp_span value_span;
-            omc_xmp_status status3;
-
-            if (!omc_xmp_attr_find_resource(ctx, attrs, attr_count,
-                                            &value_span)) {
-                value_span = omc_xmp_span_make(pos, 0U);
+    if (omc_xmp_span_eq_lit(ctx, elem_ns, k_ns_rdf)) {
+        if (omc_xmp_span_eq_lit(ctx, local, "RDF")) {
+            frame.kind = OMC_XMP_FRAME_RDF;
+            ctx->saw_xmp_shape = 1;
+        } else if (omc_xmp_span_eq_lit(ctx, local, "Description")) {
+            frame.kind = OMC_XMP_FRAME_DESC;
+            in_description = 1;
+            ctx->saw_xmp_shape = 1;
+            if (ctx->opts.decode_description_attributes) {
+                ctx->res.status =
+                    omc_xmp_emit_description_attrs(ctx, attrs, attr_count);
+                if (ctx->res.status != OMC_XMP_OK)
+                    return 0;
             }
-            omc_xmp_trim_value(ctx, value_span, &value_span);
-            status3 = omc_xmp_emit_property_from_frame_path(ctx, &frame,
-                                                            value_span);
-            if (status3 != OMC_XMP_OK) {
-                ctx->res.status = status3;
+        } else if (omc_xmp_span_eq_lit(ctx, local, "Seq") ||
+                   omc_xmp_span_eq_lit(ctx, local, "Bag") ||
+                   omc_xmp_span_eq_lit(ctx, local, "Alt")) {
+            frame.kind = OMC_XMP_FRAME_ARRAY;
+        } else if (omc_xmp_span_eq_lit(ctx, local, "li")) {
+            frame.kind = OMC_XMP_FRAME_LI;
+            if (in_description && frame.has_path && array) {
+                omc_xmp_span lang;
+                if (array->array_index == (omc_u32) ~(omc_u32)0) {
+                    ctx->res.status = OMC_XMP_LIMIT;
+                    return 0;
+                }
+                frame.current_index = ++array->array_index;
+                if (omc_xmp_span_eq_lit(ctx, array->local, "Alt") &&
+                    omc_xmp_attr_find_xml_lang(ctx, attrs, attr_count, &lang)) {
+                    if (!omc_xmp_frame_set_path_lang(ctx, &frame, ctx->frame_count,
+                                                     parent, lang))
+                        return 0;
+                } else if (!omc_xmp_frame_set_path_indexed(ctx, &frame,
+                                                           ctx->frame_count, parent,
+                                                           frame.current_index))
+                    return 0;
+            }
+        }
+    } else if (in_description && !omc_xmp_span_eq_lit(ctx, elem_ns, k_ns_xml)) {
+        omc_xmp_span value;
+        frame.prop_name = local;
+        if (frame.has_path) {
+            frame.kind = OMC_XMP_FRAME_STRUCT_FIELD;
+            if (!omc_xmp_frame_set_path_child(ctx, &frame, ctx->frame_count, parent,
+                                              local, elem_ns))
                 return 0;
-            }
+        } else {
+            frame.kind = OMC_XMP_FRAME_PROPERTY;
+            frame.prop_ns_uri = elem_ns;
+            if (!omc_xmp_frame_set_path_from_span(ctx, &frame, ctx->frame_count, local))
+                return 0;
+        }
+        if (omc_xmp_attr_find_resource(ctx, attrs, attr_count, &value)) {
+            omc_xmp_trim_value(ctx, value, &value);
+            ctx->res.status = omc_xmp_emit_property_from_frame_path(ctx, &frame, value);
+            if (ctx->res.status != OMC_XMP_OK)
+                return 0;
+            frame.emitted_resource = 1;
+        }
+    }
+    if (empty_element) {
+        if (in_description && frame.has_path && !frame.emitted_resource &&
+            (omc_xmp_frame_has_value_path(frame.kind) ||
+             frame.kind == OMC_XMP_FRAME_ARRAY)) {
+            ctx->res.status = omc_xmp_emit_property_from_frame_path(
+                ctx, &frame, omc_xmp_span_make(pos, 0U));
+            if (ctx->res.status != OMC_XMP_OK)
+                return 0;
         }
         ctx->ns_count = ns_mark;
         *io_pos = pos;
@@ -1214,11 +1458,15 @@ omc_xmp_parse_end_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
     }
 
     frame = ctx->frames[ctx->frame_count - 1U];
+    if (!omc_xmp_spans_equal(ctx, prefix, frame.prefix) ||
+        !omc_xmp_spans_equal(ctx, local, frame.local))
+        return 0;
     ctx->frame_count -= 1U;
     ctx->ns_count = frame.ns_mark;
 
-    if (omc_xmp_frame_has_value_path(frame.kind) && !frame.had_child
-        && !frame.parse_type_resource) {
+    if (frame.has_path && !frame.had_child && !frame.emitted_resource &&
+        (omc_xmp_frame_has_value_path(frame.kind) ||
+         frame.kind == OMC_XMP_FRAME_ARRAY)) {
         omc_xmp_span raw_text;
         omc_xmp_span value_span;
         omc_xmp_status status;
@@ -1243,6 +1491,9 @@ omc_xmp_parse_end_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
         }
     }
 
+    if (ctx->frame_count == 0U &&
+        (frame.kind == OMC_XMP_FRAME_XMPMETA || frame.kind == OMC_XMP_FRAME_RDF))
+        ctx->size = pos;
     *io_pos = pos;
     return 1;
 }
@@ -1267,6 +1518,13 @@ omc_xmp_skip_comment(omc_xmp_ctx* ctx, omc_u32* io_pos)
     if (!omc_xmp_find_until(ctx, *io_pos + 4U, "-->", &end)) {
         return 0;
     }
+    {
+        omc_u32 i;
+        for (i = *io_pos + 4U; i + 1U < end; ++i) {
+            if (ctx->bytes[i] == '-' && ctx->bytes[i + 1U] == '-')
+                return 0;
+        }
+    }
     *io_pos = end + 3U;
     return 1;
 }
@@ -1281,12 +1539,8 @@ omc_xmp_skip_cdata(omc_xmp_ctx* ctx, omc_u32* io_pos)
         return 0;
     }
     top = omc_xmp_top_frame(ctx);
-    if (top != (omc_xmp_frame*)0
-        && omc_xmp_frame_has_value_path(top->kind)) {
-        top->text_start = *io_pos + 9U;
-        top->text_end = end;
-        top->saw_text = 1;
-    }
+    if (!top || !omc_xmp_append_text(ctx, top, *io_pos + 9U, end, 1))
+        return 0;
     *io_pos = end + 3U;
     return 1;
 }
@@ -1335,11 +1589,17 @@ omc_xmp_run(omc_xmp_ctx* ctx)
                 pos += 1U;
             }
             top = omc_xmp_top_frame(ctx);
-            if (top != (omc_xmp_frame*)0
-                && omc_xmp_frame_has_value_path(top->kind)) {
-                top->text_start = start;
-                top->text_end = pos;
-                top->saw_text = 1;
+            if (!top) {
+                omc_u32 i;
+                for (i = start; i < pos; ++i)
+                    if (!omc_xmp_is_space(ctx->bytes[i])) {
+                        omc_xmp_mark_malformed(ctx);
+                        return 0;
+                    }
+            }
+            if (!omc_xmp_append_text(ctx, top, start, pos, 0)) {
+                omc_xmp_mark_malformed(ctx);
+                return 0;
             }
             continue;
         }
@@ -1426,6 +1686,11 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
         ctx->opts.limits.max_depth = 128U;
     }
 
+    if (xmp_size > ctx->opts.limits.max_input_bytes ||
+        xmp_size > (omc_size)((omc_u32) ~(omc_u32)0)) {
+        ctx->res.status = OMC_XMP_LIMIT;
+        return 0;
+    }
     if (xmp_size != 0U) {
         /* Keep parser spans stable even when decoded properties append into
          * store->arena during the same parse. */
@@ -1462,6 +1727,14 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
         return 0;
     }
 
+    if (!omc_xmp_alloc_size_fits(ctx->opts.limits.max_attributes_per_element,
+                                 sizeof(*ctx->attrs))) {
+        ctx->res.status = OMC_XMP_LIMIT;
+        omc_xmp_ctx_fini(ctx);
+        return 0;
+    }
+    ctx->attrs = (omc_xmp_attr *)malloc(
+        (omc_size)ctx->opts.limits.max_attributes_per_element * sizeof(*ctx->attrs));
     ctx->frames = (omc_xmp_frame*)malloc((omc_size)ctx->frame_cap
                                          * sizeof(*ctx->frames));
     ctx->ns_decls = (omc_xmp_ns_decl*)malloc((omc_size)ns_cap
@@ -1470,8 +1743,8 @@ omc_xmp_ctx_init(omc_xmp_ctx* ctx, const omc_u8* xmp_bytes, omc_size xmp_size,
     ctx->ns_cap = ns_cap;
     ctx->path_cap = path_cap;
 
-    if (ctx->frames == (omc_xmp_frame*)0 || ctx->ns_decls == (omc_xmp_ns_decl*)0
-        || ctx->frame_path_buf == (char*)0) {
+    if (ctx->attrs == (omc_xmp_attr *)0 || ctx->frames == (omc_xmp_frame *)0 ||
+        ctx->ns_decls == (omc_xmp_ns_decl *)0 || ctx->frame_path_buf == (char *)0) {
         omc_xmp_set_res(&ctx->res, OMC_XMP_NOMEM);
         omc_xmp_ctx_fini(ctx);
         return 0;
@@ -1485,6 +1758,7 @@ omc_xmp_ctx_fini(omc_xmp_ctx* ctx)
     if (ctx == (omc_xmp_ctx*)0) {
         return;
     }
+    free(ctx->attrs);
     free(ctx->frames);
     free(ctx->ns_decls);
     free(ctx->frame_path_buf);

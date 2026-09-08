@@ -28,6 +28,10 @@ typedef struct omc_xmp_limits {
     omc_u32 max_path_bytes;
     omc_u32 max_value_bytes;
     omc_u64 max_total_value_bytes;
+    /* Maximum stored schema URI and total store arena bytes. Zero uses defaults. */
+    omc_u32 max_namespace_bytes;
+    omc_u64 max_arena_bytes;
+    omc_u32 max_attributes_per_element;
 } omc_xmp_limits;
 
 typedef struct omc_xmp_opts {

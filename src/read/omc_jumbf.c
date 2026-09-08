@@ -58,7 +58,8 @@ typedef struct omc_jumbf_sig_proj {
     omc_u32 ref_label_count;
     char ref_labels[8][128];
     omc_u32 ref_label_lens[8];
-    omc_u8 ref_priority_level;
+    int has_explicit_reference;
+    int has_semantic_algorithm;
     int has_algorithm;
     char algorithm[32];
     omc_u32 algorithm_len;
@@ -1853,93 +1854,7 @@ omc_jumbf_key_matches_field(omc_const_bytes key, const char* prefix,
     return omc_jumbf_path_separator(key.data[full_len]);
 }
 
-static int
-omc_jumbf_key_matches_indexed_field_suffix(omc_const_bytes key,
-                                           const char* prefix,
-                                           omc_u32 prefix_len,
-                                           const char* marker,
-                                           const char* suffix)
-{
-    omc_u32 pos;
-    omc_u32 marker_len;
-    omc_u32 suffix_len;
 
-    if (key.data == (const omc_u8*)0 || prefix == (const char*)0
-        || marker == (const char*)0 || suffix == (const char*)0
-        || key.size <= prefix_len + 1U) {
-        return 0;
-    }
-    if (memcmp(key.data, prefix, prefix_len) != 0
-        || key.data[prefix_len] != (omc_u8)'.') {
-        return 0;
-    }
-
-    marker_len = omc_jumbf_cstr_size(marker);
-    suffix_len = omc_jumbf_cstr_size(suffix);
-    pos = prefix_len + 1U;
-    if (pos + marker_len + 4U + suffix_len > key.size
-        || memcmp(key.data + pos, marker, marker_len) != 0) {
-        return 0;
-    }
-    pos += marker_len;
-    if (pos >= key.size || key.data[pos] != (omc_u8)'[') {
-        return 0;
-    }
-    pos += 1U;
-    if (pos >= key.size || !omc_jumbf_is_digit(key.data[pos])) {
-        return 0;
-    }
-    while (pos < key.size && omc_jumbf_is_digit(key.data[pos])) {
-        pos += 1U;
-    }
-    if (pos + 2U + suffix_len != key.size || key.data[pos] != (omc_u8)']'
-        || key.data[pos + 1U] != (omc_u8)'.') {
-        return 0;
-    }
-    return memcmp(key.data + pos + 2U, suffix, suffix_len) == 0;
-}
-
-static int
-omc_jumbf_key_matches_indexed_segment_prefix(omc_const_bytes key,
-                                             const char* prefix,
-                                             omc_u32 prefix_len,
-                                             const char* marker)
-{
-    omc_u32 pos;
-    omc_u32 marker_len;
-
-    if (key.data == (const omc_u8*)0 || prefix == (const char*)0
-        || marker == (const char*)0 || key.size <= prefix_len + 1U) {
-        return 0;
-    }
-    if (memcmp(key.data, prefix, prefix_len) != 0
-        || key.data[prefix_len] != (omc_u8)'.') {
-        return 0;
-    }
-
-    marker_len = omc_jumbf_cstr_size(marker);
-    pos = prefix_len + 1U;
-    if (pos + marker_len + 3U > key.size
-        || memcmp(key.data + pos, marker, marker_len) != 0) {
-        return 0;
-    }
-    pos += marker_len;
-    if (pos >= key.size || key.data[pos] != (omc_u8)'[') {
-        return 0;
-    }
-    pos += 1U;
-    if (pos >= key.size || !omc_jumbf_is_digit(key.data[pos])) {
-        return 0;
-    }
-    while (pos < key.size && omc_jumbf_is_digit(key.data[pos])) {
-        pos += 1U;
-    }
-    if (pos >= key.size || key.data[pos] != (omc_u8)']') {
-        return 0;
-    }
-    pos += 1U;
-    return pos == key.size || omc_jumbf_path_separator(key.data[pos]);
-}
 
 static int
 omc_jumbf_key_is_indexed_item(omc_const_bytes key, const char* prefix,
@@ -3701,16 +3616,131 @@ omc_jumbf_sig_proj_add_ref_label(omc_jumbf_sig_proj* sig, const char* label,
     return 1;
 }
 
-static void
-omc_jumbf_sig_proj_clear_explicit_refs(omc_jumbf_sig_proj* sig)
+static int omc_jumbf_is_reference_key(omc_const_bytes key)
 {
-    if (sig == (omc_jumbf_sig_proj*)0) {
-        return;
+    static const char *const suffixes[] = {
+        ".ref",
+        ".refs",
+        ".reference",
+        ".references",
+        ".reference_id",
+        ".reference-id",
+        ".referenceid",
+        ".references_id",
+        ".references-id",
+        ".referencesid",
+        ".reference_index",
+        ".reference-index",
+        ".referenceindex",
+        ".references_index",
+        ".references-index",
+        ".referencesindex",
+        ".claims",
+        ".ref_id",
+        ".ref-id",
+        ".refid",
+        ".ref_index",
+        ".ref-index",
+        ".refindex",
+        ".claim_ref",
+        ".claim-ref",
+        ".claim_reference",
+        ".claim-reference",
+        ".claim_references",
+        ".claim-references",
+        ".claimref",
+        ".claimreference",
+        ".claim_refs",
+        ".claim-refs",
+        ".claimrefs",
+        ".claimreferences",
+        ".claim_ref_index",
+        ".claim-ref-index",
+        ".claim_ref_id",
+        ".claim-ref-id",
+        ".claimrefid",
+        ".claim_reference_id",
+        ".claim-reference-id",
+        ".claimreferenceid",
+        ".claim_index",
+        ".claim-index",
+        ".claimindex",
+        ".claim_id",
+        ".claim-id",
+        ".claimid",
+        ".claim_url",
+        ".claim-url",
+        ".claim_uri",
+        ".claim-uri",
+        ".claim_link",
+        ".claim-link",
+        ".claimurl",
+        ".claimuri",
+        ".claimlink",
+        ".claim-urls",
+        ".claim-uris",
+        ".claim-links",
+        ".claimurls",
+        ".claimuris",
+        ".claimlinks",
+        ".jumbf_ref",
+        ".jumbf-ref",
+        ".jumbf_reference",
+        ".jumbf-reference",
+        ".jumbf_refs",
+        ".jumbf-refs",
+        ".jumbf_references",
+        ".jumbf-references",
+        ".jumbf_url",
+        ".jumbf-url",
+        ".jumbf_uri",
+        ".jumbf-uri",
+        ".jumbf_link",
+        ".jumbf-link",
+        ".jumbf",
+    };
+    char lower[OMC_JUMBF_PATH_CAP];
+    omc_u32 n;
+    omc_u32 i;
+    omc_const_bytes view;
+    if (key.size >= sizeof(lower))
+        return 0;
+    n = (omc_u32)key.size;
+    if (n && key.data[n - 1U] == ']') {
+        i = n - 1U;
+        while (i && key.data[i - 1U] >= '0' && key.data[i - 1U] <= '9')
+            --i;
+        if (i && i < n - 1U && key.data[i - 1U] == '[')
+            n = i - 1U;
     }
-    sig->ref_index_count = 0U;
-    sig->ref_label_count = 0U;
-    sig->has_claim_ref_index = 0;
-    sig->claim_ref_index = 0U;
+    for (i = 0U; i < n; ++i)
+        lower[i] =
+            (char)(key.data[i] >= 'A' && key.data[i] <= 'Z' ? key.data[i] + ('a' - 'A')
+                                                            : key.data[i]);
+    lower[n] = '\0';
+    for (i = 0U; i < sizeof(suffixes) / sizeof(suffixes[0]); ++i) {
+        omc_size len;
+        len = strlen(suffixes[i]);
+        if (n >= len && !memcmp(lower + n - len, suffixes[i], len))
+            return 1;
+    }
+    view = omc_jumbf_const_bytes(lower, n);
+    if ((n >= 6U && !memcmp(lower + n - 6U, ".index", 6U)) ||
+        (n >= 3U && !memcmp(lower + n - 3U, ".id", 3U))) {
+        return omc_jumbf_view_has_segment(view, "reference") ||
+               omc_jumbf_view_has_segment(view, "references");
+    }
+    if ((n >= 4U && (!memcmp(lower + n - 4U, ".url", 4U) ||
+                     !memcmp(lower + n - 4U, ".uri", 4U))) ||
+        (n >= 5U && (!memcmp(lower + n - 5U, ".href", 5U) ||
+                     !memcmp(lower + n - 5U, ".link", 5U)))) {
+        return omc_jumbf_view_has_segment(view, "claim") ||
+               omc_jumbf_view_has_segment(view, "reference") ||
+               omc_jumbf_view_has_segment(view, "references") ||
+               omc_jumbf_view_has_segment(view, "jumbf") ||
+               omc_jumbf_view_has_segment(view, "manifest");
+    }
+    return 0;
 }
 
 static int
@@ -3718,276 +3748,39 @@ omc_jumbf_sig_proj_note_ref_scalar(omc_jumbf_sig_proj* sig,
                                    omc_const_bytes key, omc_elem_type elem_type,
                                    omc_u64 u64_value, omc_s64 i64_value)
 {
-    omc_u32 value;
-    int have_value;
-
-    if (sig == (omc_jumbf_sig_proj*)0) {
-        return 0;
-    }
-    if (!(omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                      "claim_ref")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "claim_id")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "claim_ref_id")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "claim_reference_id")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "reference_index")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "reference_id")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "ref_index")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "ref_id")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "reference.id")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "reference.claim_id")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "reference.claim_ref")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "reference.claim_ref_id")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "reference.claim_reference_id")
-          || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                         "reference.index")
-          || omc_jumbf_key_matches_indexed_field_suffix(
-                 key, sig->prefix, sig->prefix_len, "references", "id")
-          || omc_jumbf_key_matches_indexed_field_suffix(
-                 key, sig->prefix, sig->prefix_len, "references",
-                 "claim_id")
-          || omc_jumbf_key_matches_indexed_field_suffix(
-                 key, sig->prefix, sig->prefix_len, "references",
-                 "claim_ref")
-          || omc_jumbf_key_matches_indexed_field_suffix(
-                 key, sig->prefix, sig->prefix_len, "references",
-                 "claim_ref_id")
-          || omc_jumbf_key_matches_indexed_field_suffix(
-                 key, sig->prefix, sig->prefix_len, "references",
-                 "claim_reference_id")
-          || omc_jumbf_key_matches_indexed_field_suffix(
-                 key, sig->prefix, sig->prefix_len, "references",
-                 "index"))) {
+    if (!omc_jumbf_is_reference_key(key))
         return 1;
+    ++sig->reference_key_hits;
+    sig->has_explicit_reference = 1;
+    if (elem_type == OMC_ELEM_I64 || elem_type == OMC_ELEM_I32 ||
+        elem_type == OMC_ELEM_I16 || elem_type == OMC_ELEM_I8) {
+        if (i64_value < 0)
+            return 1;
+        u64_value = (omc_u64)i64_value;
     }
-    sig->reference_key_hits += 1U;
-    if (sig->ref_priority_level < 3U) {
-        omc_jumbf_sig_proj_clear_explicit_refs(sig);
-        sig->ref_priority_level = 3U;
-    }
-
-    value = 0U;
-    have_value = 0;
-    if (elem_type == OMC_ELEM_U64 || elem_type == OMC_ELEM_U32
-        || elem_type == OMC_ELEM_U16 || elem_type == OMC_ELEM_U8) {
-        if (u64_value <= 0xFFFFFFFFUL) {
-            value = (omc_u32)u64_value;
-            have_value = 1;
-        }
-    } else if (elem_type == OMC_ELEM_I64 || elem_type == OMC_ELEM_I32
-               || elem_type == OMC_ELEM_I16 || elem_type == OMC_ELEM_I8) {
-        if (i64_value >= 0 && (omc_u64)i64_value <= 0xFFFFFFFFUL) {
-            value = (omc_u32)i64_value;
-            have_value = 1;
-        }
-    }
-    if (!have_value || !omc_jumbf_sig_proj_add_ref_index(sig, value)) {
-        return 0;
-    }
-    if (!sig->has_claim_ref_index
-        && omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                       "claim_ref")) {
-        sig->claim_ref_index = value;
-        sig->has_claim_ref_index = 1;
-    }
-    return 1;
+    if (u64_value > 0xFFFFFFFFU)
+        return 1;
+    return omc_jumbf_sig_proj_add_ref_index(sig, (omc_u32)u64_value);
 }
 
-static int
-omc_jumbf_sig_proj_note_ref_text(omc_jumbf_sig_proj* sig,
-                                 omc_const_bytes key, const char* text,
-                                 omc_u32 text_len)
+static int omc_jumbf_sig_proj_note_ref_text(omc_jumbf_sig_proj *sig,
+                                            omc_const_bytes key, const char *text,
+                                            omc_u32 text_len)
 {
-    omc_u32 ref_index;
-    char label[128];
+    omc_u32 index;
+    char label[256];
     omc_u32 label_len;
-    omc_u8 priority;
-
-    if (sig == (omc_jumbf_sig_proj*)0 || text == (const char*)0) {
-        return 0;
-    }
-    priority = 0U;
-    if (omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                    "claim_reference")
-        || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                       "claim-reference")
-        || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                       "reference.claim_reference")
-        || omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                       "reference.claim-reference")
-        || omc_jumbf_key_matches_indexed_field_suffix(
-               key, sig->prefix, sig->prefix_len, "references",
-               "claim_reference")
-        || omc_jumbf_key_matches_indexed_field_suffix(
-               key, sig->prefix, sig->prefix_len, "references",
-               "claim-reference")) {
-        priority = 1U;
-    } else if (omc_jumbf_key_matches_field(key, sig->prefix, sig->prefix_len,
-                                           "claim_ref")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "claim_id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "claim_ref_id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "claim_reference_id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "reference_index")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "reference_id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "ref_index")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "ref_id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "claim-reference-id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "claim-id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "claim-ref")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "claim-ref-id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "reference-index")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "reference-id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "ref-index")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "ref-id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "claim_uri")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "jumbf_uri")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "claim-uri")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "jumbf-uri")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "reference.id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "reference.claim_id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "reference.claim_ref")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "reference.claim_ref_id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "reference.claim_reference_id")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "reference.index")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len, "reference.uri")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "reference.jumbf_uri")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "reference.claim-uri")
-               || omc_jumbf_key_matches_field(key, sig->prefix,
-                                              sig->prefix_len,
-                                              "reference.jumbf-uri")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references", "id")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "claim_id")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "claim_ref")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "claim_ref_id")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "claim_reference_id")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "index")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "claim-ref")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "claim-id")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "claim-ref-id")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "claim-reference-id")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "reference-index")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "reference-id")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "ref-index")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "ref-id")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references", "uri")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "jumbf_uri")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "claim-uri")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references",
-                      "jumbf-uri")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references", "href")
-               || omc_jumbf_key_matches_indexed_field_suffix(
-                      key, sig->prefix, sig->prefix_len, "references", "link")
-               || omc_jumbf_key_matches_indexed_segment_prefix(
-                      key, sig->prefix, sig->prefix_len, "references")) {
-        priority = 2U;
-    }
-    if (priority == 0U) {
+    if (!omc_jumbf_is_reference_key(key))
         return 1;
-    }
-    sig->reference_key_hits += 1U;
-    if (priority < sig->ref_priority_level) {
-        return 1;
-    }
-    if (priority > sig->ref_priority_level) {
-        omc_jumbf_sig_proj_clear_explicit_refs(sig);
-        sig->ref_priority_level = priority;
-    }
-
-    if (omc_jumbf_ref_text_parse_index(text, text_len, &ref_index)
-        && !omc_jumbf_sig_proj_add_ref_index(sig, ref_index)) {
+    ++sig->reference_key_hits;
+    sig->has_explicit_reference = 1;
+    if (omc_jumbf_ref_text_parse_index(text, text_len, &index) &&
+        !omc_jumbf_sig_proj_add_ref_index(sig, index))
         return 0;
-    }
-    if (omc_jumbf_ref_text_parse_label(text, text_len, label,
-                                       (omc_u32)sizeof(label), &label_len)
-        && !omc_jumbf_sig_proj_add_ref_label(sig, label, label_len)) {
+    if (omc_jumbf_ref_text_parse_label(text, text_len, label, (omc_u32)sizeof(label),
+                                       &label_len) &&
+        !omc_jumbf_sig_proj_add_ref_label(sig, label, label_len))
         return 0;
-    }
     return 1;
 }
 
@@ -4071,7 +3864,6 @@ omc_jumbf_find_claim_prefix_by_label(omc_jumbf_ctx* ctx, omc_size scan_limit,
         || out_len == (omc_u32*)0 || out_cap == 0U) {
         return 0;
     }
-    (void)label_len;
     match_state = 0U;
     out[0] = '\0';
     *out_len = 0U;
@@ -4092,13 +3884,12 @@ omc_jumbf_find_claim_prefix_by_label(omc_jumbf_ctx* ctx, omc_size scan_limit,
         }
         field_view = omc_jumbf_entry_key_view(ctx->store, entry);
         label_view = omc_jumbf_entry_value_view(ctx->store, entry);
-        if (field_view.size < 11U
-            || memcmp(field_view.data + field_view.size - 11U, ".jumb_label", 11U)
-                   != 0
-            || !omc_jumbf_ascii_icase_contains(label_view.data, label_view.size,
-                                               "claim", 256U)
-            || !omc_jumbf_ascii_icase_contains(label_view.data, label_view.size,
-                                               label, 256U)) {
+        if (field_view.size < 11U ||
+            memcmp(field_view.data + field_view.size - 11U, ".jumb_label", 11U) != 0 ||
+            !omc_jumbf_ascii_icase_contains(label_view.data, label_view.size, "claim",
+                                            256U) ||
+            label_view.size != label_len ||
+            memcmp(label_view.data, label, label_len) != 0) {
             continue;
         }
 
@@ -4247,7 +4038,7 @@ omc_jumbf_collect_detached_payload_refs(omc_jumbf_ctx* ctx,
     }
 
     count = 0U;
-    explicit_refs = (sig->ref_index_count != 0U || sig->ref_label_count != 0U);
+    explicit_refs = (sig->has_explicit_reference != 0);
     ambiguous = 0;
 
     if (explicit_refs) {
@@ -4431,6 +4222,9 @@ omc_jumbf_sig_link_note_target(omc_jumbf_ctx* ctx, omc_size scan_limit,
         || claim_prefix == (const char*)0 || claim_prefix_len == 0U) {
         return 0;
     }
+    if (omc_jumbf_sig_link_has_target(out_link, claim_prefix, claim_prefix_len,
+                                      (int *)0, (int *)0))
+        return 1;
     if (!omc_jumbf_sig_link_add_target(out_link, claim_prefix,
                                        claim_prefix_len)) {
         return 0;
@@ -4483,6 +4277,89 @@ omc_jumbf_sig_link_note_target(omc_jumbf_ctx* ctx, omc_size scan_limit,
     return 1;
 }
 
+/* Link every semantic claim with the referenced payload. Equal detached bytes
+ * can name multiple claims; retain that ambiguity instead of choosing one. */
+static int omc_jumbf_link_payload(omc_jumbf_ctx *ctx, omc_size scan_limit,
+                                  const omc_jumbf_sig_proj *sig,
+                                  omc_jumbf_sig_link_proj *link, const omc_u8 *bytes,
+                                  omc_u64 size)
+{
+    static const char *const suffixes[4] = {".claim", ".claim_bytes", ".claim_cbor",
+                                            ".claim_payload"};
+    omc_size i;
+    for (i = 0U; i < scan_limit; ++i) {
+        const omc_entry *e;
+        omc_const_bytes key;
+        omc_const_bytes value;
+        char prefix[OMC_JUMBF_PATH_CAP];
+        omc_u32 prefix_len;
+        omc_u32 j;
+        int payload;
+        e = &ctx->store->entries[i];
+        if (e->origin.block != ctx->block || e->key.kind != OMC_KEY_JUMBF_CBOR_KEY ||
+            !(e->value.kind == OMC_VAL_BYTES ||
+              (e->value.kind == OMC_VAL_ARRAY && e->value.elem_type == OMC_ELEM_U8)))
+            continue;
+        key = omc_jumbf_entry_key_view(ctx->store, e);
+        value = omc_jumbf_entry_value_view(ctx->store, e);
+        if (value.size != size || (size && memcmp(value.data, bytes, (omc_size)size)))
+            continue;
+        payload = 0;
+        for (j = 0U; j < 4U; ++j) {
+            omc_size n;
+            n = strlen(suffixes[j]);
+            if (key.size >= n && !memcmp(key.data + key.size - n, suffixes[j], n))
+                payload = 1;
+        }
+        if (payload &&
+            omc_jumbf_find_indexed_segment_prefix(
+                key, ".claims[", prefix, (omc_u32)sizeof(prefix), &prefix_len) &&
+            !omc_jumbf_sig_link_note_target(ctx, scan_limit, sig, link, prefix,
+                                            prefix_len))
+            return 0;
+    }
+    return 1;
+}
+
+static int omc_jumbf_link_claim_payload(omc_jumbf_ctx *ctx, omc_size scan_limit,
+                                        const omc_jumbf_sig_proj *sig,
+                                        omc_jumbf_sig_link_proj *link,
+                                        const char *prefix, omc_u32 prefix_len)
+{
+    omc_byte_ref ref;
+    omc_const_bytes value;
+    if (!omc_jumbf_find_claim_payload_ref(ctx, scan_limit, prefix, prefix_len, &ref))
+        return 1;
+    value = omc_arena_view(&ctx->store->arena, ref);
+    return omc_jumbf_link_payload(ctx, scan_limit, sig, link, value.data, value.size);
+}
+
+/* Stable lexical numbering without retaining a second copy of every path. */
+static omc_u32 omc_jumbf_prefix_rank(omc_jumbf_ctx *ctx, omc_size limit,
+                                     const char *marker, const char *prefix)
+{
+    omc_size i;
+    omc_u32 rank;
+    rank = 0U;
+    for (i = 0U; i < limit; ++i) {
+        const omc_entry *e;
+        omc_const_bytes key;
+        char other[OMC_JUMBF_PATH_CAP];
+        omc_u32 n;
+        e = &ctx->store->entries[i];
+        if (e->origin.block != ctx->block || e->key.kind != OMC_KEY_JUMBF_CBOR_KEY)
+            continue;
+        key = omc_jumbf_entry_key_view(ctx->store, e);
+        if (omc_jumbf_find_indexed_segment_prefix(key, marker, other,
+                                                  (omc_u32)sizeof(other), &n) &&
+            strcmp(other, prefix) < 0 &&
+            !omc_jumbf_prefix_seen_before(ctx->store, ctx->block, limit, i, marker,
+                                          other, n))
+            ++rank;
+    }
+    return rank;
+}
+
 static int
 omc_jumbf_collect_signature_ingredient_link(omc_jumbf_ctx* ctx,
                                             omc_size scan_limit,
@@ -4511,8 +4388,7 @@ omc_jumbf_collect_signature_ingredient_link(omc_jumbf_ctx* ctx,
         out_link->direct_claim_has_ingredients
             = (source_summary.ingredient_count != 0U);
     }
-    out_link->explicit_reference_present
-        = (sig->ref_index_count != 0U || sig->ref_label_count != 0U);
+    out_link->explicit_reference_present = (sig->has_explicit_reference != 0);
     out_link->explicit_reference_index_hits = (omc_u64)sig->ref_index_count;
     out_link->explicit_reference_label_hits = (omc_u64)sig->ref_label_count;
 
@@ -4533,9 +4409,8 @@ omc_jumbf_collect_signature_ingredient_link(omc_jumbf_ctx* ctx,
             if (omc_jumbf_find_claim_prefix_by_semantic_index(
                     ctx, scan_limit, sig->ref_indices[i], claim_prefix,
                     (omc_u32)sizeof(claim_prefix), &claim_prefix_len)) {
-                if (!omc_jumbf_sig_link_note_target(ctx, scan_limit, sig,
-                                                    out_link, claim_prefix,
-                                                    claim_prefix_len)) {
+                if (!omc_jumbf_link_claim_payload(ctx, scan_limit, sig, out_link,
+                                                  claim_prefix, claim_prefix_len)) {
                     return 0;
                 }
             }
@@ -4550,9 +4425,8 @@ omc_jumbf_collect_signature_ingredient_link(omc_jumbf_ctx* ctx,
                     ctx, scan_limit, sig->ref_labels[i], sig->ref_label_lens[i],
                     claim_prefix, (omc_u32)sizeof(claim_prefix),
                     &claim_prefix_len, &claim_matches)) {
-                if (!omc_jumbf_sig_link_note_target(ctx, scan_limit, sig,
-                                                    out_link, claim_prefix,
-                                                    claim_prefix_len)) {
+                if (!omc_jumbf_link_claim_payload(ctx, scan_limit, sig, out_link,
+                                                  claim_prefix, claim_prefix_len)) {
                     return 0;
                 }
                 if (claim_matches > 1U) {
@@ -4569,6 +4443,27 @@ omc_jumbf_collect_signature_ingredient_link(omc_jumbf_ctx* ctx,
         }
     }
 
+    {
+        omc_u32 i;
+        for (i = 1U; i < out_link->target_claim_count; ++i) {
+            omc_u32 j;
+            j = i;
+            while (j && strcmp(out_link->target_claim_prefixes[j - 1U],
+                               out_link->target_claim_prefixes[j]) > 0) {
+                char tmp[OMC_JUMBF_PATH_CAP];
+                omc_u32 len;
+                len = out_link->target_claim_lens[j];
+                memcpy(tmp, out_link->target_claim_prefixes[j], len + 1U);
+                memcpy(out_link->target_claim_prefixes[j],
+                       out_link->target_claim_prefixes[j - 1U],
+                       out_link->target_claim_lens[j - 1U] + 1U);
+                memcpy(out_link->target_claim_prefixes[j - 1U], tmp, len + 1U);
+                out_link->target_claim_lens[j] = out_link->target_claim_lens[j - 1U];
+                out_link->target_claim_lens[j - 1U] = len;
+                --j;
+            }
+        }
+    }
     out_link->direct_source = (out_link->linked_direct_claim_count != 0U);
     out_link->cross_source = (out_link->linked_cross_claim_count != 0U);
     if (out_link->linked_claim_count != 0U && !out_link->direct_source
@@ -4641,11 +4536,8 @@ omc_jumbf_collect_claim_signature_topology(
                                            &cross_match)) {
             continue;
         }
-        if (cross_match) {
-            out_stats->referenced_by_signature_count += 1U;
-        }
-        if (sig_link.ingredient_summary.ingredient_count == 0U
-            && !sig_link.explicit_reference_ambiguous) {
+        out_stats->referenced_by_signature_count += 1U;
+        if (sig_link.ingredient_summary.ingredient_count == 0U) {
             continue;
         }
 
@@ -6604,10 +6496,10 @@ omc_jumbf_collect_signature_projection(omc_jumbf_ctx* ctx, omc_size scan_limit,
     out_sig->linked_to_claim
         = (omc_jumbf_view_find(omc_jumbf_const_bytes(prefix, prefix_len), ".claims[",
                                &tmp_pos) != 0);
-    if (omc_jumbf_view_find(omc_jumbf_const_bytes(prefix, prefix_len),
-                            ".signatures[", &tmp_pos)
-        && tmp_pos != 0U
-        && tmp_pos + 1U < (omc_u32)sizeof(out_sig->direct_claim_prefix)) {
+    if (out_sig->linked_to_claim &&
+        omc_jumbf_view_find(omc_jumbf_const_bytes(prefix, prefix_len), ".signatures[",
+                            &tmp_pos) &&
+        tmp_pos != 0U && tmp_pos + 1U < (omc_u32)sizeof(out_sig->direct_claim_prefix)) {
         memcpy(out_sig->direct_claim_prefix, prefix, tmp_pos);
         out_sig->direct_claim_prefix[tmp_pos] = '\0';
         out_sig->direct_claim_prefix_len = tmp_pos;
@@ -6647,11 +6539,15 @@ omc_jumbf_collect_signature_projection(omc_jumbf_ctx* ctx, omc_size scan_limit,
             out_sig->algorithm[value_view.size] = '\0';
             out_sig->algorithm_len = (omc_u32)value_view.size;
             out_sig->has_algorithm = (out_sig->algorithm_len != 0U);
+            out_sig->has_semantic_algorithm = out_sig->has_algorithm;
         }
-        if (entry->value.kind == OMC_VAL_TEXT
-            && !omc_jumbf_sig_proj_note_ref_text(
-                   out_sig, key, (const char*)value_view.data,
-                   (omc_u32)value_view.size)) {
+        if ((entry->value.kind == OMC_VAL_TEXT ||
+             (entry->value.kind == OMC_VAL_BYTES &&
+              omc_jumbf_bytes_all_ascii_printable(value_view.data,
+                                                  (omc_u32)value_view.size))) &&
+            !omc_jumbf_sig_proj_note_ref_text(out_sig, key,
+                                              (const char *)value_view.data,
+                                              (omc_u32)value_view.size)) {
             return 0;
         }
 
@@ -7049,34 +6945,28 @@ omc_jumbf_emit_signature_projection(omc_jumbf_ctx* ctx, omc_u32 index,
         return 0;
     }
 
-    if (!omc_jumbf_emit_indexed_field_text(ctx, "c2pa.semantic.signature",
-                                           index, "prefix", sig->prefix,
-                                           sig->prefix_len)
-        || !omc_jumbf_emit_indexed_field_u64(ctx, "c2pa.semantic.signature",
-                                             index, "reference_key_hits",
-                                             sig->reference_key_hits)
-        || !omc_jumbf_emit_indexed_field_u64(ctx, "c2pa.semantic.signature",
-                                             index, "key_hits",
-                                             sig->key_hits)
-        || !omc_jumbf_emit_indexed_field_u64(
-               ctx, "c2pa.semantic.signature", index,
-               "explicit_reference_index_hits", (omc_u64)sig->ref_index_count)
-        || !omc_jumbf_emit_indexed_field_u64(
-               ctx, "c2pa.semantic.signature", index,
-               "explicit_reference_label_hits", (omc_u64)sig->ref_label_count)
-        || !omc_jumbf_emit_indexed_field_u8(
-               ctx, "c2pa.semantic.signature", index,
-               "explicit_reference_present",
-               (omc_u8)((sig->ref_index_count != 0U || sig->ref_label_count != 0U)
-                            ? 1U
-                            : 0U))) {
+    if (!omc_jumbf_emit_indexed_field_text(ctx, "c2pa.semantic.signature", index,
+                                           "prefix", sig->prefix, sig->prefix_len) ||
+        !omc_jumbf_emit_indexed_field_u64(ctx, "c2pa.semantic.signature", index,
+                                          "reference_key_hits",
+                                          sig->reference_key_hits) ||
+        !omc_jumbf_emit_indexed_field_u64(ctx, "c2pa.semantic.signature", index,
+                                          "key_hits", sig->key_hits) ||
+        !omc_jumbf_emit_indexed_field_u64(ctx, "c2pa.semantic.signature", index,
+                                          "explicit_reference_index_hits",
+                                          (omc_u64)sig->ref_index_count) ||
+        !omc_jumbf_emit_indexed_field_u64(ctx, "c2pa.semantic.signature", index,
+                                          "explicit_reference_label_hits",
+                                          (omc_u64)sig->ref_label_count) ||
+        !omc_jumbf_emit_indexed_field_u8(
+            ctx, "c2pa.semantic.signature", index, "explicit_reference_present",
+            (omc_u8)((sig->has_explicit_reference != 0) ? 1U : 0U))) {
         return 0;
     }
-    if (sig->has_algorithm
-        && !omc_jumbf_emit_indexed_field_text(ctx, "c2pa.semantic.signature",
-                                              index, "algorithm",
-                                              sig->algorithm,
-                                              sig->algorithm_len)) {
+    if (sig->has_semantic_algorithm &&
+        !omc_jumbf_emit_indexed_field_text(ctx, "c2pa.semantic.signature", index,
+                                           "algorithm", sig->algorithm,
+                                           sig->algorithm_len)) {
         return 0;
     }
 
@@ -9406,6 +9296,7 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
             omc_jumbf_ing_summary linked_claim_direct_summary;
             omc_jumbf_ing_summary linked_claim_cross_summary;
             omc_u64 claim_assertion_count;
+            omc_u64 claim_key_hits;
             omc_u64 claim_signature_count;
             omc_u64 claim_signature_key_hits;
             int claim_has_claim_generator;
@@ -9436,6 +9327,8 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
                 continue;
             }
 
+            claim_sem_index =
+                omc_jumbf_prefix_rank(ctx, scan_limit, ".claims[", claim_prefix);
             if (!omc_jumbf_collect_claim_ingredient_summary(
                     ctx, scan_limit, claim_prefix, claim_prefix_len,
                     &claim_summary)
@@ -9472,6 +9365,7 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
             (void)nested_signature_count;
             (void)linked_claim_direct_summary;
             (void)linked_claim_cross_summary;
+            claim_key_hits = 0U;
             claim_assertion_count = 0U;
             claim_signature_count = 0U;
             claim_signature_key_hits = 0U;
@@ -9495,6 +9389,11 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
                     continue;
                 }
                 other_key = omc_jumbf_entry_key_view(ctx->store, other_entry);
+                if (other_key.size >= claim_prefix_len &&
+                    !memcmp(other_key.data, claim_prefix, claim_prefix_len) &&
+                    (other_key.size == claim_prefix_len ||
+                     other_key.data[claim_prefix_len] == '.'))
+                    ++claim_key_hits;
                 if (omc_jumbf_view_starts_with(other_key, claim_prefix)
                     && (other_key.size == claim_prefix_len
                         || other_key.data[claim_prefix_len] == (omc_u8)'.'
@@ -9594,11 +9493,10 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
                                    "key_hits", sig.key_hits)) {
                             return 0;
                         }
-                        if (sig.has_algorithm
-                            && !omc_jumbf_emit_indexed_field_text(
-                                   ctx, sig_root, claim_signature_index,
-                                   "algorithm", sig.algorithm,
-                                   sig.algorithm_len)) {
+                        if (sig.has_semantic_algorithm &&
+                            !omc_jumbf_emit_indexed_field_text(
+                                ctx, sig_root, claim_signature_index, "algorithm",
+                                sig.algorithm, sig.algorithm_len)) {
                             return 0;
                         }
                         claim_signature_count += 1U;
@@ -9634,168 +9532,163 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
             }
 
             if (!omc_jumbf_emit_scoped_field_text(ctx, claim_scope, "prefix",
-                                                  claim_prefix,
-                                                  claim_prefix_len)
-                || !omc_jumbf_emit_scoped_field_u64(
-                       ctx, claim_scope, "assertion_count",
-                       claim_assertion_count)
-                || !omc_jumbf_emit_scoped_field_u64(
-                       ctx, claim_scope, "signature_count",
-                       claim_signature_count)
-                || !omc_jumbf_emit_scoped_field_u64(
-                       ctx, claim_scope, "signature_key_hits",
-                       claim_signature_key_hits)
-                || !omc_jumbf_emit_indexed_field_u64(
+                                                  claim_prefix, claim_prefix_len) ||
+                !omc_jumbf_emit_scoped_field_u64(ctx, claim_scope, "key_hits",
+                                                 claim_key_hits) ||
+                !omc_jumbf_emit_scoped_field_u64(ctx, claim_scope, "assertion_count",
+                                                 claim_assertion_count) ||
+                !omc_jumbf_emit_scoped_field_u64(ctx, claim_scope, "signature_count",
+                                                 claim_signature_count) ||
+                !omc_jumbf_emit_scoped_field_u64(ctx, claim_scope, "signature_key_hits",
+                                                 claim_signature_key_hits) ||
+                !omc_jumbf_emit_indexed_field_u64(ctx, "c2pa.semantic.claim",
+                                                  claim_sem_index, "ingredient_count",
+                                                  claim_summary.ingredient_count) ||
+                !omc_jumbf_emit_indexed_field_u64(ctx, "c2pa.semantic.claim",
+                                                  claim_sem_index,
+                                                  "ingredient_relationship_count",
+                                                  claim_summary.relationship_count) ||
+                !omc_jumbf_emit_indexed_field_u64(ctx, "c2pa.semantic.claim",
+                                                  claim_sem_index,
+                                                  "ingredient_thumbnail_url_count",
+                                                  claim_summary.thumbnail_url_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
                     ctx, "c2pa.semantic.claim", claim_sem_index,
-                    "ingredient_count", claim_summary.ingredient_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "ingredient_relationship_count",
-                       claim_summary.relationship_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "ingredient_thumbnail_url_count",
-                       claim_summary.thumbnail_url_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "referenced_by_signature_count",
-                       referenced_by_signature_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_signature_count",
-                       linked_signature_count_for_claim)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_direct_ingredient_signature_count",
-                       linked_direct_signature_count_for_claim)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_cross_ingredient_signature_count",
-                       linked_cross_signature_count_for_claim)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_title_count",
-                       linked_claim_summary.title_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_relationship_count",
-                       linked_claim_summary.relationship_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_thumbnail_url_count",
-                       linked_claim_summary.thumbnail_url_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_signature_count",
-                       linked_explicit_reference_signature_count_for_claim)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_direct_signature_count",
-                       linked_explicit_reference_direct_signature_count_for_claim)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_cross_signature_count",
-                       linked_explicit_reference_cross_signature_count_for_claim)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_title_count",
-                       claim_link_stats
-                           .linked_explicit_reference_summary.title_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_relationship_count",
-                       claim_link_stats
-                           .linked_explicit_reference_summary.relationship_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_thumbnail_url_count",
-                       claim_link_stats
-                           .linked_explicit_reference_summary.thumbnail_url_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_unresolved_signature_count",
-                       claim_link_stats
-                           .linked_explicit_reference_unresolved_signature_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_unresolved_direct_signature_count",
-                       claim_link_stats
-                           .linked_explicit_reference_unresolved_direct_signature_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_unresolved_cross_signature_count",
-                       claim_link_stats
-                           .linked_explicit_reference_unresolved_cross_signature_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_unresolved_title_count",
-                       claim_link_stats
-                           .linked_explicit_reference_unresolved_summary.title_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_unresolved_relationship_count",
-                       claim_link_stats
-                           .linked_explicit_reference_unresolved_summary
-                           .relationship_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_unresolved_thumbnail_url_count",
-                       claim_link_stats
-                           .linked_explicit_reference_unresolved_summary
-                           .thumbnail_url_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_ambiguous_signature_count",
-                       claim_link_stats
-                           .linked_explicit_reference_ambiguous_signature_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_ambiguous_direct_signature_count",
-                       claim_link_stats
-                           .linked_explicit_reference_ambiguous_direct_signature_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_ambiguous_cross_signature_count",
-                       claim_link_stats
-                           .linked_explicit_reference_ambiguous_cross_signature_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_ambiguous_title_count",
-                       claim_link_stats
-                           .linked_explicit_reference_ambiguous_summary.title_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_ambiguous_relationship_count",
-                       claim_link_stats
-                           .linked_explicit_reference_ambiguous_summary
-                           .relationship_count)
-                || !omc_jumbf_emit_indexed_field_u64(
-                       ctx, "c2pa.semantic.claim", claim_sem_index,
-                       "linked_ingredient_explicit_reference_ambiguous_thumbnail_url_count",
-                       claim_link_stats
-                           .linked_explicit_reference_ambiguous_summary
-                           .thumbnail_url_count)
-                || !omc_jumbf_emit_named_counts(
-                       ctx, claim_scope, "ingredient_relationship",
-                       &claim_summary)
-                || !omc_jumbf_emit_named_counts(
-                       ctx, claim_scope,
-                       "linked_ingredient_relationship",
-                       &claim_link_stats.linked_summary)
-                || !omc_jumbf_emit_named_counts(
-                       ctx, claim_scope,
-                       "linked_ingredient_explicit_reference_relationship",
-                       &claim_link_stats.linked_explicit_reference_summary)
-                || !omc_jumbf_emit_named_counts(
-                       ctx, claim_scope,
-                       "linked_ingredient_explicit_reference_unresolved_relationship",
-                       &claim_link_stats
-                            .linked_explicit_reference_unresolved_summary)
-                || !omc_jumbf_emit_named_counts(
-                       ctx, claim_scope,
-                       "linked_ingredient_explicit_reference_ambiguous_relationship",
-                       &claim_link_stats
-                            .linked_explicit_reference_ambiguous_summary)) {
+                    "referenced_by_signature_count", referenced_by_signature_count) ||
+                !omc_jumbf_emit_indexed_field_u64(ctx, "c2pa.semantic.claim",
+                                                  claim_sem_index,
+                                                  "linked_ingredient_signature_count",
+                                                  linked_signature_count_for_claim) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_direct_ingredient_signature_count",
+                    linked_direct_signature_count_for_claim) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_cross_ingredient_signature_count",
+                    linked_cross_signature_count_for_claim) ||
+                !omc_jumbf_emit_indexed_field_u64(ctx, "c2pa.semantic.claim",
+                                                  claim_sem_index,
+                                                  "linked_ingredient_title_count",
+                                                  linked_claim_summary.title_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_relationship_count",
+                    linked_claim_summary.relationship_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_thumbnail_url_count",
+                    linked_claim_summary.thumbnail_url_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_signature_count",
+                    linked_explicit_reference_signature_count_for_claim) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_direct_signature_count",
+                    linked_explicit_reference_direct_signature_count_for_claim) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_cross_signature_count",
+                    linked_explicit_reference_cross_signature_count_for_claim) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_title_count",
+                    claim_link_stats.linked_explicit_reference_summary.title_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_relationship_count",
+                    claim_link_stats.linked_explicit_reference_summary
+                        .relationship_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_thumbnail_url_count",
+                    claim_link_stats.linked_explicit_reference_summary
+                        .thumbnail_url_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_unresolved_signature_count",
+                    claim_link_stats
+                        .linked_explicit_reference_unresolved_signature_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_unresolved_direct_signature_"
+                    "count",
+                    claim_link_stats
+                        .linked_explicit_reference_unresolved_direct_signature_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_unresolved_cross_signature_"
+                    "count",
+                    claim_link_stats
+                        .linked_explicit_reference_unresolved_cross_signature_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_unresolved_title_count",
+                    claim_link_stats.linked_explicit_reference_unresolved_summary
+                        .title_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_unresolved_relationship_"
+                    "count",
+                    claim_link_stats.linked_explicit_reference_unresolved_summary
+                        .relationship_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_unresolved_thumbnail_url_"
+                    "count",
+                    claim_link_stats.linked_explicit_reference_unresolved_summary
+                        .thumbnail_url_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_ambiguous_signature_count",
+                    claim_link_stats
+                        .linked_explicit_reference_ambiguous_signature_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_ambiguous_direct_signature_"
+                    "count",
+                    claim_link_stats
+                        .linked_explicit_reference_ambiguous_direct_signature_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_ambiguous_cross_signature_"
+                    "count",
+                    claim_link_stats
+                        .linked_explicit_reference_ambiguous_cross_signature_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_ambiguous_title_count",
+                    claim_link_stats.linked_explicit_reference_ambiguous_summary
+                        .title_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_ambiguous_relationship_count",
+                    claim_link_stats.linked_explicit_reference_ambiguous_summary
+                        .relationship_count) ||
+                !omc_jumbf_emit_indexed_field_u64(
+                    ctx, "c2pa.semantic.claim", claim_sem_index,
+                    "linked_ingredient_explicit_reference_ambiguous_thumbnail_url_"
+                    "count",
+                    claim_link_stats.linked_explicit_reference_ambiguous_summary
+                        .thumbnail_url_count) ||
+                !omc_jumbf_emit_named_counts(
+                    ctx, claim_scope, "ingredient_relationship", &claim_summary) ||
+                !omc_jumbf_emit_named_counts(ctx, claim_scope,
+                                             "linked_ingredient_relationship",
+                                             &claim_link_stats.linked_summary) ||
+                !omc_jumbf_emit_named_counts(
+                    ctx, claim_scope,
+                    "linked_ingredient_explicit_reference_relationship",
+                    &claim_link_stats.linked_explicit_reference_summary) ||
+                !omc_jumbf_emit_named_counts(
+                    ctx, claim_scope,
+                    "linked_ingredient_explicit_reference_unresolved_relationship",
+                    &claim_link_stats.linked_explicit_reference_unresolved_summary) ||
+                !omc_jumbf_emit_named_counts(
+                    ctx, claim_scope,
+                    "linked_ingredient_explicit_reference_ambiguous_relationship",
+                    &claim_link_stats.linked_explicit_reference_ambiguous_summary)) {
                 return 0;
             }
             if (claim_has_claim_generator
@@ -9842,8 +9735,7 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
             omc_u64 manifest_explicit_reference_signature_count;
             omc_u64 manifest_explicit_reference_unresolved_signature_count;
             omc_u64 manifest_explicit_reference_ambiguous_signature_count;
-            omc_u64 manifest_explicit_reference_index_hits;
-            omc_u64 manifest_explicit_reference_label_hits;
+
             omc_jumbf_ing_summary manifest_summary;
             omc_jumbf_ing_summary manifest_linked_summary;
             omc_jumbf_ing_summary manifest_linked_direct_summary;
@@ -9895,8 +9787,7 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
             manifest_explicit_reference_signature_count = 0U;
             manifest_explicit_reference_unresolved_signature_count = 0U;
             manifest_explicit_reference_ambiguous_signature_count = 0U;
-            manifest_explicit_reference_index_hits = 0U;
-            manifest_explicit_reference_label_hits = 0U;
+
             omc_jumbf_ing_summary_init(&manifest_summary);
             omc_jumbf_ing_summary_init(&manifest_linked_summary);
             omc_jumbf_ing_summary_init(&manifest_linked_direct_summary);
@@ -9977,10 +9868,7 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
                     manifest_explicit_reference_ambiguous_signature_count
                         += claim_sig_stats
                                .explicit_reference_ambiguous_signature_count;
-                    manifest_explicit_reference_index_hits
-                        += claim_sig_stats.explicit_reference_index_hits;
-                    manifest_explicit_reference_label_hits
-                        += claim_sig_stats.explicit_reference_label_hits;
+
                     nested_signature_count
                         = claim_link_stats.nested_signature_count;
                     referenced_by_signature_count
@@ -10111,180 +9999,168 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
                     += sig_link.target_cross_claim_count;
             }
 
-            if (manifest_claim_count != 0U
-                || manifest_summary.ingredient_count != 0U) {
-                if (!omc_jumbf_emit_scoped_field_text(
-                        ctx, manifest_scope, "prefix", manifest_prefix,
-                        manifest_prefix_len)
-                    || !omc_jumbf_emit_scoped_field_u8(
-                           ctx, manifest_scope, "is_active",
-                           (omc_u8)(manifest_is_active ? 1U : 0U))
-                    || !omc_jumbf_emit_scoped_field_u64(
-                           ctx, manifest_scope, "assertion_count",
-                           manifest_assertion_count)
-                    || !omc_jumbf_emit_scoped_field_u64(
-                           ctx, manifest_scope, "signature_count",
-                           manifest_signature_count)
-                    || !omc_jumbf_emit_scoped_field_u64(
-                           ctx, manifest_scope, "signature_linked_count",
-                           manifest_signature_linked_count)
-                    || !omc_jumbf_emit_scoped_field_u64(
-                           ctx, manifest_scope, "signature_orphan_count",
-                           manifest_signature_count
-                                   >= manifest_signature_linked_count
-                               ? (manifest_signature_count
-                                  - manifest_signature_linked_count)
-                               : 0U)
-                    || !omc_jumbf_emit_scoped_field_u64(
-                           ctx, manifest_scope, "cross_claim_link_count",
-                           manifest_cross_claim_link_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
+            if (manifest_prefix_len != 0U) {
+                if (!omc_jumbf_emit_scoped_field_text(ctx, manifest_scope, "prefix",
+                                                      manifest_prefix,
+                                                      manifest_prefix_len) ||
+                    !omc_jumbf_emit_scoped_field_u8(
+                        ctx, manifest_scope, "is_active",
+                        (omc_u8)(manifest_is_active ? 1U : 0U)) ||
+                    !omc_jumbf_emit_scoped_field_u64(ctx, manifest_scope,
+                                                     "assertion_count",
+                                                     manifest_assertion_count) ||
+                    !omc_jumbf_emit_scoped_field_u64(ctx, manifest_scope,
+                                                     "signature_count",
+                                                     manifest_signature_count) ||
+                    !omc_jumbf_emit_scoped_field_u64(ctx, manifest_scope,
+                                                     "signature_linked_count",
+                                                     manifest_signature_linked_count) ||
+                    !omc_jumbf_emit_scoped_field_u64(
+                        ctx, manifest_scope, "signature_orphan_count",
+                        manifest_signature_count >= manifest_signature_linked_count
+                            ? (manifest_signature_count -
+                               manifest_signature_linked_count)
+                            : 0U) ||
+                    !omc_jumbf_emit_scoped_field_u64(ctx, manifest_scope,
+                                                     "cross_claim_link_count",
+                                                     manifest_cross_claim_link_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(ctx, "c2pa.semantic.manifest",
+                                                      manifest_sem_index, "claim_count",
+                                                      manifest_claim_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
                         ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                        "claim_count", manifest_claim_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "explicit_reference_signature_count",
-                           manifest_explicit_reference_signature_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "explicit_reference_unresolved_signature_count",
-                           manifest_explicit_reference_unresolved_signature_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "explicit_reference_ambiguous_signature_count",
-                           manifest_explicit_reference_ambiguous_signature_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "explicit_reference_index_hits",
-                           manifest_explicit_reference_index_hits)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "explicit_reference_label_hits",
-                           manifest_explicit_reference_label_hits)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_count", manifest_summary.ingredient_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_relationship_count",
-                           manifest_summary.relationship_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_thumbnail_url_count",
-                           manifest_summary.thumbnail_url_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_claim_count",
-                           manifest_ingredient_claim_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_claim_with_signature_count",
-                           manifest_ingredient_claim_with_signature_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_claim_referenced_by_signature_count",
-                           manifest_ingredient_claim_referenced_by_signature_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_signature_count",
-                           manifest_ingredient_signature_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_count",
-                           manifest_ingredient_linked_signature_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_claim_count",
-                           manifest_ingredient_linked_claim_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_direct_claim_count",
-                           manifest_ingredient_linked_direct_claim_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_claim_direct_source_count",
-                           manifest_ingredient_linked_direct_claim_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_cross_claim_count",
-                           manifest_ingredient_linked_cross_claim_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_claim_cross_source_count",
-                           manifest_ingredient_linked_cross_claim_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_claim_mixed_source_count",
-                           manifest_ingredient_linked_claim_mixed_source_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_direct_source_count",
-                           manifest_ingredient_linked_signature_direct_source_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_cross_source_count",
-                           manifest_ingredient_linked_signature_cross_source_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_mixed_source_count",
-                           manifest_ingredient_linked_signature_mixed_source_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_title_count",
-                           manifest_linked_summary.title_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_relationship_count",
-                           manifest_linked_summary.relationship_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_thumbnail_url_count",
-                           manifest_linked_summary.thumbnail_url_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_direct_title_count",
-                           manifest_linked_direct_summary.title_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_direct_relationship_count",
-                           manifest_linked_direct_summary.relationship_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_direct_thumbnail_url_count",
-                           manifest_linked_direct_summary.thumbnail_url_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_cross_title_count",
-                           manifest_linked_cross_summary.title_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_cross_relationship_count",
-                           manifest_linked_cross_summary.relationship_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_linked_signature_cross_thumbnail_url_count",
-                           manifest_linked_cross_summary.thumbnail_url_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_explicit_reference_signature_count",
-                           manifest_ingredient_explicit_reference_signature_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_explicit_reference_unresolved_signature_count",
-                           manifest_ingredient_explicit_reference_unresolved_signature_count)
-                    || !omc_jumbf_emit_indexed_field_u64(
-                           ctx, "c2pa.semantic.manifest", manifest_sem_index,
-                           "ingredient_explicit_reference_ambiguous_signature_count",
-                           manifest_ingredient_explicit_reference_ambiguous_signature_count)
-                    || !omc_jumbf_emit_named_counts(
-                           ctx, manifest_scope, "ingredient_relationship",
-                           &manifest_summary)
-                    || !omc_jumbf_emit_named_counts(
-                           ctx, manifest_scope,
-                           "ingredient_linked_signature_relationship",
-                           &manifest_linked_summary)
-                    || !omc_jumbf_emit_exp_ref_scope_fields(
-                           ctx, manifest_scope, &manifest_exp_ref_stats)) {
+                        "explicit_reference_signature_count",
+                        manifest_explicit_reference_signature_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "explicit_reference_unresolved_count",
+                        manifest_explicit_reference_unresolved_signature_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "explicit_reference_ambiguous_count",
+                        manifest_explicit_reference_ambiguous_signature_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_count", manifest_summary.ingredient_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_relationship_count",
+                        manifest_summary.relationship_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_thumbnail_url_count",
+                        manifest_summary.thumbnail_url_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_claim_count", manifest_ingredient_claim_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_claim_with_signature_count",
+                        manifest_ingredient_claim_with_signature_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_claim_referenced_by_signature_count",
+                        manifest_ingredient_claim_referenced_by_signature_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_signature_count",
+                        manifest_ingredient_signature_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_count",
+                        manifest_ingredient_linked_signature_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_claim_count",
+                        manifest_ingredient_linked_claim_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_direct_claim_count",
+                        manifest_ingredient_linked_direct_claim_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_claim_direct_source_count",
+                        manifest_ingredient_linked_direct_claim_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_cross_claim_count",
+                        manifest_ingredient_linked_cross_claim_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_claim_cross_source_count",
+                        manifest_ingredient_linked_cross_claim_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_claim_mixed_source_count",
+                        manifest_ingredient_linked_claim_mixed_source_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_direct_source_count",
+                        manifest_ingredient_linked_signature_direct_source_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_cross_source_count",
+                        manifest_ingredient_linked_signature_cross_source_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_mixed_source_count",
+                        manifest_ingredient_linked_signature_mixed_source_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_title_count",
+                        manifest_linked_summary.title_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_relationship_count",
+                        manifest_linked_summary.relationship_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_thumbnail_url_count",
+                        manifest_linked_summary.thumbnail_url_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_direct_title_count",
+                        manifest_linked_direct_summary.title_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_direct_relationship_count",
+                        manifest_linked_direct_summary.relationship_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_direct_thumbnail_url_count",
+                        manifest_linked_direct_summary.thumbnail_url_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_cross_title_count",
+                        manifest_linked_cross_summary.title_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_cross_relationship_count",
+                        manifest_linked_cross_summary.relationship_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_linked_signature_cross_thumbnail_url_count",
+                        manifest_linked_cross_summary.thumbnail_url_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_explicit_reference_signature_count",
+                        manifest_ingredient_explicit_reference_signature_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_explicit_reference_unresolved_signature_count",
+                        manifest_ingredient_explicit_reference_unresolved_signature_count) ||
+                    !omc_jumbf_emit_indexed_field_u64(
+                        ctx, "c2pa.semantic.manifest", manifest_sem_index,
+                        "ingredient_explicit_reference_ambiguous_signature_count",
+                        manifest_ingredient_explicit_reference_ambiguous_signature_count) ||
+                    !omc_jumbf_emit_named_counts(ctx, manifest_scope,
+                                                 "ingredient_relationship",
+                                                 &manifest_summary) ||
+                    !omc_jumbf_emit_named_counts(
+                        ctx, manifest_scope, "ingredient_linked_signature_relationship",
+                        &manifest_linked_summary) ||
+                    !omc_jumbf_emit_exp_ref_scope_fields(ctx, manifest_scope,
+                                                         &manifest_exp_ref_stats)) {
                     return 0;
                 }
                 manifest_sem_index += 1U;
@@ -10575,6 +10451,12 @@ omc_jumbf_res
 omc_jumbf_meas(const omc_u8* bytes, omc_size size,
                const omc_jumbf_opts* opts)
 {
-    return omc_jumbf_run(bytes, size, (omc_store*)0, 0U,
-                         OMC_ENTRY_FLAG_NONE, opts, 1);
+    omc_store scratch;
+    omc_jumbf_res res;
+    /* Claim links and lexical projections require the same bounded decoded
+     * state as the real decoder. Reuse it so measurement cannot drift. */
+    omc_store_init(&scratch);
+    res = omc_jumbf_run(bytes, size, &scratch, 0U, OMC_ENTRY_FLAG_NONE, opts, 0);
+    omc_store_fini(&scratch);
+    return res;
 }

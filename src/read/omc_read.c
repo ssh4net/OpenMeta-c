@@ -1,6 +1,7 @@
+#include "omc/omc_read.h"
+#include "read/omc_exif_internal.h"
 #include "read/omc_native.h"
 #include "read/omc_read_internal.h"
-#include "omc/omc_read.h"
 
 #include "read/omc_ciff.h"
 
@@ -522,14 +523,6 @@ omc_read_find_exif_tag_bytes(const omc_store* store, omc_size entry_start,
     return 0;
 }
 
-static int
-omc_read_ifd_equals_nikon_preview(const omc_u8* data, omc_size size)
-{
-    static const char k_preview[] = "mk_nikon_preview_0";
-
-    return size == (sizeof(k_preview) - 1U)
-           && memcmp(data, k_preview, sizeof(k_preview) - 1U) == 0;
-}
 
 static void
 omc_read_adjust_sigma_simple(omc_store* store, omc_size entry_start)
@@ -662,36 +655,6 @@ omc_read_adjust_samsung_simple(omc_store* store, omc_size entry_start)
         entry.flags = OMC_ENTRY_FLAG_NONE;
         (void)omc_store_add_entry(store, &entry, (omc_entry_id*)0);
     }
-}
-
-static void
-omc_read_prune_nikon_preview_simple(omc_store* store, omc_size entry_start)
-{
-    omc_size i;
-    omc_size write_i;
-
-    if (store == (omc_store*)0 || entry_start >= store->entry_count) {
-        return;
-    }
-
-    write_i = entry_start;
-    for (i = entry_start; i < store->entry_count; ++i) {
-        omc_entry* entry;
-        omc_const_bytes ifd_view;
-
-        entry = &store->entries[i];
-        if (entry->key.kind == OMC_KEY_EXIF_TAG) {
-            ifd_view = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
-            if (omc_read_ifd_equals_nikon_preview(ifd_view.data, ifd_view.size)) {
-                continue;
-            }
-        }
-        if (write_i != i) {
-            store->entries[write_i] = *entry;
-        }
-        write_i += 1U;
-    }
-    store->entry_count = write_i;
 }
 
 static int
@@ -1638,7 +1601,12 @@ omc_read_run(const omc_u8* file_bytes, omc_u64 file_size,
             omc_const_bytes block_view;
             omc_pay_res pay_res;
             omc_size entry_start;
+            int canon_block;
 
+            canon_block = block->format == OMC_SCAN_FMT_CR3 &&
+                          block->id == OMC_FOURCC('C', 'M', 'T', '3');
+            if (canon_block && !use_opts->exif.decode_makernote)
+                continue;
             entry_start = store->entry_count;
             if (source != NULL && block->compression == OMC_BLK_COMP_NONE &&
                 (block->part_count == 0U || block->part_count == 1U) &&
@@ -1653,8 +1621,14 @@ omc_read_run(const omc_u8* file_bytes, omc_u64 file_size,
                 nested.size = block->data_size;
                 work.value = source->workspace->metadata;
                 work.value_capacity = source->workspace->metadata_capacity;
-                decoded = omc_exif_dec_source(&nested, store, block_id, out_ifds, ifd_cap,
-                                               &work, source->state, source->limits, &use_opts->exif);
+                if (canon_block)
+                    decoded = omc_exif_dec_cmt3_source(&nested, store, block_id, &work,
+                                                       source->state, source->limits,
+                                                       &use_opts->exif);
+                else
+                    decoded = omc_exif_dec_source(&nested, store, block_id, out_ifds,
+                                                  ifd_cap, &work, source->state,
+                                                  source->limits, &use_opts->exif);
                 omc_read_merge_exif(&res.exif, decoded.decoded);
                 if (decoded.value_scratch_needed > source->result->value_scratch_needed)
                     source->result->value_scratch_needed = decoded.value_scratch_needed;
@@ -1670,7 +1644,6 @@ omc_read_run(const omc_u8* file_bytes, omc_u64 file_size,
                 omc_read_remap_kodak_simple_ifd(store, entry_start);
                 omc_read_adjust_sigma_simple(store, entry_start);
                 omc_read_adjust_samsung_simple(store, entry_start);
-                omc_read_prune_nikon_preview_simple(store, entry_start);
             } else if (block->format == OMC_SCAN_FMT_TIFF && block->data_offset == 0U
                 && block->data_size == (omc_u64)file_size) {
                 exif_res = omc_exif_dec(file_bytes, file_size, store, block_id,
@@ -1685,7 +1658,6 @@ omc_read_run(const omc_u8* file_bytes, omc_u64 file_size,
                 omc_read_remap_kodak_simple_ifd(store, entry_start);
                 omc_read_adjust_sigma_simple(store, entry_start);
                 omc_read_adjust_samsung_simple(store, entry_start);
-                omc_read_prune_nikon_preview_simple(store, entry_start);
                 if (exif_res.status == OMC_EXIF_OK
                     || exif_res.status == OMC_EXIF_TRUNCATED) {
                     omc_read_decode_tiff_embedded(use_opts, store, block_id,
@@ -1702,9 +1674,13 @@ omc_read_run(const omc_u8* file_bytes, omc_u64 file_size,
                 }
 
                 omc_read_merge_pay(&res.pay, pay_res);
-                exif_res = omc_exif_dec(block_view.data, block_view.size,
-                                        store, block_id, out_ifds, ifd_cap,
-                                        &use_opts->exif);
+                if (canon_block)
+                    exif_res = omc_exif_dec_cmt3(block_view.data, block_view.size,
+                                                 store, block_id, &use_opts->exif);
+                else
+                    exif_res =
+                        omc_exif_dec(block_view.data, block_view.size, store, block_id,
+                                     out_ifds, ifd_cap, &use_opts->exif);
                 omc_read_merge_exif(&res.exif, exif_res);
                 omc_read_clear_casio_simple_context(store, entry_start);
                 omc_read_clear_pentax_simple_context(store, entry_start);
@@ -1715,7 +1691,6 @@ omc_read_run(const omc_u8* file_bytes, omc_u64 file_size,
                 omc_read_remap_kodak_simple_ifd(store, entry_start);
                 omc_read_adjust_sigma_simple(store, entry_start);
                 omc_read_adjust_samsung_simple(store, entry_start);
-                omc_read_prune_nikon_preview_simple(store, entry_start);
             }
         } else if (block->kind == OMC_BLK_CIFF) {
             omc_exif_res ciff_res;
@@ -1897,7 +1872,6 @@ omc_read_run(const omc_u8* file_bytes, omc_u64 file_size,
                 omc_read_remap_ricoh_padded_type2_ifd(store, entry_start);
                 omc_read_adjust_sigma_simple(store, entry_start);
                 omc_read_adjust_samsung_simple(store, entry_start);
-                omc_read_prune_nikon_preview_simple(store, entry_start);
             }
         } else if (block->kind == OMC_BLK_COMMENT) {
             omc_const_bytes block_view;
@@ -2022,7 +1996,6 @@ omc_read_tiff_source(const omc_source_range* range, omc_store* store,
     omc_read_remap_kodak_simple_ifd(store, entry_start);
     omc_read_adjust_sigma_simple(store, entry_start);
     omc_read_adjust_samsung_simple(store, entry_start);
-    omc_read_prune_nikon_preview_simple(store, entry_start);
     if (res.exif.status == OMC_EXIF_OK || res.exif.status == OMC_EXIF_TRUNCATED)
         omc_read_decode_tiff_embedded(&opts->decode, store, block, entry_start, &res);
     res.entries_added = (omc_u32)(store->entry_count - entry_start);

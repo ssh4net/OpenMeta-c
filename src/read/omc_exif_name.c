@@ -585,6 +585,31 @@ omc_exif_entry_name(const omc_store* store, const omc_entry* entry,
                                        out_name, out_cap, out_len);
         }
         break;
+    case OMC_ENTRY_NAME_CTX_CANON_COLORDATA7_PSINFO2:
+        switch (entry->origin.name_context_variant) {
+        case 1:
+            return omc_exif_name_write("ColorToneUserDef3", out_name, out_cap, out_len);
+        case 2:
+            return omc_exif_name_write("FilterEffectUserDef3", out_name, out_cap,
+                                       out_len);
+        case 3:
+            return omc_exif_name_write("ToningEffectUserDef3", out_name, out_cap,
+                                       out_len);
+        case 4:
+            return omc_exif_name_write("UserDef1PictureStyle", out_name, out_cap,
+                                       out_len);
+        case 5:
+            return omc_exif_name_write("UserDef2PictureStyle", out_name, out_cap,
+                                       out_len);
+        default:
+            break;
+        }
+        break;
+    case OMC_ENTRY_NAME_CTX_SONY_MAIN_COMPAT:
+        if (entry->origin.name_context_variant == 1U)
+            return omc_exif_name_write_placeholder("Sony", entry->key.u.exif_tag.tag,
+                                                   out_name, out_cap, out_len);
+        break;
     case OMC_ENTRY_NAME_CTX_SIGMA_MAIN_COMPAT:
         if (entry->origin.name_context_variant == 1U) {
             return omc_exif_name_write_placeholder("Sigma",

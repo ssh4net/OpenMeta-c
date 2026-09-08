@@ -5,6 +5,9 @@
 #include "omc_test_assert.h"
 #include <string.h>
 
+#include "read_decode_makernote_fixtures.h"
+#include "read_decode_vendor_fixtures.h"
+
 static void
 append_u8(omc_u8* out, omc_size* io_size, omc_u8 value)
 {
@@ -5894,6 +5897,25 @@ test_nikon_preview_settings_and_aftune_makernote(void)
         makernote);
     tiff_size = make_test_tiff_with_make_and_makernote_count(
         tiff, "Canon", makernote, makernote_size, (omc_u32)makernote_size);
+    /* The reference finds preview data through exififd.MakerNote. */
+    {
+        omc_u8 saved[12];
+        omc_size pos;
+        for (pos = 10U; pos + 12U <= 34U; pos += 12U) {
+            if (tiff[pos] == 0x7cU && tiff[pos + 1U] == 0x92U) {
+                memcpy(saved, tiff + pos, 12U);
+                tiff[pos] = 0x69U;
+                tiff[pos + 1U] = 0x87U;
+                tiff[pos + 2U] = 4U;
+                write_u32le_at(tiff, pos + 4U, 1U);
+                write_u32le_at(tiff, pos + 8U, (omc_u32)tiff_size);
+                append_u16le(tiff, &tiff_size, 1U);
+                append_raw(tiff, &tiff_size, saved, 12U);
+                append_u32le(tiff, &tiff_size, 0U);
+                break;
+            }
+        }
+    }
     omc_store_init(&store);
     omc_exif_opts_init(&opts);
     opts.decode_makernote = 1;
@@ -8212,9 +8234,125 @@ test_sigma_makernote_variants(void)
     omc_store_fini(&store);
 }
 
+static void test_zero_count_numeric_value(void)
+{
+    omc_u8 tiff[26];
+    omc_store store;
+    omc_exif_res result;
+    const omc_entry *entry;
+    memset(tiff, 0, sizeof(tiff));
+    memcpy(tiff, "II\052\000\010\000\000\000\001\000", 10U);
+    tiff[10] = 1U;
+    tiff[12] = 3U;
+    omc_store_init(&store);
+    result =
+        omc_exif_dec(tiff, sizeof(tiff), &store, OMC_INVALID_BLOCK_ID, NULL, 0U, NULL);
+    assert(result.status == OMC_EXIF_OK);
+    entry = find_exif_entry(&store, "ifd0", 1U);
+    assert(entry != NULL && entry->value.kind == OMC_VAL_ARRAY &&
+           entry->value.elem_type == OMC_ELEM_U16 && entry->value.count == 0U);
+    assert(omc_arena_view(&store.arena, entry->value.u.ref).size == 0U);
+    omc_store_fini(&store);
+}
+
+static void test_rd5_vendor_offsets_and_optional_tables(void)
+{
+    static const char *makes[] = {"Phase One", "Unlisted", "Canon", "SONY"};
+    omc_u8 note[128], tiff[512];
+    omc_size note_size, size;
+    omc_exif_opts opts;
+    omc_exif_res result;
+    omc_store store;
+    const omc_entry *entry;
+    unsigned i;
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    for (i = 0U; i < 4U; ++i) {
+        note_size = omc_rd5_makernote_fixture(note, i);
+        size = make_test_tiff_with_make_model_and_makernote_count(
+            tiff, makes[i], "Camera", note, note_size, (omc_u32)note_size);
+        result =
+            omc_exif_dec(tiff, size, &store, OMC_INVALID_BLOCK_ID, NULL, 0U, &opts);
+        assert(result.status == OMC_EXIF_OK || result.status == OMC_EXIF_TRUNCATED);
+        if (i == 0U) {
+            entry = find_exif_entry(&store, "mk_phaseone_sensorcalibration_0", 0x400U);
+            assert(entry != NULL && entry->value.kind == OMC_VAL_SCALAR &&
+                   entry->value.u.u64 == 7U);
+            assert(entry->origin.wire_type.family == OMC_WIRE_OTHER);
+        } else if (i == 1U) {
+            entry = find_exif_entry(&store, "mkifd0", 5U);
+            assert(entry != NULL && entry->value.kind == OMC_VAL_EMPTY &&
+                   entry->flags == OMC_ENTRY_FLAG_UNREADABLE);
+        } else if (i == 2U) {
+            entry = find_exif_entry(&store, "mk_canon0", 1U);
+            assert(entry != NULL && entry->value.kind == OMC_VAL_ARRAY &&
+                   entry->value.count == 3U);
+        } else {
+            entry = find_exif_entry(&store, "mk_sony0", 1U);
+            assert(entry != NULL && entry->value.kind == OMC_VAL_SCALAR &&
+                   entry->value.u.u64 == 42U);
+        }
+        omc_store_reset(&store);
+    }
+    omc_store_fini(&store);
+}
+
+static void test_rd6_vendor_regressions(void)
+{
+    static const char *makes[] = {"Canon", "SONY", "NIKON", "NIKON"};
+    static const char *models[] = {"Canon EOS-1D X", "ILCE-6700", "NIKON D90",
+                                   "NIKON D90"};
+    omc_u8 note[512], tiff[1024];
+    omc_size size, note_size;
+    omc_store store;
+    omc_exif_opts opts;
+    omc_exif_res result;
+    const omc_entry *entry;
+    unsigned i;
+    omc_store_init(&store);
+    omc_exif_opts_init(&opts);
+    opts.decode_makernote = 1;
+    for (i = 0U; i < 4U; ++i) {
+        note_size = omc_rd6_vendor_fixture(note, i);
+        size = make_test_tiff_with_make_model_and_makernote_count(
+            tiff, makes[i], models[i], note, note_size, (omc_u32)note_size);
+        result =
+            omc_exif_dec(tiff, size, &store, OMC_INVALID_BLOCK_ID, NULL, 0U, &opts);
+        assert(result.status == OMC_EXIF_OK);
+        if (i == 0U) {
+            entry = find_exif_entry(&store, "mk_canon_focallength_unknown_0", 3U);
+            assert(entry != NULL && entry->value.u.u64 == 6000U);
+            entry = find_exif_entry_typed(&store, "mk_canon_camerainfo1dx_0", 0U,
+                                          OMC_VAL_ARRAY, OMC_ELEM_U16);
+            assert(entry != NULL && entry->value.count == 0U &&
+                   (entry->flags & OMC_ENTRY_FLAG_DERIVED));
+            entry = find_exif_entry_typed(&store, "mk_canon_camerainfo1dx_0", 0U,
+                                          OMC_VAL_EMPTY, OMC_ELEM_U8);
+            assert(entry != NULL && (entry->flags & OMC_ENTRY_FLAG_UNREADABLE));
+            entry = find_exif_entry(&store, "mk_canon_filterinfo_0", 0x403U);
+            assert(entry != NULL && entry->value.kind == OMC_VAL_ARRAY &&
+                   entry->value.count == 2U);
+        } else if (i == 1U) {
+            entry = find_exif_entry(&store, "mk_sony_tag9050d_0", 0xaU);
+            assert(entry != NULL && entry->value.u.u64 == 0x01010101U);
+            entry = find_exif_entry(&store, "mk_sony_faceinfo2_0", 0x25U);
+            assert(entry != NULL && entry->value.count == 4U);
+        } else {
+            entry = find_exif_entry(&store, "mk_nikon_shotinfod90_0", 0xbU);
+            assert(entry != NULL && entry->value.u.u64 == 11U);
+        }
+        omc_store_reset(&store);
+    }
+    omc_store_fini(&store);
+}
+
 int
 main(void)
 {
+    test_rd6_vendor_regressions();
+    test_zero_count_numeric_value();
+    test_rd5_vendor_offsets_and_optional_tables();
     test_decode_le_and_measure();
     test_decode_be();
     test_utf8_and_ascii_bytes();
