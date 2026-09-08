@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(OpenMetaC VERSION 0.8.0 LANGUAGES C)
+project(OpenMetaC VERSION 0.9.0 LANGUAGES C)
 
 include(CTest)
 include(CheckCSourceCompiles)
@@ -16,6 +16,8 @@ option(OMC_USE_ZLIB "Enable zlib-backed deflate payload extraction" ON)
 option(OMC_USE_BROTLI "Enable Brotli-backed metadata payload extraction" ON)
 set(OMC_OPENMETA_DIR "" CACHE PATH
   "Path to an OpenMeta CMake package directory for parity tests")
+set(OMC_OPENMETA_SOURCE_DIR "" CACHE PATH
+  "Matching OpenMeta source checkout for build-tree parity tests (optional)")
 
 if(NOT OMC_BUILD_STATIC AND NOT OMC_BUILD_SHARED)
   message(FATAL_ERROR "Enable at least one of OMC_BUILD_STATIC or OMC_BUILD_SHARED.")

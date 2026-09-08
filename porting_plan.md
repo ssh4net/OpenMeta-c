@@ -79,7 +79,35 @@ see the current checkpoint below for the remaining broad inventory.
 See [authoring.md](authoring.md) for contracts and bounded coverage. The matrix
 below retains source-review detail where broader acceptance remains open.
 
-## Current Reading/Decoding Checkpoint: Version 0.8.0
+## Current Translation Checkpoint: Version 0.9.0
+
+The next upstream batch is pinned to C++ 0.4.128, commit
+`ba99484b8be087012f9c44a1194ed828d060a0d5`. A frozen source snapshot and matching
+library keep this gate independent of ongoing C++ changes. The fresh C 0.8.0
+baseline passed 50/50 targets against that reference before implementation.
+
+`omc_translate_xmp_location()` now covers five explicit flat IPTC mappings:
+City, Location, State, Country and CountryCode. It uses the existing edit
+transaction and preserves the legacy translation API defaults. Its fixed
+planning records enforce group eligibility, ambiguity, native wire ordering,
+conflicts, removals, provenance, UTF-8 promotion and cumulative resource limits.
+See [authoring.md](authoring.md) for exact properties and API contracts.
+
+The direct gate covers 70 fixtures; 69 have paired C++ cases. The additional
+case rejects a C mapping bit with no equivalent C++ boolean option. Four
+JPEG/TIFF replacement/removal cases persist files and reread native datasets,
+including stale raw IRB precedence and unrelated caption preservation.
+
+The Clang 20 Release static build with zlib/Brotli and the shared build without
+them each pass 52/52 targets. Debug ASan/UBSan passes 39/39 direct targets.
+Native MSVC Release x64 and Win32 each pass 39/39 without optional compression.
+These Windows builds are functional gates, not warning-clean builds; existing
+CRT and decoder warnings remain, with none from the new location module.
+These gates retain the public reading inventories against the new reference.
+They do not establish new corpus, performance or whole-project parity results.
+The 0.8.0 resource and broad-transfer findings below remain open work.
+
+## Reading/Decoding Checkpoint: Version 0.8.0
 
 The [reading/decoding plan](read_decode_parity.md) records all RD0–RD6 batches
 against C++ 0.4.127. RD5 adds the remaining bounded BMFF scene/derived-image
@@ -296,7 +324,7 @@ semantics. C++ ownership and presentation APIs need not be reproduced.
 | W1 | Typed authoring | C++ `create_metadata_store()` preflights, copies, validates and publishes atomically. C has typed value makers, explicit array byte order, and candidate-based edit publication. | Implemented bounded typed helpers and output-preserving transactions; see `authoring.md`. Owning logical builders and FlatHost wrappers remain above C; reusable metadata construction and validation semantics remain C targets. |
 | W2 | Canonical TIFF/EXIF serialization | C++ `serialize_exif_tiff()` is target-neutral and honors supported wire hints. C's public serializer builds typed TIFF; internal transfer payloads apply target framing above it. | Implemented `omc_serialize_exif_tiff()` with direct tests and exact C++ byte comparison. Carrier wrappers reuse canonical output; TIFF/BigTIFF retain target layout. |
 | W3 | EXIF/IPTC to portable XMP | C already has projection, all three conflict policies, custom namespaces and managed-namespace canonicalization | Paired IPTC creation/digital-creation projection implemented and tested. Broader structured XMP parity remains partial. |
-| W4 | Explicit XMP to native metadata | C++ has date, technical, capture, descriptive and target-bound geometry translation. C exposes these groups through `omc_translate_xmp()`. | Implemented all five bounded groups in `omc_translation.h`, with one transaction and focused C++ EXIF/IPTC differential tests. Broader mappings remain separate batches. |
+| W4 | Explicit XMP to native metadata | C++ 0.4.128 has the original five translation groups plus flat IPTC locations. C exposes the original groups through `omc_translate_xmp()` and locations through `omc_translate_xmp_location()`. | Original groups and five location mappings implemented. The 0.9.0 location gate adds 69 paired fixtures and JPEG/TIFF persistence. Later upstream mappings remain separate batches. |
 | W5 | Native IPTC-IIM emission | Internal `omc_transfer_build_iptc_iim()` emits datasets; JPEG IRB and TIFF tag `33723` carrier paths exist | Present bounded mechanism. Reuse it for descriptive/date translation; add charset, repetition, tombstone and stale-IRB checks. A separate public IPTC writer is not a prerequisite. |
 | W6 | Target image facts and transfer safety | C has target image spec, CompatibleFile/RenderedImage and diagnostics; C++ has wider source-processing classification and a RAW-data descriptor | Partial. C has no source descriptor or explicit lens/preview/general-processing audit categories. Verify selected fields through actual transfer paths; share classification with interpretation/query as those operations are ported. Full query completion need not block a bounded safety fix. |
 | W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h` and direct tests | Present bounded pipeline. Existing `omc_transfer_compile()` does not imply parity with C++ compiled worker/handoff APIs. Extend the pipeline rather than replacing it. |
@@ -453,6 +481,7 @@ expression engine or five independent transaction frameworks.
 | B2b: capture EXIF | ExposureTime, FNumber, ISO, FocalLength, ExposureBiasValue | Exact integer/rational conversion; native SHORT/RATIONAL/SRATIONAL; aliases, overflow, zero denominators, no floating approximation |
 | B2c: descriptive IPTC | Title, description, creators, keywords, rights, credit, source | Default language, numeric index order, byte limits, UTF-8 charset declaration/conflicts, duplicate sources and stale raw IRB precedence |
 | B2d: target geometry | Orientation and complete stored width/height groups | Host target spec, consistent aliases, partial/deleted groups, no orientation-driven dimension swap |
+| B2e: flat IPTC locations (complete in 0.9.0) | City, Location, State, Country, CountryCode from C++ 0.4.128 | Exact groups, dirty/active duplicates, byte limits, code syntax, native wire order, charset budget, failure atomicity and JPEG/TIFF persistence |
 
 All slices use the C++ `DirtyOnly` default and explicit PreserveExisting,
 FailOnConflict and ReplaceExisting semantics for complete native groups.

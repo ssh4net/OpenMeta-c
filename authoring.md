@@ -85,17 +85,80 @@ DigitalCreationDate/DigitalCreationTime. Invalid dates are skipped. Missing
 or invalid time values produce date-only output. Existing XMP conflict policy
 continues to control generated-versus-existing values.
 
+## Explicit IPTC location writeback (0.9.0)
+
+Call `omc_location_translation_opts_init()` and then
+`omc_translate_xmp_location(source, out, &opts)`. This separate entry point
+matches the five location mappings introduced by C++ 0.4.128. Existing
+`omc_translate_xmp()` options, result layouts and default mappings are unchanged.
+The new call uses the existing edit transaction and output publication path.
+
+| Exact XMP property | Native IPTC dataset | Maximum UTF-8 bytes |
+| --- | --- | --- |
+| `photoshop:City` | 2:90 | 32 |
+| `Iptc4xmpCore:Location` | 2:92 | 32 |
+| `photoshop:State` | 2:95 | 32 |
+| `photoshop:Country` | 2:101 | 64 |
+| `Iptc4xmpCore:CountryCode` | 2:100 | 3 |
+
+CountryCode accepts exactly two or three uppercase ASCII letters. No country
+lookup or name/code agreement is imposed. Indexed, qualified, GPS and structured
+location properties do not select these mappings. Logical text must contain
+valid UTF-8/XML characters and use the C ASCII or UTF-8 encoding label.
+
+The default selects all five mappings and dirty groups, with fail-on-conflict
+behavior. A dirty member makes the complete exact-path group eligible; two
+active values are ambiguous even when one is clean. Dirty tombstones select
+removal. Replace updates the first native entry by wire order and entry ID,
+then removes duplicates. Preserve retains the complete existing native group.
+New entries copy source provenance; updates keep native provenance.
+
+Non-ASCII output adds IPTC CodedCharacterSet `ESC % G` when needed. Existing
+charset declarations must agree. Unowned native IPTC must be ASCII before
+promotion. The text budget includes active selected source text and native
+IPTC bytes inspected for promotion, including native values being replaced.
+
+Limits default to 1024 source properties, 6 additions (five values and charset),
+4096 operations and 8 MiB of inspected text. Callers may reduce them. Planning
+uses five fixed records and performs no allocation. Edit construction and
+publication use the existing owning arenas. The call therefore does not
+promise allocation-free execution. As with the existing translator, stores
+are bounded to 200000 entries. Rejection preserves source, previous output
+and its borrowed views. `OMC_TRANSLATION_VALUE_TOO_LONG` reports native wire
+limits; `OMC_TRANSLATION_LIMIT` covers source, entry and operation budgets.
+
 ## Verification and remaining scope
 
 The Clang 20 direct suite covers failure preservation, typed arrays,
 validation, canonical size/prefix behavior, native carrier readback, paired
 date/time projection, and translation conflicts. The focused
 `omc_test_authoring_parity` test compares canonical EXIF bytes and ordered IPTC
-records with C++ 0.4.127.
+records with C++ 0.4.127 at the original authoring checkpoint.
 
-The larger legacy differential harness has known failures and is not a green
-acceptance gate. `omc_test_parity --all` explicitly enables its historical
-transfer/persist cases. Nested structured XMP decoding, broader source
-processing classification, rich BMFF summaries, and later native translation
-groups are not established by the authoring gate.
+The 0.9.0 gate uses frozen C++ commit
+`ba99484b8be087012f9c44a1194ed828d060a0d5` (0.4.128). The direct location target
+covers 70 fixtures, immutable source bytes, rejected-output preservation,
+default behavior and invalid output arguments. The optional
+`omc_test_location_parity` compares 69 shared fixtures, including statuses,
+failure mapping/source, counters, native values, ordering and provenance. One
+additional C mapping-mask rejection has no C++ boolean-option equivalent.
+JPEG and TIFF replacement/removal tests persist files and reread native IPTC;
+they preserve captions and prevent stale raw IRB data from restoring locations.
+Clang 20 Release static with compression and shared without compression each
+pass 52/52 targets. ASan/UBSan and native MSVC x64/Win32 each pass 39/39 direct
+targets. Native builds retain existing CRT/decoder warnings. Clang 20 `-O3
+-fstack-usage` reports a 584-byte frame for `omc_translate_xmp_location()` on
+WSL x64; this measures that function, not the full call stack or embedded use.
 
+For a frozen reference build, set `OMC_OPENMETA_DIR` to its build directory
+and `OMC_OPENMETA_SOURCE_DIR` to the matching source snapshot. The latter is
+optional for the usual sibling checkout. The location gate is available when
+the reference headers expose its contract. When changing reference versions
+in an existing build, clear `OMC_HAVE_CPP_LOCATION_TRANSLATION` or use a fresh
+build directory.
+
+The larger legacy transfer/persist differential inventory still has known
+failures. `omc_test_parity --all` explicitly enables those historical cases.
+The separate reading/decoding checkpoint covers structured XMP and bounded
+BMFF summaries. Broader source-processing classification and native mapping
+groups beyond the pinned reference remain separate acceptance work.

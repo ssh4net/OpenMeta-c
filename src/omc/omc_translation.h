@@ -34,6 +34,15 @@ OMC_EXTERN_C_BEGIN
 #define OMC_TRANSLATE_DESCRIPTIVE 0x0FE000U
 #define OMC_TRANSLATE_GEOMETRY 0x300000U
 
+/* Location mappings are selected only by omc_translate_xmp_location. The
+ * existing OMC_TRANSLATE_ALL and omc_translate_xmp defaults stay unchanged. */
+#define OMC_TRANSLATE_CITY 0x00400000U
+#define OMC_TRANSLATE_SUBLOCATION 0x00800000U
+#define OMC_TRANSLATE_STATE 0x01000000U
+#define OMC_TRANSLATE_COUNTRY 0x02000000U
+#define OMC_TRANSLATE_COUNTRY_CODE 0x04000000U
+#define OMC_TRANSLATE_LOCATION 0x07C00000U
+
 typedef enum omc_translation_conflict {
     OMC_TRANSLATION_PRESERVE = 0,
     OMC_TRANSLATION_FAIL = 1,
@@ -51,7 +60,8 @@ typedef enum omc_translation_status {
     OMC_TRANSLATION_TARGET_REQUIRED,
     OMC_TRANSLATION_TARGET_MISMATCH,
     OMC_TRANSLATION_LIMIT,
-    OMC_TRANSLATION_NO_MEMORY
+    OMC_TRANSLATION_NO_MEMORY,
+    OMC_TRANSLATION_VALUE_TOO_LONG
 } omc_translation_status;
 
 typedef struct omc_translation_opts {
@@ -64,6 +74,16 @@ typedef struct omc_translation_opts {
     omc_u32 max_text_bytes_per_property;
     omc_u64 max_total_text_bytes;
 } omc_translation_opts;
+
+typedef struct omc_location_translation_opts {
+    omc_u32 mappings;
+    int all_sources;
+    omc_translation_conflict conflict;
+    omc_u32 max_source_properties;
+    omc_u32 max_added_entries;
+    omc_u32 max_operations;
+    omc_u64 max_total_text_bytes;
+} omc_location_translation_opts;
 
 typedef struct omc_translation_res {
     omc_translation_status status;
@@ -87,6 +107,19 @@ OMC_API void omc_translation_opts_init(omc_translation_opts *opts);
 OMC_API omc_translation_res omc_translate_xmp(
     const omc_store *source, omc_store *out, const omc_translation_opts *opts,
     const omc_transfer_target_image_spec *target);
+
+OMC_API void
+omc_location_translation_opts_init(omc_location_translation_opts *opts);
+
+/* Explicit five-field IPTC location writeback, with the same source/output
+ * ownership contract as omc_translate_xmp. Exact unqualified XMP paths only.
+ * Defaults: all five mappings, dirty groups, fail on native conflict; limits
+ * of 1024 sources, 6 additions, 4096 operations and 8 MiB inspected text.
+ * Limits may be reduced. Dirty tombstones remove native values with REPLACE.
+ * CountryCode accepts exactly two or three uppercase ASCII letters. */
+OMC_API omc_translation_res
+omc_translate_xmp_location(const omc_store *source, omc_store *out,
+                           const omc_location_translation_opts *opts);
 
 OMC_EXTERN_C_END
 #endif

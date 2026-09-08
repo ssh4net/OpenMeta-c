@@ -28,7 +28,8 @@ The [porting plan](porting_plan.md) records the source-reviewed baseline as of
 parity matrix, and acceptance gates. Earlier percentage estimates based on a
 narrower core boundary do not measure this scope. The
 [authoring contract](authoring.md) documents typed construction, detached
-validation, canonical EXIF, and the five explicit reverse-translation groups.
+validation, canonical EXIF, the original five reverse-translation groups and
+the explicit IPTC location API added in version 0.9.0.
 Versions 0.2.0 and 0.8.0 change `omc_val` and `omc_xmp_limits`, respectively;
 rebuild consumers and initialize options with their public initializers.
 
@@ -37,6 +38,12 @@ JUMBF and MakerNote parity fixes, standalone XMP callbacks and Canon CMT3.
 The [reading/decoding checkpoint](read_decode_parity.md) records 208 exact
 public cases per access mode and 138 exact comparisons over 69 selected files.
 These case counts do not imply universal camera or embedded acceptance.
+
+Version 0.9.0 ports the five flat IPTC location mappings from C++ 0.4.128:
+City, Location, State, Country and CountryCode. It adds bounded explicit
+writeback with conflict, removal and UTF-8 policies, 69 paired C/C++ cases,
+and JPEG/TIFF persistence checks. See the [authoring contract](authoring.md)
+for `omc_translate_xmp_location()` and its limits.
 
 In practice:
 

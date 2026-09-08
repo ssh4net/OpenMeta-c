@@ -2,6 +2,8 @@
 #include "omc/omc_read.h"
 #include "omc/omc_transfer.h"
 #include "omc/omc_transfer_persist.h"
+#include "omc/omc_translation.h"
+#include "omc/omc_iptc.h"
 
 #include "omc_test_assert.h"
 #if defined(_WIN32)
@@ -2249,6 +2251,118 @@ execute_transfer(const omc_u8* file_bytes, omc_size file_size,
 }
 
 static void
+test_location_persist(int remove_values, int tiff)
+{
+    static const char *const paths[] = {"City", "Location", "State", "Country", "CountryCode"};
+    static const char *const values[] = {"\344\272\254\351\203\275", "Garden", "Kyoto", "Japan", "JP"};
+    static const omc_u16 datasets[] = {90U, 92U, 95U, 101U, 100U};
+    static const omc_u8 stale[] = {0x1CU, 2U, 90U, 0U, 3U, 'O', 'L', 'D'};
+    omc_store source;
+    omc_store translated;
+    omc_store decoded;
+    omc_store iim;
+    const omc_store *native;
+    const omc_entry *entry;
+    omc_entry e;
+    omc_u32 i;
+    omc_u8 file[4096];
+    omc_size size;
+    omc_byte_ref ref;
+    omc_const_bytes payload;
+    omc_location_translation_opts opts;
+    omc_translation_res translation;
+    omc_transfer_prepare_opts prepare;
+    omc_transfer_exec exec;
+    omc_transfer_res result;
+    omc_transfer_persist_opts persist;
+    omc_transfer_persist_res persisted;
+    omc_arena edited;
+    omc_arena sidecar;
+    omc_arena meta;
+    omc_arena reread;
+    char path[OMC_TEST_TEMP_PATH_CAP];
+    omc_store_init(&source);
+    omc_store_init(&translated);
+    omc_store_init(&decoded);
+    omc_store_init(&iim);
+    omc_arena_init(&edited);
+    omc_arena_init(&sidecar);
+    omc_arena_init(&meta);
+    omc_arena_init(&reread);
+    for (i = 0U; i < 5U; ++i) {
+        add_xmp_text_entry(&source, i == 1U || i == 4U ?
+            "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/" :
+            "http://ns.adobe.com/photoshop/1.0/", paths[i], values[i]);
+        source.entries[source.entry_count - 1U].flags = OMC_ENTRY_FLAG_DIRTY |
+            (remove_values ? OMC_ENTRY_FLAG_DELETED : 0U);
+        source.entries[source.entry_count - 1U].origin.block = OMC_INVALID_BLOCK_ID;
+        memset(&e, 0, sizeof(e));
+        omc_key_make_iptc_dataset(&e.key, 2U, datasets[i]);
+        omc_val_make_bytes(&e.value, append_store_bytes(&source.arena, "OLD"));
+        e.origin.block = OMC_INVALID_BLOCK_ID;
+        assert(omc_store_add_entry(&source, &e, NULL) == OMC_STATUS_OK);
+    }
+    omc_key_make_iptc_dataset(&e.key, 2U, 120U);
+    omc_val_make_bytes(&e.value, append_store_bytes(&source.arena, "Keep caption"));
+    assert(omc_store_add_entry(&source, &e, NULL) == OMC_STATUS_OK);
+    omc_key_make_photoshop_irb(&e.key, 0x0404U);
+    assert(omc_arena_append(&source.arena, stale, sizeof(stale), &ref) == OMC_STATUS_OK);
+    omc_val_make_bytes(&e.value, ref);
+    assert(omc_store_add_entry(&source, &e, NULL) == OMC_STATUS_OK);
+    omc_location_translation_opts_init(&opts);
+    opts.conflict = OMC_TRANSLATION_REPLACE;
+    translation = omc_translate_xmp_location(&source, &translated, &opts);
+    assert(translation.status == OMC_TRANSLATION_OK);
+    assert(translation.groups_translated == 5U);
+    assert(translation.entries_removed == (remove_values ? 5U : 0U));
+    assert(translation.utf8_charset_added == !remove_values);
+    size = tiff ? make_test_tiff_le_with_make_only(file) :
+                  make_test_jpeg_with_old_xmp_comment_and_irb(file);
+    build_temp_path(path, sizeof(path), tiff ? ".tif" : ".jpg");
+    omc_transfer_prepare_opts_init(&prepare);
+    prepare.format = tiff ? OMC_SCAN_FMT_TIFF : OMC_SCAN_FMT_JPEG;
+    prepare.writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
+    execute_transfer(file, size, &translated, &prepare, &edited, &sidecar, &exec, &result);
+    omc_transfer_persist_opts_init(&persist);
+    persist.output_path = path;
+    assert(omc_transfer_persist(edited.data, edited.size, sidecar.data, sidecar.size,
+        &result, &persist, &meta, &persisted) == OMC_STATUS_OK);
+    assert(persisted.status == OMC_TRANSFER_OK && persisted.output_status == OMC_TRANSFER_OK);
+    assert_read_file_bytes(path, &reread);
+    read_store_from_bytes(reread.data, reread.size, &decoded);
+    native = &decoded;
+    if (tiff) {
+        entry = find_exif_entry(&decoded, "ifd0", 0x83BBU);
+        assert(entry != NULL);
+        payload = omc_arena_view(&decoded.arena, entry->value.u.ref);
+        assert(omc_iptc_dec(payload.data, payload.size, &iim, OMC_INVALID_BLOCK_ID,
+                            0U, NULL).status == OMC_IPTC_OK);
+        native = &iim;
+    }
+    assert_u8_blob_value(native, find_iptc_entry(native, 2U, 120U, 0U),
+                          (const omc_u8 *)"Keep caption", 12U);
+    for (i = 0U; i < 5U; ++i) {
+        entry = find_iptc_entry(native, 2U, datasets[i], 0U);
+        if (remove_values)
+            assert(entry == NULL);
+        else {
+            assert_u8_blob_value(native, entry, (const omc_u8 *)values[i],
+                                 (omc_u32)strlen(values[i]));
+            assert(find_iptc_entry(native, 2U, datasets[i], 1U) == NULL);
+        }
+    }
+    assert(remove(path) == 0);
+    omc_arena_fini(&reread);
+    omc_arena_fini(&meta);
+    omc_arena_fini(&sidecar);
+    omc_arena_fini(&edited);
+    omc_store_fini(&iim);
+    omc_store_fini(&decoded);
+    omc_store_fini(&translated);
+    omc_store_fini(&source);
+}
+
+static void
 exercise_transfer_persist_case(
     omc_transfer_persist_fixture_builder builder, const char* output_ext,
     omc_xmp_writeback_mode writeback_mode,
@@ -4330,6 +4444,10 @@ test_transfer_persist_dng_template_sidecar_only_requires_output_path(void)
 int
 main(void)
 {
+    test_location_persist(0, 0);
+    test_location_persist(0, 1);
+    test_location_persist(1, 0);
+    test_location_persist(1, 1);
     test_transfer_persist_writes_png_output_and_sidecar();
     test_transfer_persist_writes_bigtiff_output_and_sidecar_with_preserve();
     test_transfer_persist_writes_heif_output_and_sidecar_with_strip();
