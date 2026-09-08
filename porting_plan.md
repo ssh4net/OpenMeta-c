@@ -79,16 +79,20 @@ not suppress or relabel those failures. The initial positional batch is now impl
 See [authoring.md](authoring.md) for contracts and bounded coverage. The matrix
 below retains source-review detail where broader acceptance remains open.
 
-## Current Reading/Decoding Checkpoint: Version 0.6.0
+## Current Reading/Decoding Checkpoint: Version 0.7.0
 
 The [reading/decoding plan](read_decode_parity.md) pins C++ 0.4.127 and orders
 the remaining convergence work. Its first batch adds PNG/WebP callback reads,
 split JUMBF carriers, four JUMBF output corrections and working Brotli discovery.
 RD2 adds direct TIFF values, raw header variants and source MakerNote routes,
-with 80 TIFF differential fixtures. RD3 adds reusable source scanners/payload extraction and JP2/JXL/BMFF input.
-Release direct/focused gates pass 42/42; sanitizer and dependency-free direct
-gates each pass 37/37. The nine default BMFF failures and 266 broad mismatch
-reports are unchanged from the fresh baseline. Full stage parity remains open.
+with 80 TIFF differential fixtures. RD3 adds reusable source scanners/payload
+extraction and JP2/JXL/BMFF input. RD4 adds GIF, EXR, CIFF and native/declared
+RAF/X3F input, with 18 decoded-record and five scanner/payload C++ comparisons.
+Release and dependency-disabled direct/focused gates each pass 44/44; the
+sanitizer direct gate passes 38/38. RD4 also fixes the RD3 dependency-disabled
+capacity failure documented in the detailed plan. The nine default BMFF failures
+and 266 broad mismatch reports remain unchanged. RD5 decoder deltas and RD6
+stage acceptance remain open.
 
 ## Prior Core Checkpoint: Version 0.3.0
 

@@ -65,6 +65,7 @@ set(OMC_SOURCES
   read/omc_exr.c
   read/omc_exif.c
   read/omc_exif_name.c
+  read/omc_native.c
   read/omc_input.c
   read/omc_icc.c
   read/omc_iptc.c

@@ -93,7 +93,7 @@ Host make(unsigned format, uint64_t gap) {
 void equal(const omc_blk_ref& a, const openmeta::ContainerBlockRef& b) {
     assert(static_cast<int>(a.kind) == static_cast<int>(b.kind));
     assert(a.compression == OMC_BLK_COMP_NONE && b.compression == openmeta::BlockCompression::None);
-    assert(static_cast<int>(a.chunking) - (a.chunking == OMC_BLK_CHUNK_JPEG_XMP_EXT ? 1 : 0) == static_cast<int>(b.chunking));
+    assert(static_cast<int>(a.chunking) - (a.chunking >= OMC_BLK_CHUNK_JPEG_XMP_EXT ? 1 : 0) == static_cast<int>(b.chunking));
     assert(a.outer_offset == b.outer_offset && a.outer_size == b.outer_size);
     assert(a.data_offset == b.data_offset && a.data_size == b.data_size);
     assert(a.id == b.id && a.group == b.group && a.part_index == b.part_index && a.part_count == b.part_count);
@@ -162,5 +162,68 @@ bool run_omc_box_source_parity() {
     for (unsigned format = 0; format < 3; ++format)
         for (uint64_t gap : {uint64_t{0}, uint64_t{8} << 30U}) check(format, gap);
     check(3, 0); check(4, 0);
+    return true;
+}
+
+/* RD4: use the reference's declared RAW fixtures, and forbid JPEG entropy. */
+#include "omc_test_raw_fixture.h"
+bool run_omc_raw_source_parity();
+bool run_omc_raw_source_parity() {
+    for (unsigned kind = 0; kind < 5; ++kind) {
+        Host h;
+        if (kind < 4) {
+            std::vector<std::byte> fixture;
+            if (kind == 0) fixture = omc_test_fixture::raf_with_native_directory();
+            else if (kind == 2) fixture = omc_test_fixture::x3f_with_native_properties();
+            else {
+                const auto embedded = kind == 1 ? omc_test_fixture::raf_with_embedded_metadata()
+                                                : omc_test_fixture::x3f_with_embedded_metadata();
+                fixture = embedded.bytes;
+                h.body_begin = embedded.entropy_offset;
+                h.body_end = embedded.entropy_offset + embedded.entropy_size;
+            }
+            h.bytes.assign(reinterpret_cast<const omc_u8*>(fixture.data()),
+                           reinterpret_cast<const omc_u8*>(fixture.data()) + fixture.size());
+        } else {
+            literal(h.bytes, "GIF89a", 6); h.bytes.resize(13, 0);
+            number(h.bytes, 0x2c, 1); h.bytes.resize(23, 0);
+            number(h.bytes, 2, 1); number(h.bytes, 200, 1);
+            h.body_begin = h.bytes.size(); h.bytes.resize(h.bytes.size() + 200, 0xab); h.body_end = h.bytes.size();
+            number(h.bytes, 0, 1); number(h.bytes, 0x21fe, 2); number(h.bytes, 4, 1);
+            literal(h.bytes, "test", 4); number(h.bytes, 0x003b, 2);
+        }
+        omc_source_range range{omc_source_callback(h.bytes.size() + 37U, &h, read, 0), 37U, h.bytes.size()};
+        const auto reference = openmeta::make_random_access_source_range(openmeta::make_callback_random_access_source(
+            h.bytes.size() + 37U, &h, cpp_read, false), 37U, h.bytes.size());
+        std::array<omc_blk_ref, 16> blocks{};
+        std::array<openmeta::ContainerBlockRef, 16> cpp_blocks{};
+        std::array<std::byte, 512> window{}, values{};
+        std::array<omc_u8, 512> payload{};
+        std::array<uint32_t, 16> indices{};
+        openmeta::ContainerRandomAccessScratch scratch;
+        scratch.read_window = window; scratch.window_options.minimum_read_bytes = 0;
+        omc_source_state state{};
+        const auto a = omc_scan_source(&range, OMC_SCAN_FMT_UNKNOWN, blocks.data(), blocks.size(), &state, nullptr);
+        const auto b = kind < 2 ? openmeta::scan_raf_random_access(reference, cpp_blocks, scratch)
+                      : kind < 4 ? openmeta::scan_x3f_random_access(reference, cpp_blocks, scratch)
+                      : openmeta::scan_gif_random_access(reference, cpp_blocks, scratch);
+        assert(state.code == OMC_SOURCE_OK && b.complete());
+        assert(static_cast<int>(a.status) == static_cast<int>(b.scan.status));
+        assert(a.written == b.scan.written && a.needed == b.scan.needed);
+        for (uint32_t i = 0; i < a.written; ++i) {
+            equal(blocks[i], cpp_blocks[i]);
+            openmeta::PayloadRandomAccessScratch ps;
+            ps.read_window = window; ps.window_options.minimum_read_bytes = 0;
+            const auto c = omc_pay_ext_source(&range, blocks.data(), a.written, i, payload.data(), payload.size(),
+                indices.data(), indices.size(), nullptr, &state, nullptr, nullptr);
+            const auto d = openmeta::extract_payload_random_access(reference, std::span(cpp_blocks).first(a.written), i,
+                values, indices, ps, {});
+            assert(state.code == OMC_SOURCE_OK && d.complete());
+            assert(static_cast<int>(c.status) == static_cast<int>(d.payload.status));
+            assert(c.written == d.payload.written && c.needed == d.payload.needed);
+            assert(std::memcmp(payload.data(), values.data(), c.written) == 0);
+        }
+        std::printf("RD4 C/C++ source scanner kind=%u descriptors=%u\n", kind, a.written);
+    }
     return true;
 }

@@ -34,16 +34,23 @@ typedef struct omc_read_source_res {
     omc_size scratch_used;
     omc_u64 value_scratch_needed;
     omc_u32 nested_payloads_skipped;
+    /* Optional undeclared RAF/X3F prefix searches are not run on callbacks. */
+    omc_u32 undeclared_searches_skipped;
 } omc_read_source_res;
 
 OMC_API void omc_read_source_opts_init(omc_read_source_opts *opts);
 /* Borrowed fixed-size source and caller-owned workspace. Callback conversion
- * supports JPEG, PNG, WebP, JP2, JXL, BMFF and TIFF/BigTIFF/DNG.
+ * supports JPEG, PNG, WebP, GIF, JP2, JXL, BMFF, TIFF/BigTIFF/DNG,
+ * EXR headers, CRW/CIFF and declared RAF/X3F metadata.
  * JPEG stops at SOS/EOI. Chunk/box scanners skip image and media bodies.
  * Metadata is decoded one logical payload at a time; compressed input uses
  * metadata as a bounded feed buffer. PNG text framing must also fit metadata.
  * TIFF/BigTIFF/RW2/ORF read directories and values at their original offsets.
  * Metadata scratch holds one value (combined GeoTIFF parameters when needed).
+ * RAF/X3F native fields can add entries without scanned payload blocks. Their
+ * callbacks omit undeclared prefix searches; undeclared_searches_skipped counts
+ * those optional search routes, not known missing entries. EXR measurement
+ * and decode stop at the header boundary. CIFF reads declared value leaves.
  * Source-relative MakerNotes reuse the typed decoder; inspect decoded.exif,
  * value_scratch_needed and nested_payloads_skipped for incomplete results.
  * Memory sources retain the existing contiguous reader and all its formats.

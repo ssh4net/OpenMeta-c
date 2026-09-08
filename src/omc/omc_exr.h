@@ -2,6 +2,7 @@
 #define OMC_EXR_H
 
 #include "omc/omc_base.h"
+#include "omc/omc_source.h"
 #include "omc/omc_store.h"
 #include "omc/omc_types.h"
 
@@ -48,6 +49,19 @@ OMC_API omc_exr_res
 omc_exr_meas(const omc_u8* exr_bytes, omc_size exr_size,
              const omc_exr_opts* opts);
 
+typedef struct omc_exr_source_res {
+    omc_exr_res decoded;
+    omc_u64 value_scratch_needed;
+    omc_size value_scratch_used;
+} omc_exr_source_res;
+/* Shared header traversal, one caller value buffer, no image-table reads.
+ * NULL store measures without reading attribute values. Decode failures retain
+ * partial entries. Source, scratch and store storage must be disjoint. */
+OMC_API omc_exr_source_res
+omc_exr_dec_source(const omc_source_range* range, omc_store* store,
+                    omc_u8* value, omc_size value_capacity,
+                    omc_source_state* state, const omc_source_limits* limits,
+                    omc_entry_flags flags, const omc_exr_opts* opts);
 OMC_EXTERN_C_END
 
 #endif

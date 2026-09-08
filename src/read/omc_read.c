@@ -1,3 +1,4 @@
+#include "read/omc_native.h"
 #include "read/omc_read_internal.h"
 #include "omc/omc_read.h"
 
@@ -1360,6 +1361,11 @@ omc_read_block_view(const omc_u8* file_bytes, omc_u64 file_size,
                                       payload, payload_cap, payload_scratch_indices,
                                       payload_scratch_cap, &work, source->state,
                                       source->limits, opts);
+        /* Preserve capacity failure even if a later unsupported backend has
+         * higher precedence in the legacy aggregate payload status. */
+        if (out_pay->status == OMC_PAY_TRUNCATED || out_pay->status == OMC_PAY_LIMIT ||
+            out_pay->status == OMC_PAY_NOMEM)
+            source->result->status = OMC_READ_SOURCE_LIMIT;
         if (block->compression != OMC_BLK_COMP_NONE) {
             omc_size used = block->data_size > work.stream_capacity ? work.stream_capacity : (omc_size)block->data_size;
             if (used > source->result->scratch_used) source->result->scratch_used = used;
@@ -1565,8 +1571,9 @@ omc_read_run(const omc_u8* file_bytes, omc_u64 file_size,
     entries_before = store->entry_count;
     casio_qvci_index = 0U;
     if (source != NULL) {
-        res.scan = omc_scan_source(source->range, source->format, out_blocks, block_cap,
-                                    source->state, source->limits);
+        if (source->format != OMC_SCAN_FMT_EXR)
+            res.scan = omc_scan_source(source->range, source->format, out_blocks, block_cap,
+                                        source->state, source->limits);
         if (source->format == OMC_SCAN_FMT_HEIF || source->format == OMC_SCAN_FMT_AVIF ||
             source->format == OMC_SCAN_FMT_CR3)
             omc_read_merge_bmff(&res.bmff, omc_bmff_dec_source(source->range, store,
@@ -1574,6 +1581,37 @@ omc_read_run(const omc_u8* file_bytes, omc_u64 file_size,
     } else {
         res.scan = omc_scan_auto(file_bytes, (omc_size)file_size, out_blocks, block_cap);
         omc_read_merge_bmff(&res.bmff, omc_bmff_dec(file_bytes, (omc_size)file_size, store, &use_opts->bmff));
+    }
+
+    {
+        omc_scan_fmt native_format = OMC_SCAN_FMT_UNKNOWN;
+        omc_input input;
+        omc_exif_source_res native;
+        if (source != NULL) native_format = source->format;
+        else if (file_size >= 16U && memcmp(file_bytes, "FUJIFILMCCD-RAW ", 16U) == 0)
+            native_format = OMC_SCAN_FMT_RAF;
+        else if (file_size >= 4U && memcmp(file_bytes, "FOVb", 4U) == 0)
+            native_format = OMC_SCAN_FMT_X3F;
+        if (native_format == OMC_SCAN_FMT_RAF || native_format == OMC_SCAN_FMT_X3F) {
+            if (source == NULL) omc_input_memory(&input, file_bytes, (omc_size)file_size);
+            else {
+                memset(&input, 0, sizeof(input));
+                input.range = *source->range; input.state = source->state;
+                input.limits = source->limits;
+                input.stream = source->workspace->metadata;
+                input.stream_capacity = source->workspace->metadata_capacity;
+                source->result->undeclared_searches_skipped = 1U;
+            }
+            native = omc_native_dec(&input, native_format, store, &use_opts->exif.limits);
+            if (native.decoded.status != OMC_EXIF_UNSUPPORTED)
+                omc_read_merge_exif(&res.exif, native.decoded);
+            if (native.decoded.entries_decoded != 0U && res.scan.status == OMC_SCAN_UNSUPPORTED)
+                res.scan.status = OMC_SCAN_OK;
+            if (source != NULL) {
+                source->result->value_scratch_needed = native.value_scratch_needed;
+                source->result->scratch_used = native.value_scratch_used;
+            }
+        }
     }
 
     for (i = 0U; i < res.scan.written; ++i) {
@@ -1682,8 +1720,21 @@ omc_read_run(const omc_u8* file_bytes, omc_u64 file_size,
         } else if (block->kind == OMC_BLK_CIFF) {
             omc_exif_res ciff_res;
 
-            ciff_res = omc_ciff_dec(file_bytes, file_size, store, block_id,
-                                    &use_opts->exif);
+            if (source == NULL)
+                ciff_res = omc_ciff_dec(file_bytes, file_size, store, block_id, &use_opts->exif);
+            else {
+                omc_exif_source_workspace work;
+                omc_exif_source_res decoded;
+                work.value = source->workspace->metadata;
+                work.value_capacity = source->workspace->metadata_capacity;
+                decoded = omc_ciff_dec_source(source->range, store, block_id, &work,
+                                               source->state, source->limits, &use_opts->exif);
+                ciff_res = decoded.decoded;
+                if (decoded.value_scratch_needed > source->result->value_scratch_needed)
+                    source->result->value_scratch_needed = decoded.value_scratch_needed;
+                if (decoded.value_scratch_used > source->result->scratch_used)
+                    source->result->scratch_used = decoded.value_scratch_used;
+            }
             omc_read_merge_exif(&res.exif, ciff_res);
         } else if (block->kind == OMC_BLK_XMP || block->kind == OMC_BLK_XMP_EXT) {
             omc_const_bytes block_view;
@@ -1906,6 +1957,16 @@ omc_read_run(const omc_u8* file_bytes, omc_u64 file_size,
     if (source == NULL)
         res.exr = omc_exr_dec(file_bytes, (omc_size)file_size, store, OMC_ENTRY_FLAG_NONE, &use_opts->exr);
 
+    if (source != NULL && source->format == OMC_SCAN_FMT_EXR) {
+        omc_exr_source_res decoded = omc_exr_dec_source(source->range, store,
+            source->workspace->metadata, source->workspace->metadata_capacity,
+            source->state, source->limits, OMC_ENTRY_FLAG_NONE, &use_opts->exr);
+        res.exr = decoded.decoded;
+        source->result->value_scratch_needed = decoded.value_scratch_needed;
+        source->result->scratch_used = decoded.value_scratch_used;
+        if (res.exr.status == OMC_EXR_UNSUPPORTED) res.scan.status = OMC_SCAN_UNSUPPORTED;
+        else if (res.exr.status == OMC_EXR_MALFORMED) res.scan.status = OMC_SCAN_MALFORMED;
+    }
     res.entries_added = (omc_u32)(store->entry_count - entries_before);
     return res;
 }

@@ -20,7 +20,7 @@
 #endif
 
 #define OMC_VERSION_MAJOR 0
-#define OMC_VERSION_MINOR 1
+#define OMC_VERSION_MINOR 7
 #define OMC_VERSION_PATCH 0
 
 #endif

@@ -1,3 +1,4 @@
+#include "read/omc_input.h"
 #include "read/omc_ciff.h"
 
 #include <string.h>
@@ -1366,12 +1367,29 @@ omc_ciff_add_derived_entries(omc_ciff_cfg cfg, const omc_exif_opts* opts,
 }
 
 static int
+omc_ciff_input_u16(omc_ciff_cfg cfg, omc_input* input, omc_u64 size,
+                    omc_u64 offset, omc_u16* value)
+{
+    omc_u64 n;
+    if (offset > size || 2U > size - offset || !omc_input_number(input, offset, 2U, cfg.little_endian, &n)) return 0;
+    *value = (omc_u16)n; return 1;
+}
+static int
+omc_ciff_input_u32(omc_ciff_cfg cfg, omc_input* input, omc_u64 size,
+                    omc_u64 offset, omc_u32* value)
+{
+    omc_u64 n;
+    if (offset > size || 4U > size - offset || !omc_input_number(input, offset, 4U, cfg.little_endian, &n)) return 0;
+    *value = (omc_u32)n; return 1;
+}
+
+static int
 omc_ciff_decode_directory(omc_ciff_cfg cfg, const omc_exif_opts* opts,
-                          const omc_u8* dir_bytes, omc_size dir_size,
+                          omc_input* dir_bytes, omc_u64 dir_size,
                           const char* ifd_name, omc_size ifd_size,
                           omc_store* store, omc_block_id block_id,
                           omc_exif_res* res, omc_u32 depth,
-                          omc_u32* dir_index)
+                          omc_u32* dir_index, omc_exif_source_res* source_result)
 {
     omc_u32 entry_off32;
     omc_u64 entry_off;
@@ -1381,7 +1399,7 @@ omc_ciff_decode_directory(omc_ciff_cfg cfg, const omc_exif_opts* opts,
     omc_u32 i;
     int any;
 
-    if (dir_bytes == (const omc_u8*)0 || ifd_name == (const char*)0
+    if (dir_bytes == NULL || ifd_name == (const char*)0
         || store == (omc_store*)0 || res == (omc_exif_res*)0
         || dir_index == (omc_u32*)0) {
         return 0;
@@ -1399,7 +1417,7 @@ omc_ciff_decode_directory(omc_ciff_cfg cfg, const omc_exif_opts* opts,
         return 0;
     }
 
-    if (!omc_ciff_read_u32(cfg, dir_bytes, dir_size, (omc_u64)dir_size - 4U,
+    if (!omc_ciff_input_u32(cfg, dir_bytes, dir_size, (omc_u64)dir_size - 4U,
                            &entry_off32)) {
         omc_ciff_update_status(res, OMC_EXIF_MALFORMED);
         return 0;
@@ -1410,7 +1428,7 @@ omc_ciff_decode_directory(omc_ciff_cfg cfg, const omc_exif_opts* opts,
         return 0;
     }
 
-    if (!omc_ciff_read_u16(cfg, dir_bytes, dir_size, entry_off, &entry_count)) {
+    if (!omc_ciff_input_u16(cfg, dir_bytes, dir_size, entry_off, &entry_count)) {
         omc_ciff_update_status(res, OMC_EXIF_MALFORMED);
         return 0;
     }
@@ -1437,9 +1455,11 @@ omc_ciff_decode_directory(omc_ciff_cfg cfg, const omc_exif_opts* opts,
         omc_u64 value_bytes;
         omc_u32 size32;
         omc_u32 off32;
+        const omc_u8* raw;
+        omc_u8 inline_value[8];
 
         eoff = entries_start + ((omc_u64)i * 10U);
-        if (!omc_ciff_read_u16(cfg, dir_bytes, dir_size, eoff, &raw_tag)) {
+        if (!omc_ciff_input_u16(cfg, dir_bytes, dir_size, eoff, &raw_tag)) {
             omc_ciff_update_status(res, OMC_EXIF_MALFORMED);
             break;
         }
@@ -1453,8 +1473,8 @@ omc_ciff_decode_directory(omc_ciff_cfg cfg, const omc_exif_opts* opts,
             value_off = eoff + 2U;
             value_bytes = 8U;
         } else if (loc_bits == 0x0000U) {
-            if (!omc_ciff_read_u32(cfg, dir_bytes, dir_size, eoff + 2U, &size32)
-                || !omc_ciff_read_u32(cfg, dir_bytes, dir_size, eoff + 6U,
+            if (!omc_ciff_input_u32(cfg, dir_bytes, dir_size, eoff + 2U, &size32)
+                || !omc_ciff_input_u32(cfg, dir_bytes, dir_size, eoff + 6U,
                                       &off32)) {
                 omc_ciff_update_status(res, OMC_EXIF_MALFORMED);
                 break;
@@ -1485,6 +1505,7 @@ omc_ciff_decode_directory(omc_ciff_cfg cfg, const omc_exif_opts* opts,
         if (omc_ciff_is_directory(raw_tag)) {
             char child_name[32];
             omc_size child_name_size;
+            omc_input child;
 
             if (!omc_ciff_make_child_token(child_name, sizeof(child_name),
                                            tag_id, *dir_index,
@@ -1493,10 +1514,11 @@ omc_ciff_decode_directory(omc_ciff_cfg cfg, const omc_exif_opts* opts,
                 continue;
             }
             *dir_index += 1U;
+            child = omc_input_slice(dir_bytes, value_off, value_bytes);
             (void)omc_ciff_decode_directory(
-                cfg, opts, dir_bytes + (omc_size)value_off, (omc_size)value_bytes,
+                cfg, opts, &child, value_bytes,
                 child_name, child_name_size, store, block_id, res,
-                depth + 1U, dir_index);
+                depth + 1U, dir_index, source_result);
             any = 1;
             continue;
         }
@@ -1506,12 +1528,34 @@ omc_ciff_decode_directory(omc_ciff_cfg cfg, const omc_exif_opts* opts,
             break;
         }
 
-        if (omc_ciff_add_raw_entry(cfg, opts, dir_bytes, ifd_name, ifd_size,
-                                   raw_tag, tag_id, value_off, value_bytes,
+        raw = inline_value;
+        if (value_bytes <= opts->limits.max_value_bytes) {
+            if (dir_bytes->range.source.contiguous_data != NULL) {
+                raw = dir_bytes->range.source.contiguous_data +
+                      (omc_size)(dir_bytes->range.source_offset + value_off);
+            } else {
+                omc_u8* destination = inline_value;
+                if (value_bytes > sizeof(inline_value)) {
+                    if (value_bytes > dir_bytes->stream_capacity) {
+                        if (value_bytes > source_result->value_scratch_needed)
+                            source_result->value_scratch_needed = value_bytes;
+                        omc_ciff_set_limit(res, OMC_EXIF_LIM_VALUE_COUNT, tag_id);
+                        continue;
+                    }
+                    destination = dir_bytes->stream;
+                    if (value_bytes > source_result->value_scratch_used)
+                        source_result->value_scratch_used = (omc_size)value_bytes;
+                }
+                if (!omc_input_read(dir_bytes, value_off, destination, (omc_size)value_bytes)) return any;
+                raw = destination;
+            }
+        }
+        if (omc_ciff_add_raw_entry(cfg, opts, raw, ifd_name, ifd_size,
+                                   raw_tag, tag_id, 0U, value_bytes,
                                    store, block_id, i, res)) {
             if (value_bytes <= opts->limits.max_value_bytes) {
                 omc_ciff_add_derived_entries(cfg, opts, ifd_name, ifd_size,
-                                             tag_id, dir_bytes + (omc_size)value_off,
+                                             tag_id, raw,
                                              (omc_size)value_bytes, store,
                                              block_id, i, res);
             } else {
@@ -1524,10 +1568,10 @@ omc_ciff_decode_directory(omc_ciff_cfg cfg, const omc_exif_opts* opts,
     return any;
 }
 
-omc_exif_res
-omc_ciff_dec(const omc_u8* file_bytes, omc_size file_size,
+static omc_exif_res
+omc_ciff_run(omc_input* file_bytes, omc_u64 file_size,
              omc_store* store, omc_block_id source_block,
-             const omc_exif_opts* opts)
+             const omc_exif_opts* opts, omc_exif_source_res* source_result)
 {
     omc_exif_opts local_opts;
     const omc_exif_opts* use_opts;
@@ -1536,6 +1580,7 @@ omc_ciff_dec(const omc_u8* file_bytes, omc_size file_size,
     omc_u32 root_off;
     omc_u32 dir_index;
     int any;
+    omc_input root;
 
     omc_ciff_init_res(&res);
 
@@ -1546,7 +1591,7 @@ omc_ciff_dec(const omc_u8* file_bytes, omc_size file_size,
         use_opts = opts;
     }
 
-    if (file_bytes == (const omc_u8*)0 || store == (omc_store*)0) {
+    if (file_bytes == NULL || store == (omc_store*)0) {
         res.status = OMC_EXIF_MALFORMED;
         return res;
     }
@@ -1554,19 +1599,19 @@ omc_ciff_dec(const omc_u8* file_bytes, omc_size file_size,
         return res;
     }
 
-    if (file_bytes[0] == (omc_u8)'I' && file_bytes[1] == (omc_u8)'I') {
+    if (omc_input_byte(file_bytes, 0U) == (omc_u8)'I' && omc_input_byte(file_bytes, 1U) == (omc_u8)'I') {
         cfg.little_endian = 1;
-    } else if (file_bytes[0] == (omc_u8)'M' && file_bytes[1] == (omc_u8)'M') {
+    } else if (omc_input_byte(file_bytes, 0U) == (omc_u8)'M' && omc_input_byte(file_bytes, 1U) == (omc_u8)'M') {
         cfg.little_endian = 0;
     } else {
         return res;
     }
 
-    if (memcmp(file_bytes + 6U, "HEAPCCDR", 8U) != 0) {
+    if (!omc_input_match(file_bytes, 6U, "HEAPCCDR", 8U)) {
         return res;
     }
 
-    if (!omc_ciff_read_u32(cfg, file_bytes, file_size, 2U, &root_off)) {
+    if (!omc_ciff_input_u32(cfg, file_bytes, file_size, 2U, &root_off)) {
         res.status = OMC_EXIF_MALFORMED;
         return res;
     }
@@ -1576,12 +1621,41 @@ omc_ciff_dec(const omc_u8* file_bytes, omc_size file_size,
     }
 
     dir_index = 0U;
-    any = omc_ciff_decode_directory(cfg, use_opts, file_bytes + root_off,
-                                    file_size - (omc_size)root_off,
+    root = omc_input_slice(file_bytes, root_off, file_size - root_off);
+    any = omc_ciff_decode_directory(cfg, use_opts, &root,
+                                    file_size - root_off,
                                     "ciff_root", 9U, store, source_block,
-                                    &res, 0U, &dir_index);
+                                    &res, 0U, &dir_index, source_result);
     if (any) {
         omc_ciff_update_status(&res, OMC_EXIF_OK);
     }
+    return res;
+}
+
+omc_exif_res
+omc_ciff_dec(const omc_u8* bytes, omc_size size, omc_store* store,
+               omc_block_id block, const omc_exif_opts* opts)
+{
+    omc_input input;
+    omc_input_memory(&input, bytes, size);
+    return omc_ciff_run(bytes == NULL ? NULL : &input, size, store, block, opts, NULL);
+}
+omc_exif_source_res
+omc_ciff_dec_source(const omc_source_range* range, omc_store* store, omc_block_id block,
+                     const omc_exif_source_workspace* workspace, omc_source_state* state,
+                     const omc_source_limits* limits, const omc_exif_opts* opts)
+{
+    omc_input input;
+    omc_exif_source_res res;
+    memset(&res, 0, sizeof(res));
+    if (!omc_source_range_valid(range) || state == NULL || workspace == NULL ||
+        (workspace->value_capacity && workspace->value == NULL) || state->code != OMC_SOURCE_OK) {
+        res.decoded.status = OMC_EXIF_MALFORMED; return res;
+    }
+    memset(&input, 0, sizeof(input));
+    input.range = *range; input.state = state; input.limits = limits;
+    input.stream = workspace->value; input.stream_capacity = workspace->value_capacity;
+    res.decoded = omc_ciff_run(&input, range->size, store, block, opts, &res);
+    if (!omc_input_ok(&input)) res.decoded.status = OMC_EXIF_TRUNCATED;
     return res;
 }

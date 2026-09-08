@@ -1,3 +1,4 @@
+#include "omc/omc_read_source.h"
 #include "omc/omc_read.h"
 
 #include "omc_test_assert.h"
@@ -6598,8 +6599,18 @@ test_read_webp_all(void)
     omc_store_fini(&store);
 }
 
+static omc_source_io_res
+read_gif_at(void* user, omc_u64 offset, omc_u8* out, omc_size size)
+{
+    const omc_const_bytes* bytes = (const omc_const_bytes*)user;
+    omc_source_io_res result;
+    assert(offset <= bytes->size && size <= bytes->size - offset);
+    if (size) memcpy(out, bytes->data + (omc_size)offset, size);
+    result.code = OMC_SOURCE_IO_OK; result.bytes_read = size; return result;
+}
+
 static void
-test_read_gif_all(void)
+test_read_gif_all(int positional)
 {
     omc_u8 gif[1024];
     omc_size gif_size;
@@ -6618,9 +6629,31 @@ test_read_gif_all(void)
     gif_size = make_test_gif_all(gif);
     omc_store_init(&store);
 
+    if (positional) {
+        omc_u8 metadata[512];
+        omc_source_range range;
+        omc_source_state state;
+        omc_read_source_workspace workspace;
+        omc_read_source_res source_result;
+        omc_const_bytes bytes;
+        bytes.data = gif; bytes.size = gif_size;
+        range.source = omc_source_callback(gif_size, &bytes, read_gif_at, 0);
+        range.source_offset = 0U; range.size = gif_size;
+        memset(&workspace, 0, sizeof(workspace));
+        workspace.metadata = metadata; workspace.metadata_capacity = sizeof(metadata);
+        workspace.blocks = blocks; workspace.block_capacity = 8U;
+        workspace.ifds = ifds; workspace.ifd_capacity = 8U;
+        workspace.payload = payload; workspace.payload_capacity = sizeof(payload);
+        workspace.payload_indices = payload_parts; workspace.payload_index_capacity = 16U;
+        omc_source_state_init(&state);
+        source_result = omc_read_source(&range, &store, &workspace, &state, NULL);
+        assert(source_result.status == OMC_READ_SOURCE_OK && source_result.nested_payloads_skipped == 0U);
+        res = source_result.decoded;
+    } else {
     res = omc_read_simple(gif, gif_size, &store, blocks, 8U, ifds, 8U, payload,
                           sizeof(payload), payload_parts, 16U,
                           (const omc_read_opts*)0);
+    }
 
     assert(res.scan.status == OMC_SCAN_OK);
     assert(res.pay.status == OMC_PAY_OK);
@@ -6685,7 +6718,7 @@ test_read_raf_all(void)
     assert(res.pay.status == OMC_PAY_OK);
     assert(res.exif.status == OMC_EXIF_OK);
     assert(res.xmp.status == OMC_XMP_OK);
-    assert(store.block_count == 2U);
+    assert(store.block_count == 3U); /* Native block plus EXIF and XMP. */
 
     exif_make = find_exif_entry(&store, "ifd0", 0x010FU);
     assert(exif_make != (const omc_entry*)0);
@@ -6728,7 +6761,7 @@ test_read_x3f_exif(void)
 
     assert(res.scan.status == OMC_SCAN_OK);
     assert(res.exif.status == OMC_EXIF_OK);
-    assert(store.block_count == 1U);
+    assert(store.block_count == 2U); /* Native header plus embedded EXIF. */
 
     exif_make = find_exif_entry(&store, "ifd0", 0x010FU);
     assert(exif_make != (const omc_entry*)0);
@@ -11591,7 +11624,8 @@ main(void)
     test_read_png_text();
     test_read_png_xmp_compressed();
     test_read_webp_all();
-    test_read_gif_all();
+    test_read_gif_all(0);
+    test_read_gif_all(1);
     test_read_raf_all();
     test_read_x3f_exif();
     test_read_tiff_geotiff();

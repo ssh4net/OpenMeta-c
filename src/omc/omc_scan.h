@@ -184,7 +184,10 @@ omc_scan_meas_bmff(const omc_u8* bytes, omc_size size);
 
 /* Shared memory/callback scanners. Offsets are relative to range. No payload
  * bodies are retained. Fixed bounded structural tables are internal; state
- * reports exact I/O failures and cumulative budgets. UNKNOWN selects format. */
+ * reports exact I/O failures and cumulative budgets. UNKNOWN selects format.
+ * RAF/X3F callbacks scan declared JPEG/TIFF ranges and the RAF fixed TIFF
+ * location only; memory retains optional undeclared prefix searches. Native
+ * RAF/X3F fields and EXR attributes are decoder outputs, not payload blocks. */
 OMC_API omc_scan_res
 omc_scan_source(const omc_source_range* range, omc_scan_fmt format,
                  omc_blk_ref* blocks, omc_u32 capacity,

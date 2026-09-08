@@ -334,10 +334,11 @@ For persisted transfer artifacts:
 
 ## Current Core Checkpoint
 
-Version 0.6.0 includes typed values and atomic edits, detached validation,
+Version 0.7.0 includes typed values and atomic edits, detached validation,
 canonical EXIF serialization, the five bounded native translation groups,
 paired IPTC date/time projection, shared BMFF replacement, and bounded
-positional input for JPEG, TIFF/BigTIFF/DNG, PNG, WebP, JP2, JXL and BMFF. PNG `caBX` and WebP
+positional input for JPEG, TIFF/BigTIFF/DNG, PNG, WebP, JP2, JXL, BMFF, GIF,
+EXR, CIFF and native/declared RAF/X3F metadata. PNG `caBX` and WebP
 `C2PA` discovery now supports split JUMBF metadata. See [authoring.md](authoring.md),
 [bmff_writing.md](bmff_writing.md), and [positional_input.md](positional_input.md).
 
@@ -345,9 +346,9 @@ TIFF callback input now reads distant directories and values with one value
 buffer; RW2/ORF headers and tested source MakerNote layouts are supported.
 See [read_decode_parity.md](read_decode_parity.md) for residual coverage.
 
-Clang 20 validation passed 42/42 Release direct plus focused C++ parity targets,
-37/37 ASan/UBSan direct targets, and 37/37 direct targets without compression
-dependencies. Brotli discovery now enables the available backend, alongside
+Clang 20 validation passed 44/44 Release direct plus focused C++ parity targets,
+38/38 ASan/UBSan direct targets, and 44/44 direct/focused targets without
+compression dependencies. Brotli discovery now enables the available backend, alongside
 zlib. These are synthetic WSL gates against C++ 0.4.127. The historical broad
 differential inventory still fails with the same 266 mismatch reports; it is
 not part of the focused passing gate.
@@ -357,15 +358,14 @@ JUMBF decoded output now follows the reference: parent labels use `jumb_label`,
 `c2pa.verify.require_trusted_chain` reflects the option. Consumers matching the
 old label key or scalar type must update. No crypto backend was added.
 
-The next work follows [read_decode_parity.md](read_decode_parity.md): direct
-TIFF values and source-relative MakerNotes, shared positional scanner/payload
-operations, remaining container readers, decoder deltas, then stage acceptance.
+The next work follows [read_decode_parity.md](read_decode_parity.md): RD5
+remaining decoder and standalone-input differences, then RD6 stage acceptance.
 
 Remaining portable-core work includes:
 
 - broader transfer-safety, lifecycle, structured XMP, and package parity
-- source-native TIFF values and additional MakerNote offset layouts
-- positional conversion of the remaining container and RAW readers
+- additional MakerNote offset layouts and standalone metadata source routes
+- full decoder semantics, failure-policy and resource acceptance
 - selected BMFF primitive/read/naming differences and broader writer acceptance
 
 An isolated C++ consumer can now evaluate the typed serializer or bounded

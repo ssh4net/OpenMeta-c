@@ -19,7 +19,7 @@ omc_read_source(const omc_source_range* range, omc_store* store,
     omc_read_source_opts defaults;
     omc_store candidate;
     omc_exif_source_res exif_source;
-    omc_u8 signature[8];
+    omc_u8 signature[16];
     omc_scan_fmt format;
     memset(&res, 0, sizeof(res));
     if (!omc_source_range_valid(range) || store == NULL || w == NULL || state == NULL ||
@@ -46,6 +46,10 @@ omc_read_source(const omc_source_range* range, omc_store* store,
     if (signature[0] == 0xFFU && signature[1] == 0xD8U) format = OMC_SCAN_FMT_JPEG;
     else if (signature[0] == 0x89U && signature[1] == 'P') format = OMC_SCAN_FMT_PNG;
     else if (signature[0] == 'R' && signature[1] == 'I') format = OMC_SCAN_FMT_WEBP;
+    else if (signature[0] == 'G' && signature[1] == 'I') format = OMC_SCAN_FMT_GIF;
+    else if (signature[0] == 'F' && signature[1] == 'U') format = OMC_SCAN_FMT_RAF;
+    else if (signature[0] == 'F' && signature[1] == 'O') format = OMC_SCAN_FMT_X3F;
+    else if (signature[0] == 0x76U && signature[1] == 0x2fU) format = OMC_SCAN_FMT_EXR;
     else if ((signature[0] == 'I' && signature[1] == 'I') ||
              (signature[0] == 'M' && signature[1] == 'M')) format = OMC_SCAN_FMT_TIFF;
     else if (range->size >= 8U) {
@@ -56,6 +60,17 @@ omc_read_source(const omc_source_range* range, omc_store* store,
         else if (memcmp(signature + 4U, "JXL ", 4U) == 0) format = OMC_SCAN_FMT_JXL;
         else if (signature[0] != 'G' && signature[0] != 'F' && signature[0] != 0x76U)
             format = OMC_SCAN_FMT_HEIF;
+    }
+    if (format == OMC_SCAN_FMT_TIFF && range->size >= 14U) {
+        if (omc_source_read(range, 6U, signature + 6U, 2U, state, &opts->io) != OMC_SOURCE_OK) {
+            res.status = OMC_READ_SOURCE_IO; return res;
+        }
+        if (memcmp(signature + 6U, "HE", 2U) == 0) {
+            if (omc_source_read(range, 8U, signature + 8U, 6U, state, &opts->io) != OMC_SOURCE_OK) {
+                res.status = OMC_READ_SOURCE_IO; return res;
+            }
+            if (memcmp(signature + 8U, "APCCDR", 6U) == 0) format = OMC_SCAN_FMT_CRW;
+        }
     }
     if (format == OMC_SCAN_FMT_UNKNOWN) { res.status = OMC_READ_SOURCE_UNSUPPORTED; return res; }
     omc_store_init(&candidate);
@@ -72,8 +87,9 @@ omc_read_source(const omc_source_range* range, omc_store* store,
         res.decoded = omc_read_container_source(range, format, &candidate, w, state, opts, &res);
     }
     if (state->code != OMC_SOURCE_OK) res.status = OMC_READ_SOURCE_IO;
-    else if (res.value_scratch_needed != 0U || res.decoded.exif.status == OMC_EXIF_LIMIT ||
-             res.decoded.exif.status == OMC_EXIF_NOMEM || res.decoded.pay.status == OMC_PAY_LIMIT ||
+    else if (res.status == OMC_READ_SOURCE_LIMIT || res.value_scratch_needed != 0U || res.decoded.exif.status == OMC_EXIF_LIMIT ||
+             res.decoded.exif.status == OMC_EXIF_NOMEM || res.decoded.exr.status == OMC_EXR_LIMIT ||
+             res.decoded.exr.status == OMC_EXR_NOMEM || res.decoded.pay.status == OMC_PAY_LIMIT ||
              res.decoded.pay.status == OMC_PAY_NOMEM || res.decoded.pay.status == OMC_PAY_TRUNCATED)
         res.status = OMC_READ_SOURCE_LIMIT;
     else if (res.decoded.scan.status == OMC_SCAN_UNSUPPORTED) res.status = OMC_READ_SOURCE_UNSUPPORTED;

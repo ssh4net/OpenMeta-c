@@ -1,3 +1,4 @@
+#include "read/omc_input.h"
 #include "omc/omc_exr.h"
 
 #include <string.h>
@@ -60,8 +61,9 @@ static const omc_exr_type_code_map k_omc_exr_type_code_map[] = {
 };
 
 typedef struct omc_exr_state {
-    const omc_u8* bytes;
-    omc_size size;
+    omc_input* bytes;
+    omc_u64 size;
+    omc_exr_source_res* source_result;
     omc_store* store;
     omc_entry_flags flags;
     omc_exr_opts opts;
@@ -128,15 +130,24 @@ omc_exr_read_i32le(const omc_u8* bytes, omc_size size, omc_u64 off,
     return 1;
 }
 
+static int
+omc_exr_input_u32(omc_input* input, omc_u64 size, omc_u64 offset, omc_u32* value)
+{
+    omc_u64 n;
+    if (offset > size || 4U > size - offset || !omc_input_number(input, offset, 4U, 1, &n)) return 0;
+    *value = (omc_u32)n;
+    return 1;
+}
+
 static omc_exr_parse_str_status
-omc_exr_read_cstr_with_first(const omc_u8* bytes, omc_size size,
+omc_exr_read_cstr_with_first(omc_input* bytes, omc_u64 size,
                              omc_u64* io_offset, omc_u8 first,
                              omc_u32 max_bytes, omc_exr_span* out_span)
 {
     omc_u64 start;
     omc_u32 count;
 
-    if (bytes == (const omc_u8*)0 || io_offset == (omc_u64*)0
+    if (bytes == NULL || io_offset == (omc_u64*)0
         || out_span == (omc_exr_span*)0 || first == 0U) {
         return OMC_EXR_PARSE_STR_MALFORMED;
     }
@@ -153,7 +164,7 @@ omc_exr_read_cstr_with_first(const omc_u8* bytes, omc_size size,
         if (*io_offset >= (omc_u64)size) {
             return OMC_EXR_PARSE_STR_MALFORMED;
         }
-        b = bytes[(omc_size)*io_offset];
+        b = omc_input_byte(bytes, *io_offset);
         *io_offset += 1U;
         if (b == 0U) {
             break;
@@ -170,37 +181,37 @@ omc_exr_read_cstr_with_first(const omc_u8* bytes, omc_size size,
 }
 
 static omc_exr_parse_str_status
-omc_exr_read_cstr(const omc_u8* bytes, omc_size size, omc_u64* io_offset,
+omc_exr_read_cstr(omc_input* bytes, omc_u64 size, omc_u64* io_offset,
                   omc_u32 max_bytes, omc_exr_span* out_span)
 {
     omc_u8 first;
 
-    if (bytes == (const omc_u8*)0 || io_offset == (omc_u64*)0
+    if (bytes == NULL || io_offset == (omc_u64*)0
         || *io_offset >= (omc_u64)size) {
         return OMC_EXR_PARSE_STR_MALFORMED;
     }
 
-    first = bytes[(omc_size)*io_offset];
+    first = omc_input_byte(bytes, *io_offset);
     *io_offset += 1U;
     return omc_exr_read_cstr_with_first(bytes, size, io_offset, first,
                                         max_bytes, out_span);
 }
 
 static int
-omc_exr_span_equals(const omc_u8* bytes, omc_exr_span span, const char* text)
+omc_exr_span_equals(omc_input* bytes, omc_exr_span span, const char* text)
 {
     omc_size text_len;
 
-    if (bytes == (const omc_u8*)0 || text == (const char*)0) {
+    if (bytes == NULL || text == (const char*)0) {
         return 0;
     }
     text_len = strlen(text);
     return span.size == text_len
-           && memcmp(bytes + (omc_size)span.offset, text, text_len) == 0;
+           && omc_input_match(bytes, span.offset, text, text_len);
 }
 
 static omc_u16
-omc_exr_type_code(const omc_u8* bytes, omc_exr_span type_name)
+omc_exr_type_code(omc_input* bytes, omc_exr_span type_name)
 {
     omc_size i;
     omc_size count;
@@ -516,8 +527,24 @@ omc_exr_append_span(omc_store* store, omc_exr_state* st, omc_exr_span span,
         || out_ref == (omc_byte_ref*)0) {
         return OMC_STATUS_INVALID_ARGUMENT;
     }
-    return omc_arena_append(&store->arena, st->bytes + (omc_size)span.offset,
-                            span.size, out_ref);
+    {
+        omc_u8 chunk[64];
+        omc_u32 done = 0U;
+        omc_byte_ref part;
+        omc_status status;
+        out_ref->offset = 0U;
+        out_ref->size = span.size;
+        while (done < span.size) {
+            omc_size n = span.size - done;
+            if (n > sizeof(chunk)) n = sizeof(chunk);
+            if (!omc_input_read(st->bytes, span.offset + done, chunk, n)) return OMC_STATUS_INVALID_ARGUMENT;
+            status = omc_arena_append(&store->arena, chunk, n, &part);
+            if (status != OMC_STATUS_OK) return status;
+            if (done == 0U) out_ref->offset = part.offset;
+            done += (omc_u32)n;
+        }
+        return OMC_STATUS_OK;
+    }
 }
 
 static omc_exr_status
@@ -530,7 +557,20 @@ omc_exr_decode_value(omc_exr_state* st, omc_exr_span type_name,
     if (st == (omc_exr_state*)0 || out_value == (omc_val*)0) {
         return OMC_EXR_MALFORMED;
     }
-    value_bytes = st->bytes + (omc_size)value_off;
+    if (st->bytes->range.source.contiguous_data != NULL) {
+        value_bytes = st->bytes->range.source.contiguous_data +
+                      (omc_size)(st->bytes->range.source_offset + value_off);
+    } else {
+        if (value_size > st->bytes->stream_capacity) {
+            if (value_size > st->source_result->value_scratch_needed)
+                st->source_result->value_scratch_needed = value_size;
+            return OMC_EXR_LIMIT;
+        }
+        if (!omc_input_read(st->bytes, value_off, st->bytes->stream, value_size)) return OMC_EXR_MALFORMED;
+        if (value_size > st->source_result->value_scratch_used)
+            st->source_result->value_scratch_used = value_size;
+        value_bytes = value_size ? st->bytes->stream : (const omc_u8*)"";
+    }
 
     if (!st->opts.decode_known_types) {
         omc_byte_ref ref;
@@ -799,7 +839,7 @@ omc_exr_parse_attr_with_first(omc_exr_state* st, omc_u64* io_offset,
         return OMC_EXR_LIMIT;
     }
 
-    if (!omc_exr_read_u32le(st->bytes, st->size, *io_offset, &attribute_size)) {
+    if (!omc_exr_input_u32(st->bytes, st->size, *io_offset, &attribute_size)) {
         return OMC_EXR_MALFORMED;
     }
     *io_offset += 4U;
@@ -873,9 +913,9 @@ omc_exr_parse_attr_with_first(omc_exr_state* st, omc_u64* io_offset,
 }
 
 static omc_exr_res
-omc_exr_decode_impl(const omc_u8* exr_bytes, omc_size exr_size,
+omc_exr_decode_impl(omc_input* exr_bytes, omc_u64 exr_size,
                     omc_store* store, omc_entry_flags flags,
-                    const omc_exr_opts* opts)
+                    const omc_exr_opts* opts, omc_exr_source_res* source_result)
 {
     omc_exr_state st;
     omc_u32 magic;
@@ -892,6 +932,7 @@ omc_exr_decode_impl(const omc_u8* exr_bytes, omc_size exr_size,
 
     memset(&st, 0, sizeof(st));
     st.bytes = exr_bytes;
+    st.source_result = source_result;
     st.size = exr_size;
     st.store = store;
     st.flags = flags;
@@ -902,15 +943,15 @@ omc_exr_decode_impl(const omc_u8* exr_bytes, omc_size exr_size,
         st.opts = *opts;
     }
 
-    if (exr_bytes == (const omc_u8*)0) {
+    if (exr_bytes == NULL) {
         st.res.status = OMC_EXR_MALFORMED;
         return st.res;
     }
     if (exr_size < 8U) {
         return st.res;
     }
-    if (!omc_exr_read_u32le(exr_bytes, exr_size, 0U, &magic)
-        || !omc_exr_read_u32le(exr_bytes, exr_size, 4U, &version_and_flags)) {
+    if (!omc_exr_input_u32(exr_bytes, exr_size, 0U, &magic)
+        || !omc_exr_input_u32(exr_bytes, exr_size, 4U, &version_and_flags)) {
         return st.res;
     }
     if (magic != k_omc_exr_magic) {
@@ -953,7 +994,7 @@ omc_exr_decode_impl(const omc_u8* exr_bytes, omc_size exr_size,
             return st.res;
         }
 
-        first = exr_bytes[(omc_size)offset];
+        first = omc_input_byte(exr_bytes, offset);
         offset += 1U;
 
         if (first == 0U) {
@@ -964,7 +1005,7 @@ omc_exr_decode_impl(const omc_u8* exr_bytes, omc_size exr_size,
                 st.res.status = OMC_EXR_MALFORMED;
                 return st.res;
             }
-            first = exr_bytes[(omc_size)offset];
+            first = omc_input_byte(exr_bytes, offset);
             offset += 1U;
             if (first == 0U) {
                 return st.res;
@@ -1014,23 +1055,43 @@ omc_exr_opts_init(omc_exr_opts* opts)
 }
 
 omc_exr_res
-omc_exr_dec(const omc_u8* exr_bytes, omc_size exr_size, omc_store* store,
-            omc_entry_flags flags, const omc_exr_opts* opts)
+omc_exr_dec(const omc_u8* bytes, omc_size size, omc_store* store,
+              omc_entry_flags flags, const omc_exr_opts* opts)
 {
-    if (store == (omc_store*)0) {
-        omc_exr_res res;
-        res.status = OMC_EXR_MALFORMED;
-        res.parts_decoded = 0U;
-        res.entries_decoded = 0U;
-        return res;
-    }
-    return omc_exr_decode_impl(exr_bytes, exr_size, store, flags, opts);
+    omc_input input;
+    omc_exr_res res;
+    memset(&res, 0, sizeof(res));
+    if (store == NULL) { res.status = OMC_EXR_MALFORMED; return res; }
+    omc_input_memory(&input, bytes, size);
+    return omc_exr_decode_impl(bytes == NULL ? NULL : &input, size, store, flags, opts, NULL);
 }
-
 omc_exr_res
-omc_exr_meas(const omc_u8* exr_bytes, omc_size exr_size,
-             const omc_exr_opts* opts)
+omc_exr_meas(const omc_u8* bytes, omc_size size, const omc_exr_opts* opts)
 {
-    return omc_exr_decode_impl(exr_bytes, exr_size, (omc_store*)0,
-                               OMC_ENTRY_FLAG_NONE, opts);
+    omc_input input;
+    omc_input_memory(&input, bytes, size);
+    return omc_exr_decode_impl(bytes == NULL ? NULL : &input, size, NULL, OMC_ENTRY_FLAG_NONE, opts, NULL);
+}
+omc_exr_source_res
+omc_exr_dec_source(const omc_source_range* range, omc_store* store,
+                    omc_u8* value, omc_size value_capacity,
+                    omc_source_state* state, const omc_source_limits* limits,
+                    omc_entry_flags flags, const omc_exr_opts* opts)
+{
+    omc_input input;
+    omc_exr_source_res res;
+    memset(&res, 0, sizeof(res));
+    if (!omc_source_range_valid(range) || state == NULL ||
+        (value_capacity && value == NULL) || state->code != OMC_SOURCE_OK) {
+        res.decoded.status = OMC_EXR_MALFORMED; return res;
+    }
+    memset(&input, 0, sizeof(input));
+    input.range = *range;
+    input.state = state;
+    input.limits = limits;
+    input.stream = value;
+    input.stream_capacity = value_capacity;
+    res.decoded = omc_exr_decode_impl(&input, range->size, store, flags, opts, &res);
+    if (!omc_input_ok(&input)) res.decoded.status = OMC_EXR_MALFORMED;
+    return res;
 }

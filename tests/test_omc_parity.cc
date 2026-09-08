@@ -1,3 +1,5 @@
+#include <openmeta/exr_decode.h>
+#include "omc_test_raw_fixture.h"
 #include <openmeta/exif_tag_names.h>
 #include <openmeta/meta_key.h>
 #include <openmeta/meta_store.h>
@@ -37,6 +39,7 @@ bool run_omc_authoring_parity();
 bool run_omc_source_parity();
 bool run_omc_chunk_parity();
 bool run_omc_box_source_parity();
+bool run_omc_raw_source_parity();
 
 namespace {
 
@@ -9711,6 +9714,8 @@ struct TransferPersistParitySummary final {
 
 static bool g_tiff_source_inventory = false;
 static bool g_container_source_inventory = false;
+static bool g_remaining_source_inventory = false;
+static unsigned g_remaining_source_cases = 0U;
 static unsigned g_container_source_cases = 0;
 static unsigned g_tiff_source_cases = 0U;
 
@@ -9857,8 +9862,23 @@ read_cpp_records(const ByteVec& file_bytes, const ReadCaseOptions& options)
         }
     }
 
+    if (options.positional && file_bytes.size() >= 4U && file_bytes[0] == 0x76U && file_bytes[1] == 0x2fU) {
+        const auto read = [](void* context, uint64_t offset, std::span<std::byte> out) noexcept {
+            const auto r = fixture_source_read(context, offset, reinterpret_cast<omc_u8*>(out.data()), out.size());
+            return openmeta::RandomAccessIoResult{static_cast<openmeta::RandomAccessIoCode>(r.code), r.bytes_read};
+        };
+        const auto range = openmeta::make_random_access_source_range(openmeta::make_callback_random_access_source(
+            file_bytes.size() + 37U, const_cast<ByteVec*>(&file_bytes), read, false), 37U, file_bytes.size());
+        std::array<std::byte, 256> window{};
+        openmeta::ExrRandomAccessScratch workspace;
+        workspace.read_window = window; workspace.value = payload;
+        workspace.window_options.minimum_read_bytes = 0U;
+        const auto decoded = openmeta::decode_exr_header_random_access(range, store, workspace);
+        assert(decoded.complete() && decoded.decode.status == openmeta::ExrDecodeStatus::Ok);
+    } else {
     res = openmeta::simple_meta_read(as_byte_span(file_bytes), store, blocks,
                                      ifds, payload, scratch, opts);
+    }
     if (res.scan.status == openmeta::ScanStatus::Malformed) {
         std::fprintf(stderr, "openmeta scan failed with malformed status\n");
         std::exit(1);
@@ -10030,6 +10050,18 @@ run_case(const char* case_name, const ByteVec& file_bytes,
     std::vector<std::string> cpp;
 
     ReadCaseOptions use_options = options;
+    if (g_remaining_source_inventory) {
+        const bool match = file_bytes.size() >= 14U &&
+            ((file_bytes[0] == 0x76U && file_bytes[1] == 0x2fU) ||
+             std::memcmp(file_bytes.data(), "GIF", 3U) == 0 ||
+             std::memcmp(file_bytes.data(), "FOVb", 4U) == 0 ||
+             std::memcmp(file_bytes.data(), "FUJIFILMCCD-RAW ", 14U) == 0 ||
+             std::memcmp(file_bytes.data() + 6U, "HEAPCCDR", 8U) == 0);
+        if (!match) return true;
+        use_options.positional = true;
+        ++g_remaining_source_cases;
+        std::fprintf(stderr, "RD4 source case: %s\n", case_name);
+    }
     if (g_container_source_inventory) {
         omc_blk_ref block{};
         const auto scan = omc_scan_auto(file_bytes.data(), file_bytes.size(), &block, 1U);
@@ -10056,7 +10088,13 @@ run_case(const char* case_name, const ByteVec& file_bytes,
         std::fprintf(stderr, "source case: %s\n", case_name);
     }
     omc = read_omc_records(file_bytes, use_options);
-    cpp = read_cpp_records(file_bytes, options);
+    cpp = read_cpp_records(file_bytes, g_remaining_source_inventory ? use_options : options);
+    if (g_remaining_source_inventory) {
+        auto memory = read_omc_records(file_bytes, options);
+        auto reference = cpp;
+        normalize_case_records(case_name, &memory, &reference);
+        if (!compare_records(case_name, memory, reference)) return false;
+    }
     normalize_case_records(case_name, &omc, &cpp);
     return compare_records(case_name, omc, cpp);
 }
@@ -11564,14 +11602,16 @@ main(int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--bench") == 0) {
         return run_benchmarks();
     }
+    g_remaining_source_inventory = argc == 2 && std::strcmp(argv[1], "--rd4") == 0;
     g_container_source_inventory = argc == 2 && std::strcmp(argv[1], "--rd3") == 0;
     g_tiff_source_inventory = argc == 2 && std::strcmp(argv[1], "--rd2") == 0;
-    if (argc != 1 && !g_tiff_source_inventory && !g_container_source_inventory && !(argc == 2 && std::strcmp(argv[1], "--all") == 0)) {
-        std::fprintf(stderr, "usage: %s [--bench|--core-authoring|--core-source|--read-chunks|--rd2|--all]\n", argv[0]);
+    if (argc != 1 && !g_remaining_source_inventory && !g_tiff_source_inventory && !g_container_source_inventory && !(argc == 2 && std::strcmp(argv[1], "--all") == 0)) {
+        std::fprintf(stderr, "usage: %s [--bench|--core-authoring|--core-source|--read-chunks|--rd2|--rd3|--rd4|--all]\n", argv[0]);
         return 2;
     }
 
     ok = g_container_source_inventory ? run_omc_box_source_parity() : run_omc_authoring_parity();
+    if (g_remaining_source_inventory) ok = run_omc_raw_source_parity() && ok;
     ok = run_omc_source_parity() && ok;
     ok = run_omc_chunk_parity() && ok;
     ok = run_chunk_decode_cases() && ok;
@@ -16549,6 +16589,49 @@ main(int argc, char** argv)
     ok = run_case("bmff_primary_uri_item_info",
                   build_bmff_primary_uri_item_info_fixture(), false)
          && ok;
+    if (g_remaining_source_inventory) {
+        const auto convert = [](const std::vector<std::byte>& bytes) {
+            return ByteVec(reinterpret_cast<const unsigned char*>(bytes.data()),
+                           reinterpret_cast<const unsigned char*>(bytes.data()) + bytes.size());
+        };
+        ok = run_case("raf_native", convert(omc_test_fixture::raf_with_native_directory()), false) && ok;
+        ok = run_case("raf_declared", convert(omc_test_fixture::raf_with_embedded_metadata().bytes), false) && ok;
+        {
+            auto raf = convert(omc_test_fixture::raf_with_native_directory());
+            raf.resize(4096U);
+            ByteVec directory;
+            append_u16be(&directory, 0U); append_u16be(&directory, 14U);
+            for (unsigned tag : {0x0100U, 0x0110U, 0x0111U, 0x0115U, 0x0118U, 0x0119U, 0x0121U}) {
+                append_u16be(&directory, static_cast<uint16_t>(tag)); append_u16be(&directory, 4U);
+                append_u16be(&directory, 6048U); append_u16be(&directory, 4032U);
+            }
+            for (unsigned tag : {0x0117U, 0x0130U, 0x0131U, 0x9200U, 0x9650U, 0xc000U, 0xc001U}) {
+                const unsigned length = tag == 0x0130U ? 1U : tag == 0x0131U ? 3U
+                    : tag == 0x9200U || tag == 0x9650U ? 8U : tag >= 0xc000U ? 20U : 4U;
+                append_u16be(&directory, static_cast<uint16_t>(tag)); append_u16be(&directory, length);
+                for (unsigned j = 0; j < length; ++j) append_u8(&directory, static_cast<unsigned char>(j + 1U));
+            }
+            for (unsigned field : {0x5cU, 0x78U}) {
+                for (unsigned j = 0; j < 4; ++j) {
+                    raf[field + j] = static_cast<unsigned char>(4096U >> ((3U - j) * 8U));
+                    raf[field + 4U + j] = static_cast<unsigned char>(directory.size() >> ((3U - j) * 8U));
+                }
+            }
+            append_bytes(&raf, directory.data(), directory.size());
+            ok = run_case("raf_typed_directories", raf, false) && ok;
+        }
+        {
+            auto x3f = convert(omc_test_fixture::x3f_with_native_properties());
+            std::memcpy(x3f.data() + 40U, "Auto", 5U);
+            std::memcpy(x3f.data() + 72U, "Standard", 9U);
+            x3f[104U] = 1U; x3f[139U] = 0x3fU;
+            ok = run_case("x3f_header_extensions", x3f, false) && ok;
+            x3f[6U] = 4U;
+            ok = run_case("x3f_header_v4", x3f, false) && ok;
+        }
+        ok = run_case("x3f_native", convert(omc_test_fixture::x3f_with_native_properties()), false) && ok;
+        ok = run_case("x3f_declared", convert(omc_test_fixture::x3f_with_embedded_metadata().bytes), false) && ok;
+    }
     ok = run_case("exr_single_part", build_exr_single_part_fixture(), false)
          && ok;
     ok = run_case("exr_known_types", build_exr_known_types_fixture(), false)
@@ -16829,6 +16912,8 @@ main(int argc, char** argv)
                   build_tiff_nikon_main_single_long_fixture("E700", 0x000AU, 0U),
                   true)
          && ok;
+    if (g_remaining_source_inventory)
+        std::fprintf(stderr, "RD4 source cases: %u\n", g_remaining_source_cases);
     if (g_container_source_inventory)
         std::fprintf(stderr, "source container cases: %u\n", g_container_source_cases);
     if (g_tiff_source_inventory)

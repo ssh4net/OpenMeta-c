@@ -27,7 +27,7 @@ lifetime. Argument/range checks and preparatory view failures identify the
 range-relative request. Exact-read budget failures and dispatched I/O failures
 identify the absolute backing-source offset.
 
-## Reader and payload APIs at 0.6.0
+## Reader and payload APIs at 0.7.0
 
 `omc_scan_source()` shares the memory scanners' framing, item and extent rules.
 Pass `OMC_SCAN_FMT_UNKNOWN` for format selection or select a supported family.
@@ -73,20 +73,47 @@ Supported high-level callback families:
   structural interpretation is shared. Richer C++ semantic output differences
   remain in RD5; source conversion does not remove them.
 
+- GIF: comment, XMP and ICC application sub-blocks share payload assembly.
+  Image sub-block bodies are skipped using their declared lengths.
+- EXR: `omc_exr_dec_source()` traverses multipart headers and decodes one
+  attribute value in metadata scratch. A NULL store measures attributes without
+  fetching their bodies. Stop before image offset tables and pixel data.
+- CRW/CIFF: traverse directory records, nested directories and declared value
+  leaves at their original offsets. Use eight local bytes or one caller value
+  buffer; no whole-directory scratch span. CIFF raw leaves below the configured
+  value limit are retained, as in C++; this is not a pixel-tag exclusion policy.
+- RAF/X3F: native header, directory and property values plus declared embedded
+  JPEG/TIFF metadata. RAF supports both native directories and both TIFF range
+  pairs; X3F supports header extensions and directory-declared PROP and JPEG
+  image sections. Embedded JPEG traversal stops at SOS/EOI.
+
+For callback RAF/X3F, `undeclared_searches_skipped == 1` reports omission of the
+optional memory prefix search. It does not assert that an entry is missing.
+The fixed RAF TIFF probe at offset 160 remains supported when no TIFF range is
+declared. Native-only input can have `scan.written == 0` and decoded EXIF entries;
+the high-level scan status becomes OK if native decoding produced entries.
+Native fields use an empty source block, matching C++. Memory RAW reads can now
+include native fields and an additional native block. Consumers must rebuild
+for the added source-result field in 0.7.0.
+
 Block coordinates are relative to the supplied range. Nested blocks are remapped
 once. Exact-read I/O failure offsets are absolute in the backing source. There
-is no whole-image callback fallback. Native GIF/EXR/RAF/X3F/CRW integration is RD4.
+is no whole-image callback fallback.
 
 ## Verification
 
-Clang 20 Release passes 42 direct/focused targets; the compression-disabled build
-passes the same 42 targets, and ASan/UBSan passes 37 direct targets. LeakSanitizer
+Clang 20 Release passes 44 direct/focused targets; the compression-disabled build
+passes the same 44 targets, and ASan/UBSan passes 38 direct targets. LeakSanitizer
 runs outside the ptrace sandbox. Existing scanner and payload tests now compare
 memory and callbacks, including seven-byte compressed feeds. The RD2 gate has
 80 C callback/C++ contiguous TIFF fixtures. RD3 adds 17 C memory/callback decoded
 container fixtures plus eight C/C++ callback scanner/payload cases: JP2/JXL,
 split BMFF extents at zero/8 GiB gaps, JPEG ICC and extended XMP. Callbacks reject
-pixel/media reads. Tests include partial output, overlap, malformed framing,
+pixel/media reads. RD4 adds 18 C memory/callback versus C++ decoded fixtures,
+including five comparisons against the public C++ EXR source decoder, plus five
+C/C++ callback RAW/GIF scanner and payload cases. Nine direct access fixtures
+cover EXR, CIFF, RAF and X3F at zero/3 GiB gaps and GIF raster skipping.
+Tests include partial output, overlap, malformed framing,
 I/O failure, cancellation, budgets and preservation of populated stores.
 
 Fixed PNG/WebP counters after RD3 (zero or 3 GiB gap):
@@ -100,3 +127,8 @@ Payload, structural stack, backend and store allocations are separate. These are
 sparse-access observations, not throughput or embedded-memory acceptance.
 See [read_decode_parity.md](read_decode_parity.md) for the pinned C++ reference,
 logs and remaining acceptance work.
+
+The final RD4 run fixes an RD3 failure in the compression-disabled build:
+a later unsupported backend no longer hides an earlier payload-capacity failure
+from the high-level source transaction. The saved RD3 log was 41/42, despite the
+previous passing note. Current validation includes this regression.

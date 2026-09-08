@@ -233,8 +233,9 @@ Missing/overlapping fragments fail before reads. Deflate/Brotli feed buffers
 are caller-owned and bounded. An optional Samsung local MakerNote postpass that
 returns no additional table no longer creates a false incomplete-source result.
 
-Validation: 42/42 Release direct/focused targets and 42/42 without zlib/Brotli;
-37/37 ASan/UBSan direct targets. `--rd3` checks 17 C memory/callback decoded
+Validation: 42/42 Release direct/focused targets and 37/37 ASan/UBSan direct
+targets. Correction from the saved log: the build without zlib/Brotli was
+41/42, with a payload-capacity preservation failure fixed in RD4. `--rd3` checks 17 C memory/callback decoded
 fixtures and eight C/C++ callback scanner/payload fixtures. JP2/JXL metadata and
 a two-extent BMFF item cross 8 GiB gaps with source base 37. JPEG ICC and extended
 XMP arrive out of order. Payload prefixes, descriptor fields, malformed overlap,
@@ -252,4 +253,74 @@ Artifacts: `/tmp/openmeta-rd3-release-tests.log`,
 `/tmp/openmeta-rd3-nodeps-tests.log`,
 `/tmp/openmeta-c-read-sanitize-20260908/Testing/Temporary/LastTest.log`,
 `/tmp/openmeta-rd3-container-parity.log`, `/tmp/openmeta-rd3-default-parity.log`
-and `/tmp/openmeta-rd3-all-parity.log`. RD4 follows with native formats.
+and `/tmp/openmeta-rd3-all-parity.log`. See the RD4 correction below for the
+dependency-disabled result.
+
+## RD4 Checkpoint: Version 0.7.0
+
+Implemented GIF high-level source reads, shared EXR positional header decoding,
+shared CRW/CIFF positional directory traversal, and native RAF/X3F values in both
+memory and callback readers. RAF supports typed directory values and RAFData
+projection, plus two declared TIFF ranges and preview JPEG metadata. X3F supports
+native header fields, extensions and PROP records, plus declared JPEG sections.
+The public EXR source decoder also measures without fetching attribute bodies.
+No OpenEXR or camera SDK dependency is required.
+
+`omc_read_source_res.undeclared_searches_skipped` reports the omitted optional
+RAW prefix-search route for callback RAF/X3F. Native-only inputs can produce
+entries with zero scanned payload descriptors. Their native block is empty,
+matching the reference. Callback traversal retains the fixed RAF TIFF probe at
+160 when no TIFF offset is declared. Memory reads retain legacy undeclared
+searches; RAF avoids duplicate XMP when its preview already supplied a packet.
+
+The final capacity fix also closes an RD3 regression: when zlib is disabled,
+a later unsupported compressed payload must not hide an earlier insufficient
+payload buffer. The source transaction now retains the original store in that
+case. Correction to the RD3 note: `/tmp/openmeta-rd3-nodeps-tests.log` records
+41/42 passing targets, not 42/42. RD4's dependency-disabled gate passes 44/44.
+Public `OMC_VERSION_*` macros now agree with the CMake version (0.7.0); the minor
+macro had remained at 1 through earlier CMake version increments.
+
+Validation against the pinned C++ build:
+
+- Clang 20 Release: 44/44 direct and focused targets.
+- Clang 20 Release with zlib/Brotli disabled: 44/44 targets.
+- Clang 20 Debug ASan/UBSan with LeakSanitizer outside ptrace: 38/38 direct targets.
+- `--rd4`: 18 C memory/callback decoded-record fixtures versus C++, covering five
+  EXR, six CIFF and seven RAF/X3F cases. EXR also uses the public C++ callback
+  decoder. RAF tests cover all new typed value groups and both native directories;
+  X3F tests include v2.3 extensions and v4 header fields.
+- Five C/C++ callback scanner/payload fixtures cover native and declared RAW
+  layouts and GIF comments; embedded JPEG entropy reads are forbidden. C direct
+  tests also cover GIF XMP/ICC applications, late short reads, request budgets,
+  invalid declared ranges, EXR body-free measurement, native entry limits and
+  preservation of populated stores on failure.
+- Existing default and broad mismatch identifiers remain exactly 9 and 266,
+  respectively. These historical inventories still fail; they are not coverage
+  percentages or stage acceptance.
+
+Fixed direct access counters (zero or 3 GiB gap; source base 37):
+
+| Fixture | Requests | Requested bytes | Metadata scratch | Entries |
+| --- | ---: | ---: | ---: | ---: |
+| EXR string header | 21 | 59 | 20 | 1 |
+| CIFF distant directory | 17 | 74 | 20 | 1 |
+| RAF native + declared JPEG/TIFF | 68 | 232 | 20 | 14 |
+| X3F native + declared JPEG | 92 | 282 | 0 | 9 |
+| GIF comment after raster (no sparse gap) | 15 | 24 | 0 | 1 |
+
+These fixtures reject reads into image bodies and sparse holes. Counts do not
+include payload storage, structural stack or store/backend allocations. They do
+not establish throughput, embedded RAM budgets, 32-bit or native Windows support.
+CIFF reads declared raw leaves within its value limit, like the reference; it
+has no general pixel-leaf filtering policy. Standalone metadata source routes,
+uncommon vendor layouts, richer BMFF semantics and remaining family error-policy
+differences stay in RD5. RD6 supplies corpus/platform/resource acceptance.
+
+Artifacts: `/tmp/openmeta-rd4-release-tests.log`,
+`/tmp/openmeta-rd4-nodeps-tests.log`,
+`/tmp/openmeta-c-read-sanitize-20260908/Testing/Temporary/LastTest.log`,
+`/tmp/openmeta-rd4-parity.log`, `/tmp/openmeta-rd4-access.log`,
+`/tmp/openmeta-rd4-default-parity.log` and `/tmp/openmeta-rd4-all-parity.log`.
+The test-only RAW fixture subset is pinned locally in `tests/omc_test_raw_fixture.h`
+so the gate does not depend on changing C++ test files or private APIs.
