@@ -217,6 +217,9 @@ typedef struct omc_jumbf_sem_proj {
     int has_ingredient;
     int has_signature;
     int active_manifest_present;
+    char active_manifest_prefix[OMC_JUMBF_PATH_CAP];
+    omc_u32 active_manifest_prefix_len;
+    int active_manifest_ambiguous;
     int have_claim_generator;
     omc_u32 semantic_sig_index;
 } omc_jumbf_sem_proj;
@@ -1148,30 +1151,6 @@ omc_jumbf_emit_field_i64(omc_jumbf_ctx* ctx, const char* field_key,
 }
 
 static int
-omc_jumbf_emit_field_u32(omc_jumbf_ctx* ctx, const char* field_key,
-                         omc_u32 field_len, omc_u32 value)
-{
-    omc_key key;
-    omc_val val;
-    omc_byte_ref key_ref;
-
-    if (ctx == (omc_jumbf_ctx*)0) {
-        return 0;
-    }
-    if (ctx->store != (omc_store*)0) {
-        if (!omc_jumbf_store_bytes(ctx, field_key, field_len, &key_ref)) {
-            return 0;
-        }
-        omc_key_make_jumbf_field(&key, key_ref);
-        omc_val_make_u32(&val, value);
-    } else {
-        omc_key_init(&key);
-        omc_val_init(&val);
-    }
-    return omc_jumbf_add_entry(ctx, &key, &val, OMC_ENTRY_FLAG_DERIVED);
-}
-
-static int
 omc_jumbf_emit_field_u8(omc_jumbf_ctx* ctx, const char* field_key,
                         omc_u32 field_len, omc_u8 value)
 {
@@ -1270,6 +1249,10 @@ omc_jumbf_emit_c2pa_verify_scaffold(omc_jumbf_ctx* ctx, int has_signatures,
                    "c2pa.verify.require_resolved_references"),
                (omc_u8)(ctx->opts.verify_require_resolved_references ? 1U
                                                                      : 0U))
+        || !omc_jumbf_emit_field_u8(
+               ctx, "c2pa.verify.require_trusted_chain",
+               omc_jumbf_cstr_size("c2pa.verify.require_trusted_chain"),
+               (omc_u8)(ctx->opts.verify_require_trusted_chain ? 1U : 0U))
         || !omc_jumbf_emit_field_u8(
                ctx, "c2pa.verify.enabled_in_build",
                omc_jumbf_cstr_size("c2pa.verify.enabled_in_build"),
@@ -1619,7 +1602,7 @@ omc_jumbf_emit_c2pa_marker(omc_jumbf_ctx* ctx, const char* marker_path,
     if (ctx->c2pa_emitted) {
         return 1;
     }
-    if (!omc_jumbf_emit_field_u32(ctx, "c2pa.detected", 13U, 1U)) {
+    if (!omc_jumbf_emit_field_u8(ctx, "c2pa.detected", 13U, 1U)) {
         return 0;
     }
     if (marker_path != (const char*)0 && marker_len != 0U) {
@@ -4109,8 +4092,8 @@ omc_jumbf_find_claim_prefix_by_label(omc_jumbf_ctx* ctx, omc_size scan_limit,
         }
         field_view = omc_jumbf_entry_key_view(ctx->store, entry);
         label_view = omc_jumbf_entry_value_view(ctx->store, entry);
-        if (field_view.size < 6U
-            || memcmp(field_view.data + field_view.size - 6U, ".label", 6U)
+        if (field_view.size < 11U
+            || memcmp(field_view.data + field_view.size - 11U, ".jumb_label", 11U)
                    != 0
             || !omc_jumbf_ascii_icase_contains(label_view.data, label_view.size,
                                                "claim", 256U)
@@ -4119,12 +4102,12 @@ omc_jumbf_find_claim_prefix_by_label(omc_jumbf_ctx* ctx, omc_size scan_limit,
             continue;
         }
 
-        if (field_view.size - 6U + 1U > (omc_u32)sizeof(box_prefix)) {
+        if (field_view.size - 11U + 1U > (omc_u32)sizeof(box_prefix)) {
             return 0;
         }
-        memcpy(box_prefix, field_view.data, field_view.size - 6U);
-        box_prefix[field_view.size - 6U] = '\0';
-        box_prefix_len = (omc_u32)(field_view.size - 6U);
+        memcpy(box_prefix, field_view.data, field_view.size - 11U);
+        box_prefix[field_view.size - 11U] = '\0';
+        box_prefix_len = (omc_u32)(field_view.size - 11U);
 
         for (j = 0U; j < scan_limit && j < ctx->store->entry_count; ++j) {
             const omc_entry* cbor_entry;
@@ -7008,20 +6991,20 @@ omc_c2pa_collect_verify_candidates(
         }
         field_key = omc_jumbf_entry_key_view(ctx->store, entry);
         label_view = omc_jumbf_entry_value_view(ctx->store, entry);
-        if (field_key.size < 6U
-            || memcmp(field_key.data + field_key.size - 6U, ".label", 6U)
+        if (field_key.size < 11U
+            || memcmp(field_key.data + field_key.size - 11U, ".jumb_label", 11U)
                    != 0
             || !omc_jumbf_ascii_icase_contains(label_view.data, label_view.size,
                                                "signature", 256U)) {
             continue;
         }
-        if (field_key.size - 6U + 1U > (omc_u32)sizeof(box_prefix)) {
+        if (field_key.size - 11U + 1U > (omc_u32)sizeof(box_prefix)) {
             ctx->res.status = OMC_JUMBF_LIMIT;
             return 0;
         }
-        memcpy(box_prefix, field_key.data, field_key.size - 6U);
-        box_prefix[field_key.size - 6U] = '\0';
-        box_prefix_len = (omc_u32)(field_key.size - 6U);
+        memcpy(box_prefix, field_key.data, field_key.size - 11U);
+        box_prefix[field_key.size - 11U] = '\0';
+        box_prefix_len = (omc_u32)(field_key.size - 11U);
         *out_has_signatures = 1;
 
         for (j = 0U; j < scan_limit && j < ctx->store->entry_count; ++j) {
@@ -7295,7 +7278,8 @@ omc_jumbf_sem_note_key(omc_jumbf_sem_proj* sem, const char* path,
                        omc_u32 path_len)
 {
     omc_const_bytes key;
-    omc_u32 active_pos;
+    char prefix[OMC_JUMBF_PATH_CAP];
+    omc_u32 prefix_len;
 
     if (sem == (omc_jumbf_sem_proj*)0 || path == (const char*)0) {
         return;
@@ -7325,11 +7309,22 @@ omc_jumbf_sem_note_key(omc_jumbf_sem_proj* sem, const char* path,
         sem->has_signature = 1;
         sem->signature_key_hits += 1U;
     }
-    if (!sem->active_manifest_present
-        && omc_jumbf_view_find(key, ".manifests.active_manifest",
-                               &active_pos)) {
+    if (omc_jumbf_extract_manifest_prefix_from_key(
+            key, prefix, sizeof(prefix), &prefix_len)
+        && omc_jumbf_manifest_prefix_is_active(prefix, prefix_len)) {
         sem->active_manifest_present = 1;
-        sem->active_manifest_count = 1U;
+        /* Measurement only needs to distinguish zero, one and multiple
+         * prefixes to count the optional field. Keep no unbounded set. */
+        if (sem->active_manifest_prefix_len == 0U) {
+            memcpy(sem->active_manifest_prefix, prefix, prefix_len + 1U);
+            sem->active_manifest_prefix_len = prefix_len;
+            sem->active_manifest_count = 1U;
+        } else if (sem->active_manifest_prefix_len != prefix_len
+                   || memcmp(sem->active_manifest_prefix, prefix,
+                             prefix_len) != 0) {
+            sem->active_manifest_ambiguous = 1;
+            sem->active_manifest_count = 2U;
+        }
     }
 }
 
@@ -8509,10 +8504,12 @@ omc_jumbf_project_c2pa_semantics_meas(omc_jumbf_ctx* ctx, const omc_u8* bytes,
                0U)) {
         return 0;
     }
-    if (!omc_jumbf_emit_field_text(
+    if (sem.active_manifest_prefix_len != 0U
+        && !sem.active_manifest_ambiguous
+        && !omc_jumbf_emit_field_text(
             ctx, "c2pa.semantic.active_manifest.prefix",
             omc_jumbf_cstr_size("c2pa.semantic.active_manifest.prefix"),
-            "", 0U)) {
+            sem.active_manifest_prefix, sem.active_manifest_prefix_len)) {
         return 0;
     }
     if (!omc_jumbf_emit_named_counts(ctx, "c2pa.semantic",
@@ -9367,7 +9364,7 @@ omc_jumbf_project_c2pa_semantics(omc_jumbf_ctx* ctx, omc_size scan_limit)
                ingredient_explicit_reference_ambiguous_signature_count)) {
         return 0;
     }
-    if (!omc_jumbf_emit_field_text(
+    if (active_manifest_prefix_len != 0U && !omc_jumbf_emit_field_text(
             ctx, "c2pa.semantic.active_manifest.prefix",
             omc_jumbf_cstr_size("c2pa.semantic.active_manifest.prefix"),
             active_manifest_prefix, active_manifest_prefix_len)) {
@@ -10422,7 +10419,7 @@ omc_jumbf_decode_boxes(omc_jumbf_ctx* ctx, const omc_u8* bytes, omc_size size,
                                            payload_size, label,
                                            (omc_u32)sizeof(label),
                                            &label_len)) {
-                if (!omc_jumbf_make_field_key(parent_path, parent_len, "label",
+                if (!omc_jumbf_make_field_key(parent_path, parent_len, "jumb_label",
                                               label_key,
                                               (omc_u32)sizeof(label_key),
                                               &label_key_len)

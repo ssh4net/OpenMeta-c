@@ -127,6 +127,121 @@ finished:
     return 1;
 }
 static int
+collect_chunk(omc_source_collect *c, omc_source_segment *segments,
+              omc_u32 *count, omc_u64 offset, omc_u64 size,
+              const omc_u8 *header)
+{
+    if (*count == OMC_SOURCE_MAX_SEGMENTS || size > c->capacity - c->used) {
+        c->status = OMC_READ_SOURCE_LIMIT;
+        return 0;
+    }
+    segments[*count].original = offset;
+    segments[*count].compact = c->used;
+    segments[*count].size = (omc_size)size;
+    memcpy(c->bytes + c->used, header, 8U);
+    if (!read_bytes(c, offset + 8U, c->bytes + c->used + 8U,
+                    (omc_size)size - 8U))
+        return 0;
+    c->used += (omc_size)size;
+    (*count)++;
+    return 1;
+}
+static int
+collect_png(omc_source_collect *c, omc_source_segment *segments, omc_u32 *count)
+{
+    static const omc_u8 signature[8] = {
+        0x89U, 'P', 'N', 'G', 13U, 10U, 26U, 10U
+    };
+    omc_u8 h[8];
+    omc_u64 offset, size;
+    if (!read_bytes(c, 0U, h, 8U))
+        return 0;
+    if (memcmp(h, signature, 8U) != 0) {
+        c->status = OMC_READ_SOURCE_UNSUPPORTED;
+        return 0;
+    }
+    if (c->capacity < 8U) {
+        c->status = OMC_READ_SOURCE_LIMIT;
+        return 0;
+    }
+    memcpy(c->bytes, h, 8U);
+    c->used = 8U;
+    offset = 8U;
+    *count = 0U;
+    while (offset <= c->range->size && c->range->size - offset >= 12U) {
+        if (!read_bytes(c, offset, h, 8U))
+            return 0;
+        size = number(h, 4U, 0) + 12U;
+        if (size > c->range->size - offset) {
+            c->status = OMC_READ_SOURCE_MALFORMED;
+            return 0;
+        }
+        if (memcmp(h + 4U, "eXIf", 4U) == 0 ||
+            memcmp(h + 4U, "iCCP", 4U) == 0 ||
+            memcmp(h + 4U, "tEXt", 4U) == 0 ||
+            memcmp(h + 4U, "zTXt", 4U) == 0 ||
+            memcmp(h + 4U, "iTXt", 4U) == 0 ||
+            memcmp(h + 4U, "caBX", 4U) == 0) {
+            if (!collect_chunk(c, segments, count, offset, size, h))
+                return 0;
+        }
+        offset += size;
+        if (memcmp(h + 4U, "IEND", 4U) == 0)
+            break;
+    }
+    /* The metadata scanner accepts EOF without IEND and does not check CRCs.
+     * Only retained metadata chunks need to be present in the compact input. */
+    return 1;
+}
+static int
+collect_webp(omc_source_collect *c, omc_source_segment *segments, omc_u32 *count)
+{
+    omc_u8 h[12];
+    omc_u64 offset, end, size;
+    omc_u32 riff_size;
+    unsigned i;
+    if (!read_bytes(c, 0U, h, 12U))
+        return 0;
+    if (memcmp(h, "RIFF", 4U) != 0 || memcmp(h + 8U, "WEBP", 4U) != 0) {
+        c->status = OMC_READ_SOURCE_UNSUPPORTED;
+        return 0;
+    }
+    if (c->capacity < 12U) {
+        c->status = OMC_READ_SOURCE_LIMIT;
+        return 0;
+    }
+    memcpy(c->bytes, h, 12U);
+    c->used = 12U;
+    end = number(h + 4U, 4U, 1) + 8U;
+    if (end > c->range->size)
+        end = c->range->size;
+    offset = 12U;
+    *count = 0U;
+    while (offset <= end && end - offset >= 8U) {
+        if (!read_bytes(c, offset, h, 8U))
+            return 0;
+        size = number(h + 4U, 4U, 1);
+        size += 8U + (size & 1U);
+        if (size > end - offset) {
+            c->status = OMC_READ_SOURCE_MALFORMED;
+            return 0;
+        }
+        if (memcmp(h, "EXIF", 4U) == 0 || memcmp(h, "XMP ", 4U) == 0 ||
+            memcmp(h, "ICCP", 4U) == 0 || memcmp(h, "C2PA", 4U) == 0) {
+            if (!collect_chunk(c, segments, count, offset, size, h))
+                return 0;
+        }
+        offset += size;
+    }
+    /* Retain valid RIFF framing for the shared contiguous metadata decoder. */
+    riff_size = (omc_u32)(c->used - 8U);
+    for (i = 0U; i < 4U; ++i) {
+        c->bytes[4U + i] = (omc_u8)(riff_size & 255U);
+        riff_size >>= 8U;
+    }
+    return 1;
+}
+static int
 queue_ifd(omc_source_collect *c, omc_u64 *queue, omc_u32 *count, omc_u64 offset)
 {
     omc_u32 i;
@@ -340,6 +455,18 @@ omc_read_source(const omc_source_range *range, omc_store *store,
                    (signature[0] == 'M' && signature[1] == 'M')) {
             tiff = 1;
             if (!collect_tiff(&c)) {
+                res.status = c.status;
+                res.scratch_used = c.used;
+                return res;
+            }
+        } else if (signature[0] == 0x89U && signature[1] == 'P') {
+            if (!collect_png(&c, segments, &count)) {
+                res.status = c.status;
+                res.scratch_used = c.used;
+                return res;
+            }
+        } else if (signature[0] == 'R' && signature[1] == 'I') {
+            if (!collect_webp(&c, segments, &count)) {
                 res.status = c.status;
                 res.scratch_used = c.used;
                 return res;

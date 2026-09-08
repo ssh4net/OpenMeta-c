@@ -44,8 +44,17 @@ Callback sources currently support:
   arrays, and referenced tag values. Strip, tile, and preview-offset tags remain
   metadata values; their image addresses are not followed. Embedded metadata
   stored as tag values remains available to existing decoders.
+- PNG (0.4.0): collect `eXIf`, `iCCP`, text and `caBX` metadata chunks, skip
+  image bodies and stop at `IEND`. Chunk lengths include CRC storage, but the
+  metadata scanner does not validate CRC values or require `IEND` before EOF.
+- WebP (0.4.0): collect `EXIF`, `XMP `, `ICCP` and `C2PA` chunks within the
+  declared RIFF extent, bounded by source size. Honor odd-length padding and
+  skip image bodies. PNG/WebP reuse the contiguous family decoders, including
+  compressed payload handling and split JUMBF assembly.
 
-JPEG collection retains at most 1,024 metadata segments. TIFF collection visits
+JPEG/PNG/WebP collection retains at most 1,024 metadata segments/chunks. Their
+aggregate metadata and framing must fit `metadata_capacity`; logical payloads
+must also fit the separate payload scratch. TIFF collection visits
 at most 1,024 unique IFDs, also constrained by the EXIF limits (default 128 IFDs).
 The TIFF scratch snapshot retains original TIFF offsets. Its highest referenced
 metadata byte must fit `metadata_capacity`, even for a small value far into the
@@ -72,6 +81,11 @@ orders, Classic/BigTIFF, DNG tags, raw MakerNotes, and JPEG MakerNote enrichment
 Callbacks reject attempted access to the fixtures' image-data ranges. Focused
 C++ differential tests compare exact-read failures/accounting, cached views,
 JPEG block coordinates, and canonical EXIF bytes after positional TIFF decode.
+PNG/WebP tests compare all decoded C entries between memory and callbacks,
+then compare scanner fields, logical payload bytes and decoded records with
+C++. Split JUMBF chunks straddle a 3 GiB virtual image gap. Tests also cover
+exact/insufficient scratch, minimal headers, odd padding, malformed lengths,
+I/O budgets and preservation of populated stores on collection failure.
 
 Fixed synthetic sources report a virtual size of 5 GiB:
 
@@ -88,6 +102,7 @@ The complete fixed-fixture test rounded to 0.00 seconds with `time -p`; this is
 functional I/O evidence, not a throughput benchmark.
 
 Next: replace the bounded TIFF scratch snapshot with direct value windows and
-convert the first external MakerNote offsets; then add PNG/WebP and multipart
-payload source reads. JP2/JXL/BMFF, GIF/EXR, and native RAW readers follow. Keep
-unsupported and scratch-limit results explicit at every increment.
+convert the first external MakerNote offsets; then add reusable source scanner
+and multipart payload operations. JP2/JXL/BMFF, GIF/EXR, and native RAW readers
+follow. See [read_decode_parity.md](read_decode_parity.md) for the pinned
+reference, ordered batches and acceptance gates.

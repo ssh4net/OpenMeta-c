@@ -107,8 +107,17 @@ check_bounded_family_details(void)
 
     cap = omc_metadata_capability_query(OMC_SCAN_FMT_WEBP,
                                         OMC_METADATA_CAPABILITY_JUMBF);
+    OMC_TEST_CHECK_U64_EQ(cap.read, OMC_METADATA_CAPABILITY_BOUNDED);
+    OMC_TEST_CHECK_U64_EQ(cap.structured_decode, OMC_METADATA_CAPABILITY_BOUNDED);
     OMC_TEST_CHECK_U64_EQ(cap.transfer_prepare,
                           OMC_METADATA_CAPABILITY_UNSUPPORTED);
+
+    cap = omc_metadata_capability_query(OMC_SCAN_FMT_PNG,
+                                        OMC_METADATA_CAPABILITY_C2PA);
+    OMC_TEST_CHECK_U64_EQ(cap.read, OMC_METADATA_CAPABILITY_BOUNDED);
+    OMC_TEST_CHECK_U64_EQ(cap.structured_decode, OMC_METADATA_CAPABILITY_BOUNDED);
+    OMC_TEST_CHECK_U64_EQ(cap.target_edit, OMC_METADATA_CAPABILITY_UNSUPPORTED);
+    OMC_TEST_CHECK_U64_EQ(cap.transfer_prepare, OMC_METADATA_CAPABILITY_UNSUPPORTED);
 
     cap = omc_metadata_capability_query(OMC_SCAN_FMT_JXL,
                                         OMC_METADATA_CAPABILITY_JUMBF);

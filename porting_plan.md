@@ -1,13 +1,25 @@
 # OpenMeta-c Porting Plan
 
-Updated: 2026-09-07.
+Updated: 2026-09-08.
 
 ## Goal And Reference Baseline
 
-Bring the portable C metadata core into behavioral parity with the relevant
-C++ core. Keep it suitable for possible reuse underneath the C++ library.
-C++ API coverage is not the completion criterion: owning convenience objects,
-rich queries, host adapters, search, and language bindings can remain in C++.
+Build a standalone C89/C90 metadata-processing library with substantially the
+same portable core features as OpenMeta C++. Reading, decoding, interpretation,
+structured non-fuzzy queries, concept resolution, creation, editing,
+translation, transfer, and writing are in scope. Embedded-device use and
+possible reuse underneath C++ are design goals.
+
+Match metadata behavior through C-native APIs, not C++ class layouts. Owning
+convenience objects, presentation, host SDK adapters and language bindings may
+remain in C++. Fuzzy search is excluded. Native DNG metadata processing remains
+in scope independently of the excluded Adobe DNG SDK integration.
+
+This scope clarification supersedes the earlier restriction to read/write
+primitives and safety-only interpretation. Rich metadata semantics are not
+excluded merely because their current C++ API owns vectors or strings.
+Temporary implementation overlap is expected while C catches up; later C++
+reuse is incremental and must preserve behavior and acceptable resource cost.
 
 The initial comparison used these public source snapshots:
 
@@ -31,6 +43,9 @@ The old estimates of `80-85%` read coverage and `60-65%` overall public surface
 do not define a current core-parity denominator. Track the scoped matrix and
 its acceptance cases instead. Do not average C++ product percentages into C
 completion or count intentionally excluded C++ features as C defects.
+The conversational estimate of about 75% used the narrower boundary and is
+not a completion estimate for this clarified scope. Define feature cases for
+interpretation and non-fuzzy query before publishing revised percentages.
 
 ## Execution Checkpoint: Typed Writer and Translation
 
@@ -64,7 +79,16 @@ not suppress or relabel those failures. The initial positional batch is now impl
 See [authoring.md](authoring.md) for contracts and bounded coverage. The matrix
 below retains source-review detail where broader acceptance remains open.
 
-## Current Checkpoint: Version 0.3.0
+## Current Reading/Decoding Checkpoint: Version 0.4.0
+
+The [reading/decoding plan](read_decode_parity.md) pins C++ 0.4.127 and orders
+the remaining convergence work. Its first batch adds PNG/WebP callback reads,
+split JUMBF carriers, four JUMBF output corrections and working Brotli discovery.
+Release direct/focused gates pass 40/40; sanitizer and dependency-free direct
+gates each pass 37/37. The nine default BMFF failures and 266 broad mismatch
+reports are unchanged from the fresh baseline. Full stage parity remains open.
+
+## Prior Core Checkpoint: Version 0.3.0
 
 The five authorized workstreams have an implemented bounded slice: fresh
 baselines, typed authoring/validation/canonical EXIF, the five reverse groups
@@ -82,10 +106,15 @@ initial JPEG/TIFF/BigTIFF/DNG conversion. This is not complete C++ core parity.
 | Historical `--all` differential inventory | Fails: 266 mismatch reports, compared with 268 at baseline |
 | Corpus and native Windows acceptance | Not run in this checkpoint |
 
+These results describe the 2026-09-07 implementation checkpoint. The scope
+clarification changes planned coverage, not code or recorded test outcomes.
+
 The `--all` count is an inventory, not a coverage percentage. Its final reports
 comprise 91 metadata comparisons, 116 output-byte comparisons, and 59 status,
-output-presence, or sidecar-path comparisons. Some richer C++ summaries are
-outside the C scope; other lifecycle and metadata differences remain real work.
+output-presence, or sidecar-path comparisons. Richer metadata summaries must
+now be reviewed as semantic parity work; do not dismiss them as C++-only.
+Separate presentation-only differences and excluded fuzzy/SDK behavior from
+real lifecycle, metadata and interpretation gaps.
 The new focused gates test the added APIs independently and do not hide these
 reports. Whole-file BMFF byte identity is not promised by the append layout.
 
@@ -109,8 +138,8 @@ a general object framework, or a separate writer for each translation group.
 
 | Layer | Intended responsibility |
 | --- | --- |
-| C portable core | Bounded input, metadata keys/values/origin, decode, typed validation, explicit edits and translation, canonical payload serialization, bounded carrier rewrite, transfer policy primitives, payload/package wire formats |
-| C++ layer | Owning objects and ergonomic APIs, rich interpretation/query/concept aggregation, fuzzy search, host adoption and codec adapters, higher-level scheduling and file workflows, Python and other bindings |
+| C portable core | Bounded input, metadata keys/values/origin, decode, semantic interpretation and normalization, structured non-fuzzy query/candidates/concept resolution, provenance/conflict/safety facts, typed validation, explicit edits and translation, canonical payload serialization, bounded carrier rewrite, transfer policy, payload/package wire formats |
+| C++ layer | Owning objects and ergonomic wrappers over metadata behavior, presentation, fuzzy search, host adoption and SDK adapters, higher-level scheduling and file workflows, Python and other bindings |
 | Host/platform boundary | Storage and I/O policy, image facts, worker scheduling, SDK integration, signing/trust services, publication/privacy policy |
 
 Existing C file/persist helpers remain supported. A reusable algorithm must
@@ -121,15 +150,16 @@ Rules for the proposed common core:
 
 - Preserve flat C APIs, explicit lifetimes, capacities, errors, and resource
   limits. Current targets compile as C90 with a 64-bit integer shim; retain
-  that compatibility while the project is referred to as the C99 port. A
+  that compatibility for the C89/C90 port. A
   language-level change is a separate decision, not a prerequisite here.
 - Use setup-time allocation/reservation where the existing API owns storage.
   Make scratch requirements explicit. Do not describe all current C code as
   caller-allocated or allocation-free. Promise allocation-free execution only
   for measured and tested replay/patch paths.
 - Keep algorithms and wire contracts reusable without C++ types or a C++
-  runtime. C++ should eventually wrap selected C operations without
-  reimplementing their validation or policy.
+  runtime. C++ can eventually wrap accepted C operations without duplicating
+  their algorithms. Independent implementations and overlapping public APIs
+  are acceptable during migration; shared differential fixtures limit drift.
 - Keep translation explicit. XMP projection during transfer is not permission
   to rewrite native EXIF/IPTC. Preserve exact types, rational/date precision,
   source provenance, target image authority, and deletion/conflict behavior.
@@ -141,6 +171,32 @@ Rules for the proposed common core:
 - Treat future C++ use of C as a separate migration milestone. This plan does
   not switch the C++ implementation, freeze a new ABI, or add C++ dependencies
   to the C library.
+
+### Embedded Use
+
+Embedded support changes resource and platform contracts, not the meaning of
+enabled metadata features. A constrained build may omit optional modules,
+backends or registry families with explicit capability reporting; enabled
+operations must retain their documented semantics. Module selection beyond
+existing build options is planned work, not an available feature claim.
+
+- Keep interpretation/query outputs in explicit records, source-entry IDs and
+  bounded arrays, with documented ownership, capacities and unknown outcomes.
+  Preserve confidence and conflict information where the reference defines it;
+  these data do not require C++ objects or fuzzy matching.
+- Separate filesystem, threads, SDKs and host policy from memory/source-based
+  metadata operations. Do not require these services for semantic queries.
+- Make workspace, allocation, depth and I/O limits explicit. Extend caller
+  storage or allocator control where needed; existing store/decoder allocation
+  and sizable parser stacks still need an embedded resource audit.
+- Validate each supported toolchain and target data model. Current scalar
+  types require 16-bit short, 32-bit int and a usable 64-bit integer shim.
+  C89 syntax alone does not establish support for every MCU or freestanding
+  environment. Existing desktop tests are not embedded acceptance.
+- Measure code/read-only-table size, maximum stack, peak scratch/heap, I/O and
+  execution cost on fixed cases. Record the enabled feature set and target.
+  Include capacity rejection, allocation failure, malformed input and the
+  dependency-disabled configuration in the relevant acceptance gates.
 
 ## Dependency And Distribution Policy
 
@@ -199,22 +255,35 @@ Presence alone does not establish complete reference parity:
 | R1 | Store, keys, values, origins, edits | `omc_store.h`, `omc_val.h`, `omc_edit.h`; add/set/tombstone and reserve operations | Present and tested: typed makers, array byte order, candidate publication on commit/compact, and failure preservation. |
 | R2 | Contiguous scan, payload assembly, decode | `omc_scan.h`, `omc_pay.h`, `omc_read.h`; direct EXIF/XMP/ICC/IPTC/IRB/JUMBF/EXR tests | Present, broad bounded coverage. Promote C++ differences by fixture; no universal camera/read-parity claim. |
 | R3 | MakerNote/native RAW and modern-container enrichment | `src/read/omc_exif.c`, `omc_bmff.c`, naming and read tests | Partial against the newer C++ tree. Preserve raw/unknown values; port safety-relevant facts and small proven read deltas before long-tail descriptive enrichment. |
-| R4 | BMFF derived fields | Item semantics, properties, `ipma` associations and `grpl` summaries in `omc_bmff.c` | Partial. C++ has deeper scene/component, derived-image and display-transform summaries. Keep parsing/preservation facts in C; broad semantic aggregation may stay in C++. Read-side summaries do not imply writer remapping. |
-| R5 | Positional source, read budgets, source ranges/windows | `omc_source.h`, `omc_read_source.h`, direct and focused C++ source tests | Implemented fixed-size memory/callback sources, exact reads, sticky budgets, ranges/windows, and initial JPEG/TIFF/BigTIFF/DNG collection. Remaining readers and source-native TIFF/MakerNote values are staged work. |
+| R4 | BMFF derived fields | Item semantics, properties, `ipma` associations and `grpl` summaries in `omc_bmff.c` | Partial. Deeper scene/component, derived-image and display-transform metadata semantics are C targets. Port bounded records and derivations without C++ ownership containers. Read-side summaries do not imply writer remapping. |
+| R5 | Positional source, read budgets, source ranges/windows | `omc_source.h`, `omc_read_source.h`, direct and focused C++ source tests | Implemented fixed-size memory/callback sources, exact reads, sticky budgets, ranges/windows, and bounded JPEG/TIFF/BigTIFF/DNG/PNG/WebP collection. Remaining readers and source-native TIFF/MakerNote values are staged work; see `read_decode_parity.md`. |
 | R6 | Runtime capabilities, preview, CCM/DNG helpers | `omc_capabilities.h`, `omc_preview.h`, `omc_ccm_query.h` and direct tests | Present bounded helpers. Capabilities must report actual C support and enabled compression features. |
 | R7 | Detached entry/store validation | `omc_validate.h` exposes file/read diagnostics and CCM checks | Implemented initial detached schema in `omc_store_validate.h`; bounded diagnostics, wire/value checks, singleton and image-context tests. |
 | R8 | Decoded snapshots, source provenance and persistence | C callers retain stores/bytes; transfer packages retain output source ranges | Missing named snapshot API; Conditional. C++ snapshot v1 exists. Positional input does not require its owning or serialized snapshot object first. |
+
+### Interpretation And Non-Fuzzy Query
+
+These rows are part of the C completion denominator. Their scope is the
+portable behavior in the pinned C++ reference, including rich metadata
+semantics. C++ ownership and presentation APIs need not be reproduced.
+
+| ID | Capability | Current C evidence | Status and decision |
+| --- | --- | --- | --- |
+| I1 | Tag meaning, units, enums, normalization and vendor semantics | EXIF/MakerNote naming and decode, BMFF facts, DNG/CCM fields | Partial. Inventory exact values, units, shapes and explicit unknowns by semantic family; names alone do not establish interpretation parity. |
+| I2 | Structured interpretation records | Bounded CCM collection and selected derived metadata | Partial foundations; general equivalent record API is missing. Port normalized records and their source-entry relationships using C data and explicit storage. |
+| Q1 | Non-fuzzy semantic queries and candidates | Bounded `omc_ccm_collect_fields()`; general query API is missing | Partial subset. Port exact/registered-alias matching, normalized candidates, confidence and provenance. Fuzzy fallback remains excluded and must be disabled in the reference comparison. |
+| Q2 | Concept resolution and metadata applicability | Existing target-image facts and transfer diagnostics | Partial foundations; general concept API is missing. Port deterministic preference/conflict rules, structured concepts and RAW/transfer applicability. Retain ambiguity and unknown results; application policy remains explicit. |
 
 ### Creation, Translation, And Writing
 
 | ID | Capability | C++ reference and current C evidence | Status and decision |
 | --- | --- | --- | --- |
-| W1 | Typed authoring | C++ `create_metadata_store()` preflights, copies, validates and publishes atomically. C has typed value makers, explicit array byte order, and candidate-based edit publication. | Implemented bounded typed helpers and output-preserving transactions; see `authoring.md`. Logical builders and FlatHost import remain above the core. |
+| W1 | Typed authoring | C++ `create_metadata_store()` preflights, copies, validates and publishes atomically. C has typed value makers, explicit array byte order, and candidate-based edit publication. | Implemented bounded typed helpers and output-preserving transactions; see `authoring.md`. Owning logical builders and FlatHost wrappers remain above C; reusable metadata construction and validation semantics remain C targets. |
 | W2 | Canonical TIFF/EXIF serialization | C++ `serialize_exif_tiff()` is target-neutral and honors supported wire hints. C's public serializer builds typed TIFF; internal transfer payloads apply target framing above it. | Implemented `omc_serialize_exif_tiff()` with direct tests and exact C++ byte comparison. Carrier wrappers reuse canonical output; TIFF/BigTIFF retain target layout. |
 | W3 | EXIF/IPTC to portable XMP | C already has projection, all three conflict policies, custom namespaces and managed-namespace canonicalization | Paired IPTC creation/digital-creation projection implemented and tested. Broader structured XMP parity remains partial. |
 | W4 | Explicit XMP to native metadata | C++ has date, technical, capture, descriptive and target-bound geometry translation. C exposes these groups through `omc_translate_xmp()`. | Implemented all five bounded groups in `omc_translation.h`, with one transaction and focused C++ EXIF/IPTC differential tests. Broader mappings remain separate batches. |
 | W5 | Native IPTC-IIM emission | Internal `omc_transfer_build_iptc_iim()` emits datasets; JPEG IRB and TIFF tag `33723` carrier paths exist | Present bounded mechanism. Reuse it for descriptive/date translation; add charset, repetition, tombstone and stale-IRB checks. A separate public IPTC writer is not a prerequisite. |
-| W6 | Target image facts and transfer safety | C has target image spec, CompatibleFile/RenderedImage and diagnostics; C++ has wider source-processing classification and a RAW-data descriptor | Partial. C has no source descriptor or explicit lens/preview/general-processing audit categories. Verify selected fields through actual transfer paths; port needed safety facts without the rich query system. |
+| W6 | Target image facts and transfer safety | C has target image spec, CompatibleFile/RenderedImage and diagnostics; C++ has wider source-processing classification and a RAW-data descriptor | Partial. C has no source descriptor or explicit lens/preview/general-processing audit categories. Verify selected fields through actual transfer paths; share classification with interpretation/query as those operations are ported. Full query completion need not block a bounded safety fix. |
 | W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h` and direct tests | Present bounded pipeline. Existing `omc_transfer_compile()` does not imply parity with C++ compiled worker/handoff APIs. Extend the pipeline rather than replacing it. |
 | W8 | XMP carrier merge and lifecycle | C has destination embedded/sidecar stores, precedence, writeback and persistence options | Present controls, Partial lifecycle parity. Test modes/defaults, strip/overwrite/failure behavior and source/destination conflicts. |
 | W9 | Payload/package artifacts | C has `OMTPLD01` v1, `OMTPKG01` v2, semantic views, replay, executed-output materialization and artifact inspection | Present bounded wire families. Test interoperation in both directions; matching version/magic does not establish complete builder/execution parity. |
@@ -223,13 +292,13 @@ Presence alone does not establish complete reference parity:
 | W12 | Prepared canonical TIFF patching | C++ `exif_tiff_patch.h` has plan-scoped handles, fixed-width typed transactions and independent workers | Missing; Conditional for the first writer milestone. Useful later as a small reusable execution primitive after W1/W2, without C++ owner classes. |
 | W13 | MakerNote trust and C2PA | C has conservative rendered filtering and bounded JUMBF/C2PA routes; C++ has richer MakerNote layout audits and optional verification | Partial safety facts. Keep opaque preservation distinct from verified relocation. Bounded OpenSSL verification logic is eligible as an optional C backend. Rendered C2PA invalidation/drop stays explicit; full asset binding, signing and trust remain outside the first writer milestone. |
 
-### Features That Stay Above The C Core
+### Excluded Integrations And Conditional Features
 
 | Feature | Decision |
 | --- | --- |
-| Rich query candidates, confidence/provenance presentation, concept resolution and interpretation records | C++ layer. Port only primitive facts needed by C read/write/safety operations; do not copy the full query graph or its containers. |
+| Owning C++ query/interpretation objects and presentation helpers | C++ layer. Underlying candidates, confidence, provenance, concept resolution and interpretation semantics are C targets in I1/I2/Q1/Q2. |
 | Fuzzy search, Unicode/transliteration policy and optional search indexes | C++ layer. Independent capability; not a metadata-core parity gate. |
-| Logical convenience builders, FlatHost mapping/reconciliation and typed codec operations | C++ layer. C typed data/validation/edits can provide their eventual foundation. |
+| Owning logical builders, FlatHost object adapters and typed codec wrappers | C++ layer for object/host integration. Portable metadata construction, validation and reconciliation rules remain C targets; wrapper placement does not exclude their underlying semantics. |
 | Host Adoption Profile, PreparedTransferHandoff, generic adapter views and owning compiled plans | C++ layer. Wire payloads and narrow replay primitives remain the C bridge. |
 | OCIO, EXR host adapters, Adobe DNG SDK and LibRaw integration | C++ layer. EXR header read remains in C; host emission is Conditional, and full EXR file rewrite is outside scope. |
 | OIIO adapter | Removed from the current C++ tree. Do not list it as an implemented feature to port; any future bridge is separate integration work. |
@@ -268,13 +337,23 @@ schedule. Establish timings in B0 before assigning calendar estimates.
 | B2 | Five reverse-translation groups plus relevant forward-XMP deltas | B1; medium, split by mapping group | Exact native JPEG/TIFF readback, conflicts/tombstones/provenance and failure atomicity agree with reference |
 | B3 | Bounded BMFF replacement, preservation and packages | B0; medium/large, independent of translation logic | HEIF/AVIF/CR3 direct and persisted-package graph fixtures agree on retained and changed semantics |
 | B4 | Positional source and incremental reader conversion | B0; small primitive, large staged conversion | Memory/callback parity, budgets, cancellation/short reads; measured I/O skips image payloads |
-| B5 | Optional common-core reuse experiment | Selected B1-B4 operations accepted; bounded experiment | Isolated C++ consumer delegates one operation to C with behavior/cost evidence; production switch is a separate decision |
+| S1 | Shared semantic classification and normalization | Existing decode/model; stage by metadata family | Meaning, units, numeric shape, source IDs, ambiguity and unknown outcomes match pinned C++ cases |
+| S2 | Non-fuzzy query, interpretation records and concept resolution | Accepted S1 families; reuse current store and semantic rules | Candidates, normalized records, preference/conflicts, provenance and applicability match with fuzzy matching disabled |
+| E1 | Embedded resource and portability acceptance | Applies to each enabled B/S slice | Target/toolchain, code/table size, stack, scratch/heap and I/O measured; capacity/failure and dependency-disabled cases verified |
+| B5 | Optional common-core reuse experiment | Selected B1-B4 or S1/S2 operation accepted; bounded experiment | Isolated C++ consumer delegates one operation to C with behavior/cost evidence; production switch is a separate decision |
 
-Default order is **B0 -> B1 -> B2 -> B3 -> B4**, then evaluate B5. Safety or
-existing-test regressions in B0 preempt features. Small fixture-backed
-read/name/projection corrections can travel with the relevant batch. Move B3
-ahead of B1/B2 if a concrete consumer is blocked on BMFF preservation.
-Do not delay B2 for a complete positional-reader port or rich semantic parity.
+The first implementation sequence was **B0 -> B1 -> B2 -> B3 -> B4**. Its
+bounded slices are recorded above; do not restart completed work. Next,
+follow the reading/decoding convergence batches in
+[read_decode_parity.md](read_decode_parity.md). Keep decoder-generated semantic
+fields in that inventory. S1/S2 and remaining transfer/lifecycle parity follow
+in bounded increments after the current reading/decoding priority.
+Apply E1 as those modules become candidates for embedded use. B5 can use any
+accepted operation and does not gate semantic porting or require full parity.
+
+Small fixture-backed read/name/projection corrections can travel with the
+relevant batch. A useful writer milestone need not wait for every semantic
+family, but it must not be reported as complete metadata-core parity.
 Expat-backed XMP decoding may be introduced with a relevant read/projection
 batch when it closes a demonstrated parity gap. Optional OpenSSL verification
 is a separate bounded batch; its availability does not block B1-B4.
@@ -339,7 +418,8 @@ IPTC emitter. Do not route authoring through a fabricated target image file.
 - Audit source-processing safety needed by these writes, including target-owned
   dimensions/layout, RAW/rendered source facts, lens/preview-related fields,
   ICC, MakerNotes and C2PA. Add narrow classification/descriptor inputs only
-  where the reference behavior needs them; do not import its query model.
+  where the reference behavior needs them. Reuse these facts in S1/S2 rather
+  than keeping separate rules for transfer and query indefinitely.
   Preserve capture facts separately from instructions that reprocess pixels.
 
 First B1 slice: typed makers, detached validation and transaction failure tests.
@@ -445,6 +525,52 @@ on fixed fixtures. C++ itself has positional enrichment residuals; preserve
 explicit unsupported outcomes rather than guessing offset bases.
 Snapshot ownership/serialization and rich diagnostics are not prerequisites.
 
+### S1/S2: Port Rich Metadata Semantics In Bounded Families
+
+First inventory the pinned C++ query, interpretation and concept operations,
+their shared classifiers/normalizers and their tests. Keep interpretation and
+query as separately tracked stages even where they share implementation.
+Do not infer coverage from tag counts or recreate a second metadata store.
+
+1. Establish C records, source-entry references, explicit output/scratch
+   capacities and failure contracts using the existing store/value types.
+   Translate behavior rather than C++ vectors, strings or ownership graphs.
+2. Begin with well-defined families already supported by C decode: orientation,
+   geometry, capture values, DNG/CCM and descriptive metadata. Follow actual
+   reference dependencies; shared classification and normalization feed query
+   candidates, interpretation records and concept resolution.
+3. Extend to source-processing/lens/RAW applicability, vendor semantics and
+   richer BMFF relationships. Preserve source-declared units and shape beside
+   normalized values where the contract requires both. Interpreting a curve
+   or LUT does not authorize applying it to pixels.
+4. Match non-fuzzy rules, confidence, provenance, candidate preference and
+   conflict behavior on shared fixtures. Include incomplete/malformed values,
+   duplicate and contradictory sources, ambiguous vendor facts, capacity
+   failure and explicit unknown outcomes. Disable fuzzy matching on the C++
+   side; do not silently count fuzzy-only results as semantic requirements.
+5. Share accepted rules with validation, translation and transfer when their
+   contracts agree. Keep interpretation read-only and native translation
+   explicit; semantic inference must not silently alter source metadata.
+
+Progress is recorded per family and operation with a defined fixture scope.
+An implemented primitive is partial progress toward a rich semantic API, not
+proof that every candidate or resolution outcome matches C++.
+
+### E1: Accept A Defined Embedded Configuration
+
+Select and record the target/toolchain and enabled metadata families before
+claiming embedded support. Preserve a dependency-disabled, single-threaded
+configuration. Audit allocator and workspace paths, fixed parser stacks,
+recursion/depth bounds, integer-width/size overflow and required runtime
+services. Add caller workspace or allocator control where the selected paths
+need it, without replacing the existing store architecture.
+
+Measure the resource quantities listed under Embedded Use on fixed valid and
+malformed fixtures. Verify the selected compiler/data model and, where
+available, actual target or emulator execution. A host build or cross-compile
+alone does not establish target runtime behavior. Record limits per supported
+configuration; avoid a blanket claim for all embedded devices.
+
 ### B5: Evaluate C As A C++ Implementation Core
 
 After accepting a useful slice, build an isolated C++ consumer that delegates
@@ -453,7 +579,8 @@ Compare values/bytes, errors, allocations, copies, peak memory and throughput
 against pinned native C++ on identical fixed fixtures.
 
 Determine whether borrowed views suffice before adding conversion copies or
-freezing a shared ABI. Keep RAII and rich APIs above the C boundary. If a call
+freezing a shared ABI. Keep RAII and owning convenience wrappers above C;
+rich metadata algorithms themselves may be the delegated operation. If a call
 needs repeated full-store copies, resolve ownership/layout costs before
 replacing production code.
 
@@ -468,7 +595,10 @@ later migration decision; it is not authorization to switch C++.
 First milestone: a **bounded writer core**, with B0-B3 accepted for selected
 cases, including safety, XMP lifecycle, native translation and package
 interoperation. The second adds **positional reads** through B4. Neither
-requires rich C++ query, search or adapter parity.
+requires all semantic families to be complete. The full metadata-core target
+also includes S1/S2 interpretation, non-fuzzy query and concept semantics;
+embedded acceptance requires E1 for a declared configuration. Fuzzy search
+and excluded SDK adapters remain outside that denominator.
 
 For each completed batch:
 
@@ -505,6 +635,7 @@ C++ paths refer to the public OpenMeta repository at the revision above.
 | Area | C entry points | C++ reference entry points |
 | --- | --- | --- |
 | Model/transactions | [omc_val.h](src/omc/omc_val.h), [omc_edit.c](src/core/omc_edit.c), [store tests](tests/test_omc_store.c), [edit tests](tests/test_omc_edit.c) | `src/openmeta/metadata_authoring.cc`, `src/openmeta/metadata_store_validate.cc`, `docs/generic_authoring.md` |
+| Interpretation/query/concepts | [CCM subset](src/omc/omc_ccm_query.h), [naming](src/omc/omc_exif_name.h), existing decode/transfer facts; general APIs pending | `src/include/openmeta/metadata_query.h`, `src/include/openmeta/metadata_interpretation.h`, `src/include/openmeta/metadata_concepts.h` |
 | Canonical serialization | [omc_exif_write.c](src/edit/omc_exif_write.c), [transfer tests](tests/test_omc_transfer.c) | `src/include/openmeta/exif_tiff_serialize.h`, implementation in `src/openmeta/metadata_transfer.cc`, `tests/metadata_authoring_serialize_test.cc`, `docs/canonical_serialization.md` |
 | Translation/projection | [omc_xmp_dump.c](src/edit/omc_xmp_dump.c), [XMP tests](tests/test_omc_xmp_dump.c), [omc_transfer.c](src/edit/omc_transfer.c) | `src/openmeta/metadata_translation*.cc`, `tests/metadata_translation_test.cc`, `docs/translation.md`, `docs/xmp_sync_policy.md` |
 | BMFF/packages/safety | [package API](src/omc/omc_transfer_package.h), [package tests](tests/test_omc_transfer_package.c), [diagnostic tests](tests/test_omc_transfer_diagnostics.c) | `src/openmeta/metadata_transfer.cc`, `tests/metadata_transfer_api_test.cc`, `docs/writer_target_contract.md` |
@@ -512,5 +643,9 @@ C++ paths refer to the public OpenMeta repository at the revision above.
 | Differential gate | [parity tests](tests/test_omc_parity.cc), [test configuration](tests/CMakeLists.txt) | `docs/development.md`, `docs/api_stability.md`, public format tests |
 | Conditional patch/reuse | Existing C payload/package views and replay | `src/include/openmeta/exif_tiff_patch.h`, implementation in `src/openmeta/metadata_transfer.cc`, `docs/canonical_patching.md` |
 
-Immediate action: execute B0, then the first B1 slice. Do not begin by porting
-rich C++ APIs or replacing the already implemented C BMFF insertion foundation.
+Current priority: converge reading/input and decoding against the pinned C++
+reference. Follow [read_decode_parity.md](read_decode_parity.md); the first
+PNG/WebP batch is implemented, and direct TIFF values are next. S1/S2 remain
+in scope after this stage priority; they are not prerequisites for reader
+conversion. Preserve the implemented B0-B4 foundation. Future C++ reuse must
+not narrow the C library's standalone metadata-processing scope.

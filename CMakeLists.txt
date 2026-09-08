@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(OpenMetaC VERSION 0.3.0 LANGUAGES C)
+project(OpenMetaC VERSION 0.4.0 LANGUAGES C)
 
 include(CTest)
 include(CheckCSourceCompiles)
@@ -55,9 +55,6 @@ if(OMC_USE_ZLIB)
 endif()
 
 set(OMC_HAVE_BROTLI 0)
-set(OMC_BROTLI_INCLUDE_DIR "")
-set(OMC_BROTLI_DEC_LIB "")
-set(OMC_BROTLI_COMMON_LIB "")
 if(OMC_USE_BROTLI)
   find_path(OMC_BROTLI_INCLUDE_DIR brotli/decode.h)
   find_library(OMC_BROTLI_DEC_LIB NAMES brotlidec)

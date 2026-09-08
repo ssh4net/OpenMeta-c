@@ -1170,6 +1170,87 @@ omc_scan_meas_x3f(const omc_u8* bytes, omc_size size)
         omc_scan_x3f(bytes, size, (omc_blk_ref*)0, 0U));
 }
 
+static int
+omc_scan_jumbf_header_fragment(const omc_u8* bytes, omc_size size,
+                               const omc_blk_ref* block)
+{
+    omc_u32 size32, type;
+    omc_u64 size64;
+    if (block->data_size < 8U
+        || !omc_scan_read_u32be(bytes, size, block->data_offset, &size32)
+        || !omc_scan_read_u32be(bytes, size, block->data_offset + 4U, &type)
+        || type == 0U) {
+        return 0;
+    }
+    if (size32 == 0U) {
+        return 1;
+    }
+    if (size32 == 1U) {
+        return block->data_size >= 16U
+               && omc_scan_read_u64be(bytes, size, block->data_offset + 8U,
+                                      &size64)
+               && size64 >= 16U;
+    }
+    return size32 >= 8U;
+}
+
+static omc_u32
+omc_scan_next_jumbf(const omc_scan_sink* sink, omc_u32 begin,
+                     omc_scan_fmt format, omc_u32 id)
+{
+    omc_u32 i;
+    for (i = begin; i < sink->result.written; ++i) {
+        if (sink->out_blocks[i].format == format
+            && sink->out_blocks[i].kind == OMC_BLK_JUMBF
+            && sink->out_blocks[i].id == id) {
+            return i;
+        }
+    }
+    return sink->result.written;
+}
+
+static void
+omc_scan_normalize_split_jumbf(omc_scan_sink* sink, const omc_u8* bytes,
+                               omc_size size, omc_scan_fmt format, omc_u32 id)
+{
+    omc_u32 i, j, next, count, part, written;
+    omc_u64 group;
+    if (sink->out_blocks == (omc_blk_ref*)0) {
+        return;
+    }
+    written = sink->result.written;
+    i = 0U;
+    while ((i = omc_scan_next_jumbf(sink, i, format, id)) < written) {
+        if (!omc_scan_jumbf_header_fragment(bytes, size, &sink->out_blocks[i])) {
+            ++i;
+            continue;
+        }
+        count = 1U;
+        next = written;
+        j = i + 1U;
+        while ((j = omc_scan_next_jumbf(sink, j, format, id)) < written) {
+            if (omc_scan_jumbf_header_fragment(bytes, size, &sink->out_blocks[j])) {
+                next = j;
+                break;
+            }
+            ++count;
+            ++j;
+        }
+        if (count > 1U) {
+            group = ((omc_u64)id << 32U) ^ ((omc_u64)i + 1U);
+            j = i;
+            for (part = 0U; part < count; ++part) {
+                j = omc_scan_next_jumbf(sink, j, format, id);
+                sink->out_blocks[j].group = group;
+                sink->out_blocks[j].part_count = count;
+                sink->out_blocks[j].part_index = part;
+                ++j;
+            }
+        }
+        i = next;
+    }
+}
+
 omc_scan_res
 omc_scan_png(const omc_u8* bytes, omc_size size,
              omc_blk_ref* out_blocks, omc_u32 out_cap)
@@ -1221,10 +1302,12 @@ omc_scan_png(const omc_u8* bytes, omc_size size,
             return sink.result;
         }
 
-        if (type == OMC_FOURCC('e', 'X', 'I', 'f')) {
+        if (type == OMC_FOURCC('e', 'X', 'I', 'f')
+            || type == OMC_FOURCC('c', 'a', 'B', 'X')) {
             omc_scan_init_block(&block);
             block.format = OMC_SCAN_FMT_PNG;
-            block.kind = OMC_BLK_EXIF;
+            block.kind = type == OMC_FOURCC('e', 'X', 'I', 'f')
+                             ? OMC_BLK_EXIF : OMC_BLK_JUMBF;
             block.outer_offset = chunk_off;
             block.outer_size = chunk_size;
             block.data_offset = data_off;
@@ -1365,6 +1448,8 @@ omc_scan_png(const omc_u8* bytes, omc_size size,
         }
     }
 
+    omc_scan_normalize_split_jumbf(&sink, bytes, size, OMC_SCAN_FMT_PNG,
+                                    OMC_FOURCC('c', 'a', 'B', 'X'));
     return sink.result;
 }
 
@@ -1450,6 +1535,16 @@ omc_scan_webp(const omc_u8* bytes, omc_size size,
             block.id = type;
             omc_scan_skip_exif_preamble(&block, bytes, size);
             omc_scan_sink_emit(&sink, &block);
+        } else if (type == OMC_FOURCC('C', '2', 'P', 'A')) {
+            omc_scan_init_block(&block);
+            block.format = OMC_SCAN_FMT_WEBP;
+            block.kind = OMC_BLK_JUMBF;
+            block.outer_offset = chunk_off;
+            block.outer_size = next - chunk_off;
+            block.data_offset = data_off;
+            block.data_size = data_size;
+            block.id = type;
+            omc_scan_sink_emit(&sink, &block);
         } else if (type == OMC_FOURCC('X', 'M', 'P', ' ')) {
             omc_scan_init_block(&block);
             block.format = OMC_SCAN_FMT_WEBP;
@@ -1475,6 +1570,8 @@ omc_scan_webp(const omc_u8* bytes, omc_size size,
         offset = next;
     }
 
+    omc_scan_normalize_split_jumbf(&sink, bytes, size, OMC_SCAN_FMT_WEBP,
+                                    OMC_FOURCC('C', '2', 'P', 'A'));
     return sink.result;
 }
 

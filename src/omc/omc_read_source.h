@@ -36,8 +36,10 @@ typedef struct omc_read_source_res {
 
 OMC_API void omc_read_source_opts_init(omc_read_source_opts *opts);
 /* Borrowed fixed-size source and caller-owned workspace. Callback conversion
- * currently supports JPEG and TIFF/BigTIFF/DNG. No whole-file callback fallback.
- * JPEG stops at SOS/EOI. TIFF gathers directory/value ranges into a bounded
+ * supports JPEG, PNG, WebP and TIFF/BigTIFF/DNG. No whole-file callback fallback.
+ * JPEG stops at SOS/EOI. PNG/WebP skip image chunks and collect metadata chunks
+ * including framing into metadata_capacity; multipart payloads use payload.
+ * TIFF gathers directory/value ranges into a bounded
  * TIFF-relative snapshot; metadata offsets must fit metadata_capacity.
  * Callback TIFF MakerNote enrichment is explicitly unsupported when requested
  * and present. Raw MakerNote values are retained with enrichment disabled.

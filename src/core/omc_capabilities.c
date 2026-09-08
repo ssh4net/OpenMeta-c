@@ -135,8 +135,15 @@ omc_capability_set_photoshop_irb(omc_metadata_capability* cap)
 static void
 omc_capability_set_jumbf(omc_metadata_capability* cap)
 {
-    if (cap == (omc_metadata_capability*)0
-        || !omc_capability_has_c_jumbf_transfer_lane(cap->format)) {
+    if (cap == (omc_metadata_capability*)0) {
+        return;
+    }
+    if (cap->format == OMC_SCAN_FMT_PNG || cap->format == OMC_SCAN_FMT_WEBP) {
+        cap->read = OMC_METADATA_CAPABILITY_BOUNDED;
+        cap->structured_decode = OMC_METADATA_CAPABILITY_BOUNDED;
+        return;
+    }
+    if (!omc_capability_has_c_jumbf_transfer_lane(cap->format)) {
         return;
     }
     cap->read              = OMC_METADATA_CAPABILITY_BOUNDED;
@@ -149,8 +156,15 @@ omc_capability_set_jumbf(omc_metadata_capability* cap)
 static void
 omc_capability_set_c2pa(omc_metadata_capability* cap)
 {
-    if (cap == (omc_metadata_capability*)0
-        || !omc_capability_has_c_jumbf_transfer_lane(cap->format)) {
+    if (cap == (omc_metadata_capability*)0) {
+        return;
+    }
+    if (cap->format == OMC_SCAN_FMT_PNG || cap->format == OMC_SCAN_FMT_WEBP) {
+        cap->read = OMC_METADATA_CAPABILITY_BOUNDED;
+        cap->structured_decode = OMC_METADATA_CAPABILITY_BOUNDED;
+        return;
+    }
+    if (!omc_capability_has_c_jumbf_transfer_lane(cap->format)) {
         return;
     }
     cap->read              = OMC_METADATA_CAPABILITY_BOUNDED;

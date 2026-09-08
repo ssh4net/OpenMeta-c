@@ -349,6 +349,7 @@ test_jumbf_decode_sample(void)
     marker = find_jumbf_field(&store, "c2pa.detected");
     assert(marker != (const omc_entry*)0);
     assert(marker->value.kind == OMC_VAL_SCALAR);
+    assert(marker->value.elem_type == OMC_ELEM_U8);
     assert(marker->value.u.u64 == 1U);
 
     box_type = find_jumbf_field(&store, "box.0.type");
@@ -371,6 +372,48 @@ test_jumbf_decode_sample(void)
     assert(meas.entries_decoded == (omc_u32)store.entry_count);
 
     omc_store_fini(&store);
+}
+
+static void
+test_jumbf_measures_optional_active_manifest_prefix(void)
+{
+    omc_u8 cbor[64];
+    omc_u8 jumbf[256];
+    omc_size cbor_size;
+    omc_size box_size;
+    omc_size size;
+    omc_store store;
+    omc_jumbf_res decoded;
+    omc_jumbf_res measured;
+    const omc_entry* prefix;
+    unsigned active_count;
+
+    for (active_count = 0U; active_count <= 2U; ++active_count) {
+        cbor_size = 0U;
+        append_cbor_map(cbor, &cbor_size, 1U);
+        append_cbor_text(cbor, &cbor_size, "manifests");
+        append_cbor_map(cbor, &cbor_size, 1U);
+        append_cbor_text(cbor, &cbor_size,
+                         active_count ? "active_manifest" : "other");
+        append_cbor_map(cbor, &cbor_size, 1U);
+        append_cbor_text(cbor, &cbor_size, "value");
+        append_cbor_i64(cbor, &cbor_size, 1);
+        box_size = make_jumbf_with_cbor(jumbf, cbor, cbor_size);
+        size = box_size;
+        if (active_count == 2U) {
+            memcpy(jumbf + box_size, jumbf, box_size);
+            size += box_size;
+        }
+        omc_store_init(&store);
+        decoded = omc_jumbf_dec(jumbf, size, &store, 0U,
+                                 OMC_ENTRY_FLAG_NONE, (const omc_jumbf_opts*)0);
+        measured = omc_jumbf_meas(jumbf, size, (const omc_jumbf_opts*)0);
+        assert(decoded.status == OMC_JUMBF_OK && measured.status == OMC_JUMBF_OK);
+        assert(measured.entries_decoded == decoded.entries_decoded);
+        prefix = find_jumbf_field(&store, "c2pa.semantic.active_manifest.prefix");
+        assert((prefix != (const omc_entry*)0) == (active_count == 1U));
+        omc_store_fini(&store);
+    }
 }
 
 static void
@@ -1178,9 +1221,8 @@ test_jumbf_emits_c2pa_per_manifest_projection_fields(void)
                                  "c2pa.semantic.manifest.1.explicit_reference_signature_count"),
                              0U);
 
-    assert_text_entry_equals(
-        &store,
-        find_jumbf_field(&store, "c2pa.semantic.active_manifest.prefix"), "");
+    assert(find_jumbf_field(&store, "c2pa.semantic.active_manifest.prefix")
+           == (const omc_entry*)0);
 
     omc_store_fini(&store);
 }
@@ -2756,7 +2798,7 @@ test_jumbf_emits_c2pa_explicit_reference_status_fields(void)
                         (const omc_jumbf_opts*)0);
     assert(res.status == OMC_JUMBF_OK);
 
-    assert_text_entry_equals(&store, find_jumbf_field(&store, "box.0.label"),
+    assert_text_entry_equals(&store, find_jumbf_field(&store, "box.0.jumb_label"),
                              "c2pa");
     assert_scalar_u64_equals(find_jumbf_field(
                                  &store,
@@ -5927,6 +5969,7 @@ int
 main(void)
 {
     test_jumbf_decode_sample();
+    test_jumbf_measures_optional_active_manifest_prefix();
     test_jumbf_emits_c2pa_semantic_summary();
     test_jumbf_emits_c2pa_manifest_claim_signature_projection();
     test_jumbf_emits_c2pa_per_manifest_projection_fields();

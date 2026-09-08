@@ -1,6 +1,6 @@
 # OpenMeta-c
 
-OpenMeta-c is a native C port of OpenMeta.
+OpenMeta-c is a native C89/C90 port of OpenMeta.
 
 It follows the C++ library's general metadata model with a C-native API:
 flat, explicit, caller-buffer-oriented, and designed around bounded read,
@@ -10,13 +10,23 @@ and safety coverage.
 ## Status
 
 The C port provides metadata reads, bounded edits, and transfer/writeback.
-The goal is parity with the portable C++ metadata core, with the option of
-using C beneath the C++ library later. Rich C++ query, search, adapter, and
-binding APIs are outside that core milestone.
+The goal is a standalone rich metadata-processing library with substantially
+the same portable core features as C++, including interpretation, structured
+non-fuzzy queries and concept resolution. Those semantic stages currently have
+partial foundations and remain porting work. Fuzzy search, host SDK adapters
+(including Adobe DNG SDK), owning C++ wrappers and bindings remain above C.
+Native DNG metadata processing is in scope.
+
+Embedded-device use requires explicit resource limits and platform boundaries.
+C89/C90 compatibility alone does not establish embedded acceptance; current
+allocation, stack use and target-toolchain requirements still need validation.
+The C library may later serve as the C++ implementation core. Temporary
+implementation overlap is expected while behavior is ported and verified.
 
 The [porting plan](porting_plan.md) records the source-reviewed baseline as of
-2026-09-07 against C++ `0.4.127`, the scoped parity matrix, and acceptance
-gates. Earlier percentage estimates are superseded by that matrix. The
+2026-09-07 against C++ `0.4.127`, the scope clarification of 2026-09-08, the
+parity matrix, and acceptance gates. Earlier percentage estimates based on a
+narrower core boundary do not measure this scope. The
 [authoring contract](authoring.md) documents typed construction, detached
 validation, canonical EXIF, and the five explicit reverse-translation groups.
 Version 0.2.0 changes the `omc_val` layout; rebuild consumers.
@@ -324,16 +334,28 @@ For persisted transfer artifacts:
 
 ## Current Core Checkpoint
 
-Version 0.3.0 includes typed values and atomic edits, detached validation,
+Version 0.4.0 includes typed values and atomic edits, detached validation,
 canonical EXIF serialization, the five bounded native translation groups,
-paired IPTC date/time projection, shared BMFF replacement, and initial
-positional input. See [authoring.md](authoring.md),
+paired IPTC date/time projection, shared BMFF replacement, and bounded
+positional input for JPEG, TIFF/BigTIFF/DNG, PNG and WebP. PNG `caBX` and WebP
+`C2PA` discovery now supports split JUMBF metadata. See [authoring.md](authoring.md),
 [bmff_writing.md](bmff_writing.md), and [positional_input.md](positional_input.md).
 
-Clang 20 validation passed 38/38 Release direct plus focused C++ parity targets,
-36/36 ASan/UBSan direct targets, and 36/36 direct targets without compression
-dependencies. These are synthetic WSL gates. The historical broad differential
-inventory still fails; it is not part of the focused passing gate.
+Clang 20 validation passed 40/40 Release direct plus focused C++ parity targets,
+37/37 ASan/UBSan direct targets, and 37/37 direct targets without compression
+dependencies. Brotli discovery now enables the available backend, alongside
+zlib. These are synthetic WSL gates against C++ 0.4.127. The historical broad
+differential inventory still fails with the same 266 mismatch reports; it is
+not part of the focused passing gate.
+
+JUMBF decoded output now follows the reference: parent labels use `jumb_label`,
+`c2pa.detected` is U8, an empty/ambiguous active-manifest prefix is omitted, and
+`c2pa.verify.require_trusted_chain` reflects the option. Consumers matching the
+old label key or scalar type must update. No crypto backend was added.
+
+The next work follows [read_decode_parity.md](read_decode_parity.md): direct
+TIFF values and source-relative MakerNotes, shared positional scanner/payload
+operations, remaining container readers, decoder deltas, then stage acceptance.
 
 Remaining portable-core work includes:
 

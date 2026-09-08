@@ -18,6 +18,7 @@ extern "C" {
 }
 
 #include "omc_test_assert.h"
+#include "omc_test_chunk_fixture.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -33,6 +34,7 @@ extern "C" {
 
 bool run_omc_authoring_parity();
 bool run_omc_source_parity();
+bool run_omc_chunk_parity();
 
 namespace {
 
@@ -11459,6 +11461,19 @@ run_benchmarks(void)
     return 0;
 }
 
+bool
+run_chunk_decode_cases()
+{
+    bool ok = true;
+    for (int webp = 0; webp < 2; ++webp) {
+        omc_test_chunk_fixture fixture;
+        omc_test_chunk_make(&fixture, webp, OMC_HAVE_ZLIB);
+        ok = run_case(webp ? "webp_chunk_metadata" : "png_chunk_metadata",
+                      ByteVec(fixture.bytes, fixture.bytes + fixture.size), false) && ok;
+    }
+    return ok;
+}
+
 }  // namespace
 
 int
@@ -11472,16 +11487,22 @@ main(int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--core-source") == 0) {
         return run_omc_source_parity() ? 0 : 1;
     }
+    if (argc == 2 && std::strcmp(argv[1], "--read-chunks") == 0) {
+        ok = run_omc_chunk_parity();
+        return run_chunk_decode_cases() && ok ? 0 : 1;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--bench") == 0) {
         return run_benchmarks();
     }
     if (argc != 1 && !(argc == 2 && std::strcmp(argv[1], "--all") == 0)) {
-        std::fprintf(stderr, "usage: %s [--bench|--core-authoring|--core-source|--all]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s [--bench|--core-authoring|--core-source|--read-chunks|--all]\n", argv[0]);
         return 2;
     }
 
     ok = run_omc_authoring_parity();
     ok = run_omc_source_parity() && ok;
+    ok = run_omc_chunk_parity() && ok;
+    ok = run_chunk_decode_cases() && ok;
     ok = run_case("jpeg_comment", build_jpeg_comment_fixture(), false) && ok;
     ok = run_case("jpeg_all", build_jpeg_all_fixture(), false) && ok;
     ok = run_case("jpeg_irb_fields", build_jpeg_irb_fields_fixture(), false)
