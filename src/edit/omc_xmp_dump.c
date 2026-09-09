@@ -2407,6 +2407,10 @@ omc_xmp_dump_extract_iptc_property(const omc_store* store, omc_size index,
         schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_dc);
         property_name = omc_xmp_dump_view_from_lit(k_prop_title);
         break;
+    case 10U:
+        schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_ps);
+        property_name = omc_xmp_dump_view_from_lit("Urgency");
+        break;
     case 15U:
         schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_ps);
         property_name = omc_xmp_dump_view_from_lit(k_prop_category);
@@ -2420,9 +2424,17 @@ omc_xmp_dump_extract_iptc_property(const omc_store* store, omc_size index,
         schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_dc);
         property_name = omc_xmp_dump_view_from_lit(k_prop_subject);
         break;
+    case 40U:
+        schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_ps);
+        property_name = omc_xmp_dump_view_from_lit("Instructions");
+        break;
     case 80U:
         schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_dc);
         property_name = omc_xmp_dump_view_from_lit(k_prop_creator);
+        break;
+    case 85U:
+        schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_ps);
+        property_name = omc_xmp_dump_view_from_lit("AuthorsPosition");
         break;
     case 90U:
         schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_ps);
@@ -2437,12 +2449,16 @@ omc_xmp_dump_extract_iptc_property(const omc_store* store, omc_size index,
         property_name = omc_xmp_dump_view_from_lit(k_prop_state);
         break;
     case 100U:
+        schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_iptc4xmp);
+        property_name = omc_xmp_dump_view_from_lit(k_prop_country_code);
+        break;
+    case 101U:
         schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_ps);
         property_name = omc_xmp_dump_view_from_lit(k_prop_country);
         break;
-    case 101U:
-        schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_iptc4xmp);
-        property_name = omc_xmp_dump_view_from_lit(k_prop_country_code);
+    case 103U:
+        schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_ps);
+        property_name = omc_xmp_dump_view_from_lit("TransmissionReference");
         break;
     case 105U:
         schema_ns = omc_xmp_dump_view_from_lit(k_xmp_ns_ps);
@@ -4464,7 +4480,7 @@ omc_xmp_dump_property_has_output(const omc_xmp_dump_property* prop)
             return 0;
         }
         bytes = omc_arena_view(prop->arena, prop->value->u.ref);
-        return bytes.data != (const omc_u8*)0 && bytes.size != 0U;
+        return bytes.data != (const omc_u8*)0 && bytes.size == 4U && prop->value->count == 4U;
     case OMC_XMP_DUMP_VALUE_EXIF_GPS_COORD:
         if (prop->exif_tag == 0x0002U) {
             return omc_xmp_dump_write_gps_coord(
@@ -4505,6 +4521,7 @@ omc_xmp_dump_write_value(omc_xmp_dump_writer* writer,
     omc_const_bytes bytes;
     char date_buf[32];
     omc_size date_size;
+    omc_size component;
     omc_urational ur;
     omc_srational sr;
     char buf[64];
@@ -4607,8 +4624,12 @@ omc_xmp_dump_write_value(omc_xmp_dump_writer* writer,
     if (prop->value_mode == OMC_XMP_DUMP_VALUE_EXIF_GPS_VERSION) {
         if (prop->value->kind == OMC_VAL_ARRAY && prop->value->elem_type == OMC_ELEM_U8) {
             bytes = omc_arena_view(prop->arena, prop->value->u.ref);
-            if (bytes.data != (const omc_u8*)0 && bytes.size != 0U) {
-                omc_xmp_dump_write_u64_decimal(writer, bytes.data[0]);
+            if (bytes.data != (const omc_u8*)0 && bytes.size == 4U && prop->value->count == 4U) {
+                for (component = 0U; component < 4U; ++component) {
+                    if (component != 0U)
+                        omc_xmp_dump_write_byte(writer, '.');
+                    omc_xmp_dump_write_u64_decimal(writer, bytes.data[component]);
+                }
             }
         }
         return;

@@ -5,6 +5,7 @@
 int omc_store_shape_valid(const omc_store *store);
 int omc_value_shape_valid(const omc_val *value, const omc_arena *arena);
 int omc_ref_valid(const omc_arena *arena, omc_byte_ref ref);
+int omc_utf8_valid(const omc_u8 *bytes, omc_size size, int ascii);
 omc_status omc_clone_entry(const omc_entry *entry, const omc_arena *src, omc_arena *dst,
                            omc_entry *out_entry);
 omc_u16 omc_value_tiff_type(const omc_val *value);

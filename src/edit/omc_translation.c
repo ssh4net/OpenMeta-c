@@ -33,6 +33,9 @@ typedef struct omc_translation {
     omc_edit edit;
     omc_translation_field *fields;
     omc_translation_source *sources;
+    omc_translation_source *native_order;
+    omc_size native_count;
+    int repeated_iptc;
     omc_u32 source_count;
     omc_u32 field_count;
     omc_u64 text_bytes;
@@ -152,7 +155,10 @@ omc_translation_reconcile(omc_translation *t)
     omc_u32 k;
     omc_u32 j;
     omc_u32 ordinal;
+    omc_u32 repeated_order;
     omc_size i;
+    omc_size count;
+    omc_entry_id id;
     int any;
     int exact;
     int duplicate_key;
@@ -162,6 +168,7 @@ omc_translation_reconcile(omc_translation *t)
     omc_status status;
     any = 0;
     exact = 1;
+    count = t->native_order != NULL ? t->native_count : t->source->entry_count;
     for (k = 0U; k < t->field_count; ++k) {
         duplicate_key = 0;
         for (j = 0U; j < k; ++j)
@@ -170,14 +177,15 @@ omc_translation_reconcile(omc_translation *t)
         if (duplicate_key)
             continue;
         ordinal = 0U;
-        for (i = 0U; i < t->source->entry_count; ++i) {
-            if ((t->source->entries[i].flags & OMC_ENTRY_FLAG_DELETED) != 0U ||
-                !omc_translation_key_matches(t, &t->source->entries[i], &t->fields[k]))
+        for (i = 0U; i < count; ++i) {
+            id = t->native_order != NULL ? t->native_order[i].id : (omc_entry_id)i;
+            if ((t->source->entries[id].flags & OMC_ENTRY_FLAG_DELETED) != 0U ||
+                !omc_translation_key_matches(t, &t->source->entries[id], &t->fields[k]))
                 continue;
             any = 1;
             f = omc_translation_nth_field(t, k, ordinal++);
             if (f == NULL || !omc_translation_value_equal(
-                                 t, &t->source->entries[i].value, &f->value))
+                                 t, &t->source->entries[id].value, &f->value))
                 exact = 0;
         }
         if (omc_translation_nth_field(t, k, ordinal) != NULL)
@@ -213,17 +221,21 @@ omc_translation_reconcile(omc_translation *t)
         if (duplicate_key)
             continue;
         ordinal = 0U;
-        for (i = 0U; i < t->source->entry_count; ++i) {
-            if ((t->source->entries[i].flags & OMC_ENTRY_FLAG_DELETED) != 0U ||
-                !omc_translation_key_matches(t, &t->source->entries[i], &t->fields[k]))
+        repeated_order = 0U;
+        for (i = 0U; i < count; ++i) {
+            id = t->native_order != NULL ? t->native_order[i].id : (omc_entry_id)i;
+            if ((t->source->entries[id].flags & OMC_ENTRY_FLAG_DELETED) != 0U ||
+                !omc_translation_key_matches(t, &t->source->entries[id], &t->fields[k]))
                 continue;
             f = omc_translation_nth_field(t, k, ordinal++);
+            if (f != NULL)
+                repeated_order = t->source->entries[id].origin.order_in_block;
             if (f == NULL) {
-                status = omc_edit_tombstone(&t->edit, (omc_entry_id)i);
+                status = omc_edit_tombstone(&t->edit, id);
                 t->res.entries_removed++;
-            } else if (!omc_translation_value_equal(t, &t->source->entries[i].value,
+            } else if (!omc_translation_value_equal(t, &t->source->entries[id].value,
                                                     &f->value)) {
-                status = omc_edit_set_value(&t->edit, (omc_entry_id)i, &f->value);
+                status = omc_edit_set_value(&t->edit, id, &f->value);
                 t->res.entries_updated++;
             } else
                 status = OMC_STATUS_OK;
@@ -250,7 +262,9 @@ omc_translation_reconcile(omc_translation *t)
                                         &added.origin.wire_type_name)))
                 return 0;
             j = (omc_u32)(f - t->fields) + 1U;
-            if (added.origin.order_in_block <= 0xFFFFFFFFU - j)
+            if (t->repeated_iptc)
+                added.origin.order_in_block = repeated_order;
+            else if (added.origin.order_in_block <= 0xFFFFFFFFU - j)
                 added.origin.order_in_block += j;
             else
                 added.origin.order_in_block = 0xFFFFFFFFU;
@@ -276,7 +290,9 @@ omc_translation_source_compare(const void *a, const void *b)
     const omc_translation_source *y;
     x = (const omc_translation_source *)a;
     y = (const omc_translation_source *)b;
-    return x->index < y->index ? -1 : x->index != y->index;
+    if (x->index != y->index)
+        return x->index < y->index ? -1 : 1;
+    return x->id < y->id ? -1 : x->id != y->id;
 }
 
 static int
@@ -738,7 +754,9 @@ omc_translation_text_group(omc_translation *t, const char *ns, const char *path,
     omc_const_bytes bytes;
     omc_u32 i;
     omc_size j;
+    omc_size capacity;
     int utf8;
+    int ok;
     omc_u32 preserved;
     if (!omc_translation_find(t, ns, path, indexed, 0) || t->source_count == 0U)
         return t->res.status == OMC_TRANSLATION_OK;
@@ -770,7 +788,42 @@ omc_translation_text_group(omc_translation *t, const char *ns, const char *path,
             return 0;
     }
     preserved = t->res.groups_preserved;
-    if (!omc_translation_reconcile(t))
+    if (indexed && ifd == NULL) {
+        capacity = t->source->entry_count;
+        if (capacity > t->opts.max_operations)
+            capacity = t->opts.max_operations;
+        t->native_order = (omc_translation_source *)calloc(capacity + 1U,
+                                                           sizeof(*t->native_order));
+        if (t->native_order == NULL) {
+            t->res.status = OMC_TRANSLATION_NO_MEMORY;
+            return 0;
+        }
+        t->native_count = 0U;
+        for (j = 0U; j < t->source->entry_count; ++j) {
+            const omc_entry *e;
+            e = &t->source->entries[j];
+            if (e->key.kind != OMC_KEY_IPTC_DATASET ||
+                (e->flags & OMC_ENTRY_FLAG_DELETED) != 0U ||
+                e->key.u.iptc_dataset.record != 2U || e->key.u.iptc_dataset.dataset != tag)
+                continue;
+            if (t->native_count == capacity) {
+                free(t->native_order);
+                t->native_order = NULL;
+                t->res.status = OMC_TRANSLATION_LIMIT;
+                return 0;
+            }
+            t->native_order[t->native_count].id = (omc_entry_id)j;
+            t->native_order[t->native_count++].index = e->origin.order_in_block;
+        }
+        qsort(t->native_order, t->native_count, sizeof(*t->native_order),
+               omc_translation_source_compare);
+        t->repeated_iptc = 1;
+    }
+    ok = omc_translation_reconcile(t);
+    free(t->native_order);
+    t->native_order = NULL;
+    t->repeated_iptc = 0;
+    if (!ok)
         return 0;
     if (utf8 && preserved == t->res.groups_preserved)
         t->utf8_source = id;

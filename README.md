@@ -29,7 +29,7 @@ parity matrix, and acceptance gates. Earlier percentage estimates based on a
 narrower core boundary do not measure this scope. The
 [authoring contract](authoring.md) documents typed construction, detached
 validation, canonical EXIF, the original five reverse-translation groups and
-the explicit IPTC location API added in version 0.9.0.
+the explicit location API (0.9.0) and combined 20-group IPTC API (0.10.0).
 Versions 0.2.0 and 0.8.0 change `omc_val` and `omc_xmp_limits`, respectively;
 rebuild consumers and initialize options with their public initializers.
 
@@ -44,6 +44,13 @@ City, Location, State, Country and CountryCode. It adds bounded explicit
 writeback with conflict, removal and UTF-8 policies, 69 paired C/C++ cases,
 and JPEG/TIFF persistence checks. See the [authoring contract](authoring.md)
 for `omc_translate_xmp_location()` and its limits.
+
+Version 0.10.0 adds the eight remaining flat IPTC fields and
+`omc_translate_xmp_iptc()` against frozen C++ 0.4.132. Its 20 groups share one
+bounded transaction. Repeated native values retain numeric source order across
+updates and growth. Native-to-XMP projection includes the added fields and
+corrects Country/CountryCode and GPSVersionID. Existing translation defaults
+remain unchanged. See [authoring.md](authoring.md) for masks and limits.
 
 In practice:
 

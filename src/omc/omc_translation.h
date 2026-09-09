@@ -43,6 +43,33 @@ OMC_EXTERN_C_BEGIN
 #define OMC_TRANSLATE_COUNTRY_CODE 0x04000000U
 #define OMC_TRANSLATE_LOCATION 0x07C00000U
 
+/* Separate mask domain for omc_translate_xmp_iptc and its failed_mapping. */
+#define OMC_IPTC_TRANSLATE_TITLE 0x000001U
+#define OMC_IPTC_TRANSLATE_DESCRIPTION 0x000002U
+#define OMC_IPTC_TRANSLATE_CREATORS 0x000004U
+#define OMC_IPTC_TRANSLATE_KEYWORDS 0x000008U
+#define OMC_IPTC_TRANSLATE_RIGHTS 0x000010U
+#define OMC_IPTC_TRANSLATE_CREDIT 0x000020U
+#define OMC_IPTC_TRANSLATE_SOURCE 0x000040U
+#define OMC_IPTC_TRANSLATE_CITY 0x000080U
+#define OMC_IPTC_TRANSLATE_SUBLOCATION 0x000100U
+#define OMC_IPTC_TRANSLATE_STATE 0x000200U
+#define OMC_IPTC_TRANSLATE_COUNTRY 0x000400U
+#define OMC_IPTC_TRANSLATE_COUNTRY_CODE 0x000800U
+#define OMC_IPTC_TRANSLATE_HEADLINE 0x001000U
+#define OMC_IPTC_TRANSLATE_INSTRUCTIONS 0x002000U
+#define OMC_IPTC_TRANSLATE_TRANSMISSION_REFERENCE 0x004000U
+#define OMC_IPTC_TRANSLATE_AUTHORS_POSITION 0x008000U
+#define OMC_IPTC_TRANSLATE_CAPTION_WRITER 0x010000U
+#define OMC_IPTC_TRANSLATE_CATEGORY 0x020000U
+#define OMC_IPTC_TRANSLATE_SUPPLEMENTAL_CATEGORIES 0x040000U
+#define OMC_IPTC_TRANSLATE_URGENCY 0x080000U
+#define OMC_IPTC_TRANSLATE_DESCRIPTIVE 0x00007FU
+#define OMC_IPTC_TRANSLATE_LOCATION 0x000F80U
+#define OMC_IPTC_TRANSLATE_EDITORIAL 0x007000U
+#define OMC_IPTC_TRANSLATE_WORKFLOW 0x0F8000U
+#define OMC_IPTC_TRANSLATE_ALL 0x0FFFFFU
+
 typedef enum omc_translation_conflict {
     OMC_TRANSLATION_PRESERVE = 0,
     OMC_TRANSLATION_FAIL = 1,
@@ -85,6 +112,16 @@ typedef struct omc_location_translation_opts {
     omc_u64 max_total_text_bytes;
 } omc_location_translation_opts;
 
+typedef struct omc_iptc_translation_opts {
+    omc_u32 mappings;
+    int all_sources;
+    omc_translation_conflict conflict;
+    omc_u32 max_source_properties;
+    omc_u32 max_added_entries;
+    omc_u32 max_operations;
+    omc_u64 max_total_text_bytes;
+} omc_iptc_translation_opts;
+
 typedef struct omc_translation_res {
     omc_translation_status status;
     omc_u32 failed_mapping;
@@ -120,6 +157,19 @@ omc_location_translation_opts_init(omc_location_translation_opts *opts);
 OMC_API omc_translation_res
 omc_translate_xmp_location(const omc_store *source, omc_store *out,
                            const omc_location_translation_opts *opts);
+
+OMC_API void omc_iptc_translation_opts_init(omc_iptc_translation_opts *opts);
+
+/* All 20 bounded IPTC text/priority groups in one output-preserving transaction.
+ * Use OMC_IPTC_TRANSLATE_* masks, also reported in failed_mapping. Dates remain
+ * in omc_translate_xmp. Defaults: all groups, dirty-only, fail on conflict,
+ * 1024 sources, 1025 additions, 4096 operations and 8 MiB inspected text.
+ * Repeated groups retain numeric XMP index order. Category is 1-3 ASCII letters;
+ * Urgency is text or an integer scalar 1-8. Planning may allocate bounded
+ * scratch for repeated groups; edit/commit use owning arenas as usual.
+ * Source and initialized out must be distinct. Failure preserves both. */
+OMC_API omc_translation_res omc_translate_xmp_iptc(
+    const omc_store *source, omc_store *out, const omc_iptc_translation_opts *opts);
 
 OMC_EXTERN_C_END
 #endif

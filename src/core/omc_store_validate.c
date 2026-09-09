@@ -175,7 +175,7 @@ omc_validate_key_shape(const omc_validation *v, const omc_key *k)
     return 0;
 }
 
-static int
+int
 omc_utf8_valid(const omc_u8 *p, omc_size n, int ascii)
 {
     omc_size i;

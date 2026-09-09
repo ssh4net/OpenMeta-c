@@ -6,7 +6,7 @@ edit types. They require no file handle or C++ runtime.
 ## Lifetime and failure contracts
 
 Initialize every output store before calling `omc_edit_commit()`,
-`omc_store_compact()`, or `omc_translate_xmp()`. The output must be distinct
+`omc_store_compact()`, or any `omc_translate_xmp*()` call. The output must be distinct
 from the source. These operations build a candidate and publish it only after
 success. Failure preserves the source, previous output, and its borrowed views.
 Success invalidates views into the previous output.
@@ -127,6 +127,65 @@ are bounded to 200000 entries. Rejection preserves source, previous output
 and its borrowed views. `OMC_TRANSLATION_VALUE_TOO_LONG` reports native wire
 limits; `OMC_TRANSLATION_LIMIT` covers source, entry and operation budgets.
 
+## Combined IPTC writeback (0.10.0)
+
+Call `omc_iptc_translation_opts_init()` and then
+`omc_translate_xmp_iptc(source, out, &opts)` for one atomic transaction across
+20 groups. Use only `OMC_IPTC_TRANSLATE_*` masks with this API; its
+`failed_mapping` uses the same separate mask domain. The default selects all
+20 groups, dirty sources and fail-on-conflict behavior. The legacy translation
+and location API masks, result layouts and defaults remain unchanged.
+
+The combined call includes the seven descriptive and five flat location
+mappings above, plus these eight fields from frozen C++ 0.4.132:
+
+| Exact XMP property | Native IPTC dataset | Maximum UTF-8 bytes |
+| --- | --- | --- |
+| `photoshop:Headline` | 2:105 | 256 |
+| `photoshop:Instructions` | 2:40 | 256 |
+| `photoshop:TransmissionReference` | 2:103 | 32 |
+| `photoshop:AuthorsPosition` | 2:85 | 32 |
+| `photoshop:CaptionWriter` | 2:122 | 32 |
+| `photoshop:Category` | 2:15 | 3 |
+| `photoshop:SupplementalCategories[n]` | 2:20 | 32 per value |
+| `photoshop:Urgency` | 2:10 | 1 |
+
+Category accepts one to three ASCII letters and preserves case. Urgency accepts
+one text digit or one signed/unsigned integer scalar from 1 to 8. It rejects
+floating values, arrays and other numbers. The caller associates AuthorsPosition
+with the first creator; translation does not create or infer that relationship.
+Wire limits count UTF-8 bytes and never truncate. Date/time fields continue to
+use the legacy translation call separately.
+
+All selected sources are validated before native conflicts are evaluated.
+Dirty eligibility includes all active members of a repeated group. Positive
+numeric indexes set repeated value order; equal values at distinct indexes
+remain distinct. Duplicate numeric indexes are ambiguous, including `[1]`
+and `[01]`. Unindexed, zero, overflowing and qualified repeated paths do not
+select a mapping. Selected dirty tombstones remove native values under Replace.
+
+Native repeated entries are reconciled by `order_in_block`, then entry ID.
+Updates retain native provenance. New repeated entries copy their source
+provenance but share the final overlapping native rank, or zero when no native
+entry exists. Entry IDs preserve append order even at the maximum rank. The
+legacy creator and keyword paths now use this same ordering rule. New singleton
+entries retain source provenance. One shared UTF-8 charset preflight protects
+unowned IPTC bytes before promotion, using the location rules above.
+
+Defaults and hard maxima are 1024 source properties, 1025 additions, 4096
+operations and 8 MiB of inspected text. Callers can reduce each bound. Selected
+sources share one budget; native inspection is also bounded. Planning uses
+20 fixed group records and bounded scratch for eligible repeated groups. The
+location API shares the engine with five fixed records and no planning heap.
+Edit construction and publication still allocate through owning arenas.
+Failure preserves both source and initialized output, including borrowed views.
+This API is not an allocation-free embedded execution contract.
+
+Forward native projection adds Urgency, Instructions, AuthorsPosition and
+TransmissionReference. It corrects CountryCode to dataset 2:100 and Country to
+2:101. EXIF GPSVersionID now emits all four components, such as `2.3.0.0`, and
+skips arrays with the wrong length. Primary GPS writeback remains separate work.
+
 ## Verification and remaining scope
 
 The Clang 20 direct suite covers failure preservation, typed arrays,
@@ -135,7 +194,7 @@ date/time projection, and translation conflicts. The focused
 `omc_test_authoring_parity` test compares canonical EXIF bytes and ordered IPTC
 records with C++ 0.4.127 at the original authoring checkpoint.
 
-The 0.9.0 gate uses frozen C++ commit
+The historical 0.9.0 gate used frozen C++ commit
 `ba99484b8be087012f9c44a1194ed828d060a0d5` (0.4.128). The direct location target
 covers 70 fixtures, immutable source bytes, rejected-output preservation,
 default behavior and invalid output arguments. The optional
@@ -150,12 +209,27 @@ targets. Native builds retain existing CRT/decoder warnings. Clang 20 `-O3
 -fstack-usage` reports a 584-byte frame for `omc_translate_xmp_location()` on
 WSL x64; this measures that function, not the full call stack or embedded use.
 
+The 0.10.0 gate uses frozen C++ `7f0ec70` (0.4.132). Its 120 direct combined
+fixtures include 119 paired C/C++ cases comparing statuses, failure attribution,
+counters, native bytes, order and provenance. The extra case rejects unknown
+C mask bits. Direct tests also check source/output preservation, idempotence,
+six legacy creator/keyword order variants, and forward projection. Four new
+JPEG/TIFF replacement/removal cases cover all 20 groups, repeated growth,
+unowned datasets and stale raw IRB precedence. Existing location cases remain.
+
+Clang 20 Release static with zlib/Brotli and shared without them each pass
+54/54 targets. Debug ASan/UBSan and native MSVC Release x64/Win32 each pass
+40/40 direct targets. Windows retains existing CRT/decoder warnings; the new
+IPTC module emits none. No new corpus, performance or embedded acceptance is
+claimed by this batch. The older stack measurement above predates the shared
+engine and is not a current bound.
+
 For a frozen reference build, set `OMC_OPENMETA_DIR` to its build directory
 and `OMC_OPENMETA_SOURCE_DIR` to the matching source snapshot. The latter is
-optional for the usual sibling checkout. The location gate is available when
-the reference headers expose its contract. When changing reference versions
-in an existing build, clear `OMC_HAVE_CPP_LOCATION_TRANSLATION` or use a fresh
-build directory.
+optional for the usual sibling checkout. The location and combined IPTC gates are available when
+the reference headers expose their contracts. When changing reference versions
+in an existing build, clear `OMC_HAVE_CPP_LOCATION_TRANSLATION` and
+`OMC_HAVE_CPP_IPTC_TRANSLATION`, or use a fresh build directory.
 
 The larger legacy transfer/persist differential inventory still has known
 failures. `omc_test_parity --all` explicitly enables those historical cases.

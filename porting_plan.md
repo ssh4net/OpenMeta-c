@@ -79,9 +79,39 @@ see the current checkpoint below for the remaining broad inventory.
 See [authoring.md](authoring.md) for contracts and bounded coverage. The matrix
 below retains source-review detail where broader acceptance remains open.
 
-## Current Translation Checkpoint: Version 0.9.0
+## Current Translation Checkpoint: Version 0.10.0
 
-The next upstream batch is pinned to C++ 0.4.128, commit
+Batch 1 uses a frozen C++ 0.4.132 source and library at commit `7f0ec70`.
+The fresh C 0.9.0 direct baseline passed 39/39 tests. Its default parity suite
+exposed one shared projection difference: GPSVersionID emitted only its first
+byte. This batch ports the four-component formatting rule from the reference.
+The focused frozen C++ IPTC/transfer suite passed 48/48 cases.
+
+`omc_translate_xmp_iptc()` combines all 20 flat IPTC groups in one bounded,
+output-preserving transaction. It adds Headline, Instructions,
+TransmissionReference, AuthorsPosition, CaptionWriter, Category,
+SupplementalCategories and Urgency. The location API shares its planning engine;
+legacy defaults remain unchanged. Repeated creators, keywords and supplemental
+categories retain numeric index order through native updates and growth.
+Native projection includes missing fields and corrects Country/CountryCode.
+See [authoring.md](authoring.md) for exact limits and mask domains.
+
+Verification passes 54/54 Clang 20 Release targets in both static/compression
+and shared/no-compression builds, including 119 paired IPTC fixtures. The direct
+combined target covers 120 fixtures plus six legacy ordering variants. Existing
+70 location fixtures remain. ASan/UBSan and native MSVC x64/Win32 each pass
+40/40 direct targets. Four new JPEG/TIFF replacement/removal cases cover all
+20 groups, repeated growth, unowned data and stale raw IRB precedence. Native
+Windows retains existing CRT/decoder warnings, with none from the new module.
+
+The next translation batch is primary GPS writeback. Structured locations,
+caller-owned execution workspaces, broader transfer/lifecycle acceptance and
+rich interpretation/query remain separate work. This checkpoint does not
+establish new corpus, performance, embedded-device or whole-project parity.
+
+## Previous Translation Checkpoint: Version 0.9.0
+
+The 0.9.0 batch was pinned to C++ 0.4.128, commit
 `ba99484b8be087012f9c44a1194ed828d060a0d5`. A frozen source snapshot and matching
 library keep this gate independent of ongoing C++ changes. The fresh C 0.8.0
 baseline passed 50/50 targets against that reference before implementation.
@@ -324,7 +354,7 @@ semantics. C++ ownership and presentation APIs need not be reproduced.
 | W1 | Typed authoring | C++ `create_metadata_store()` preflights, copies, validates and publishes atomically. C has typed value makers, explicit array byte order, and candidate-based edit publication. | Implemented bounded typed helpers and output-preserving transactions; see `authoring.md`. Owning logical builders and FlatHost wrappers remain above C; reusable metadata construction and validation semantics remain C targets. |
 | W2 | Canonical TIFF/EXIF serialization | C++ `serialize_exif_tiff()` is target-neutral and honors supported wire hints. C's public serializer builds typed TIFF; internal transfer payloads apply target framing above it. | Implemented `omc_serialize_exif_tiff()` with direct tests and exact C++ byte comparison. Carrier wrappers reuse canonical output; TIFF/BigTIFF retain target layout. |
 | W3 | EXIF/IPTC to portable XMP | C already has projection, all three conflict policies, custom namespaces and managed-namespace canonicalization | Paired IPTC creation/digital-creation projection implemented and tested. Broader structured XMP parity remains partial. |
-| W4 | Explicit XMP to native metadata | C++ 0.4.128 has the original five translation groups plus flat IPTC locations. C exposes the original groups through `omc_translate_xmp()` and locations through `omc_translate_xmp_location()`. | Original groups and five location mappings implemented. The 0.9.0 location gate adds 69 paired fixtures and JPEG/TIFF persistence. Later upstream mappings remain separate batches. |
+| W4 | Explicit XMP to native metadata | C exposes the original groups, flat locations and the C++ 0.4.132 combined 20-group IPTC surface. | Implemented bounded 0.10.0 IPTC checkpoint with 119 paired fixtures and JPEG/TIFF persistence. Primary GPS and structured location writeback remain separate batches. |
 | W5 | Native IPTC-IIM emission | Internal `omc_transfer_build_iptc_iim()` emits datasets; JPEG IRB and TIFF tag `33723` carrier paths exist | Present bounded mechanism. Reuse it for descriptive/date translation; add charset, repetition, tombstone and stale-IRB checks. A separate public IPTC writer is not a prerequisite. |
 | W6 | Target image facts and transfer safety | C has target image spec, CompatibleFile/RenderedImage and diagnostics; C++ has wider source-processing classification and a RAW-data descriptor | Partial. C has no source descriptor or explicit lens/preview/general-processing audit categories. Verify selected fields through actual transfer paths; share classification with interpretation/query as those operations are ported. Full query completion need not block a bounded safety fix. |
 | W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h` and direct tests | Present bounded pipeline. Existing `omc_transfer_compile()` does not imply parity with C++ compiled worker/handoff APIs. Extend the pipeline rather than replacing it. |
@@ -482,6 +512,7 @@ expression engine or five independent transaction frameworks.
 | B2c: descriptive IPTC | Title, description, creators, keywords, rights, credit, source | Default language, numeric index order, byte limits, UTF-8 charset declaration/conflicts, duplicate sources and stale raw IRB precedence |
 | B2d: target geometry | Orientation and complete stored width/height groups | Host target spec, consistent aliases, partial/deleted groups, no orientation-driven dimension swap |
 | B2e: flat IPTC locations (complete in 0.9.0) | City, Location, State, Country, CountryCode from C++ 0.4.128 | Exact groups, dirty/active duplicates, byte limits, code syntax, native wire order, charset budget, failure atomicity and JPEG/TIFF persistence |
+| B2f: combined IPTC (complete in 0.10.0) | Eight additional flat fields and atomic 20-group API from frozen C++ 0.4.132 | Repeated index/native rank order, scalar Urgency, wire limits, shared conflicts/charset/budgets, provenance and JPEG/TIFF persistence |
 
 All slices use the C++ `DirtyOnly` default and explicit PreserveExisting,
 FailOnConflict and ReplaceExisting semantics for complete native groups.
@@ -495,10 +526,9 @@ or missing time handling and generated-vs-existing precedence. Custom namespace
 support already exists in C; audit compatibility instead of implementing it
 again. Native EXIF/IPTC emission stays independent of XMP projection toggles.
 
-The current C++ next direction is broader bounded native synchronization.
-Track that as upstream growth after these five groups. Do not label it already
-implemented, guess the next mapping group, or postpone C until a general sync
-engine exists. Pin and close one reference batch before advancing it.
+The pinned C++ 0.4.132 also has primary GPS and structured location writeback.
+Port primary GPS next, then assess the structured contract against a fresh
+frozen reference. Pin and close one reference batch before advancing it.
 
 ### B3: Close Specific BMFF Deltas
 
@@ -687,9 +717,9 @@ C++ paths refer to the public OpenMeta repository at the revision above.
 | Differential gate | [parity tests](tests/test_omc_parity.cc), [test configuration](tests/CMakeLists.txt) | `docs/development.md`, `docs/api_stability.md`, public format tests |
 | Conditional patch/reuse | Existing C payload/package views and replay | `src/include/openmeta/exif_tiff_patch.h`, implementation in `src/openmeta/metadata_transfer.cc`, `docs/canonical_patching.md` |
 
-Current priority: converge reading/input and decoding against the pinned C++
-reference. Follow [read_decode_parity.md](read_decode_parity.md); the first
-PNG/WebP batch is implemented, and direct TIFF values are next. S1/S2 remain
-in scope after this stage priority; they are not prerequisites for reader
-conversion. Preserve the implemented B0-B4 foundation. Future C++ reuse must
-not narrow the C library's standalone metadata-processing scope.
+Current priority: continue bounded native translation after the completed
+0.10.0 IPTC batch, starting with primary GPS writeback. Retain the reading and
+decoding inventories in [read_decode_parity.md](read_decode_parity.md) and the
+implemented B0-B4 foundation. S1/S2 interpretation and queries remain in scope.
+Future C++ reuse must not narrow the C library's standalone metadata-processing
+scope.

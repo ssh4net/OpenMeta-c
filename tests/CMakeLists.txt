@@ -27,6 +27,11 @@ add_executable(omc_test_translation test_omc_translation.c)
 target_link_libraries(omc_test_translation PRIVATE omc)
 add_test(NAME omc_test_translation COMMAND omc_test_translation)
 
+add_executable(omc_test_iptc_translation test_omc_iptc_translation.c)
+target_link_libraries(omc_test_iptc_translation PRIVATE omc)
+omc_apply_warnings(omc_test_iptc_translation)
+add_test(NAME omc_test_iptc_translation COMMAND omc_test_iptc_translation)
+
 add_executable(omc_test_location_translation test_omc_location_translation.c)
 target_link_libraries(omc_test_location_translation PRIVATE omc)
 omc_apply_warnings(omc_test_location_translation)
@@ -149,7 +154,8 @@ add_executable(omc_test_transfer_diagnostics test_omc_transfer_diagnostics.c)
 target_link_libraries(omc_test_transfer_diagnostics PRIVATE omc)
 add_test(NAME omc_test_transfer_diagnostics COMMAND omc_test_transfer_diagnostics)
 
-add_executable(omc_test_transfer_persist test_omc_transfer_persist.c)
+add_executable(omc_test_transfer_persist test_omc_transfer_persist.c test_omc_iptc_translation.c)
+target_compile_definitions(omc_test_transfer_persist PRIVATE OMC_IPTC_PARITY_FIXTURES=1)
 target_link_libraries(omc_test_transfer_persist PRIVATE omc)
 add_test(NAME omc_test_transfer_persist COMMAND omc_test_transfer_persist)
 
@@ -251,9 +257,9 @@ if(OMC_BUILD_PARITY_TESTS)
   endif()
   add_test(NAME omc_test_parity COMMAND omc_test_parity)
   add_test(NAME omc_test_authoring_parity COMMAND omc_test_parity --core-authoring)
-  # This optional gate requires the location API introduced by C++ 0.4.128.
+  # Discover optional location (0.4.128) and combined IPTC (0.4.130) contracts.
   include(CheckCXXSourceCompiles)
-  function(omc_check_location_translation)
+  function(omc_check_translation_contracts)
     set(CMAKE_CXX_STANDARD 20)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     get_target_property(omc_reference_target OpenMeta::openmeta ALIASED_TARGET)
@@ -267,8 +273,11 @@ if(OMC_BUILD_PARITY_TESTS)
     check_cxx_source_compiles("#include <openmeta/metadata_translation.h>
 int main() { return openmeta::kMetadataLocationTranslationContractVersion == 0; }"
       OMC_HAVE_CPP_LOCATION_TRANSLATION)
+    check_cxx_source_compiles("#include <openmeta/metadata_translation.h>
+int main() { return openmeta::kMetadataIptcTranslationContractVersion == 0; }"
+      OMC_HAVE_CPP_IPTC_TRANSLATION)
   endfunction()
-  omc_check_location_translation()
+  omc_check_translation_contracts()
   if(OMC_HAVE_CPP_LOCATION_TRANSLATION)
     add_executable(omc_test_location_parity
       test_omc_location_parity.cc test_omc_location_translation.c)
@@ -282,6 +291,20 @@ int main() { return openmeta::kMetadataLocationTranslationContractVersion == 0; 
       target_link_options(omc_test_location_parity PRIVATE -stdlib=libc++)
     endif()
     add_test(NAME omc_test_location_parity COMMAND omc_test_location_parity)
+  endif()
+  if(OMC_HAVE_CPP_IPTC_TRANSLATION)
+    add_executable(omc_test_iptc_parity
+      test_omc_iptc_parity.cc test_omc_iptc_translation.c)
+    set_target_properties(omc_test_iptc_parity PROPERTIES
+      C_STANDARD 90 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+      CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    target_compile_definitions(omc_test_iptc_parity PRIVATE OMC_IPTC_PARITY_FIXTURES=1)
+    target_link_libraries(omc_test_iptc_parity PRIVATE omc OpenMeta::openmeta)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      target_compile_options(omc_test_iptc_parity PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>")
+      target_link_options(omc_test_iptc_parity PRIVATE -stdlib=libc++)
+    endif()
+    add_test(NAME omc_test_iptc_parity COMMAND omc_test_iptc_parity)
   endif()
   add_test(NAME omc_test_source_parity COMMAND omc_test_parity --core-source)
   add_test(NAME omc_test_remaining_source_parity COMMAND omc_test_parity --rd4)

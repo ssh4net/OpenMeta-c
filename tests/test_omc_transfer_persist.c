@@ -1,3 +1,4 @@
+#include "omc_iptc_fixture.h"
 #include "omc/omc_icc.h"
 #include "omc/omc_read.h"
 #include "omc/omc_transfer.h"
@@ -2251,7 +2252,7 @@ execute_transfer(const omc_u8* file_bytes, omc_size file_size,
 }
 
 static void
-test_location_persist(int remove_values, int tiff)
+test_iptc_persist(int remove_values, int tiff, int combined)
 {
     static const char *const paths[] = {"City", "Location", "State", "Country", "CountryCode"};
     static const char *const values[] = {"\344\272\254\351\203\275", "Garden", "Kyoto", "Japan", "JP"};
@@ -2265,11 +2266,16 @@ test_location_persist(int remove_values, int tiff)
     const omc_entry *entry;
     omc_entry e;
     omc_u32 i;
+    omc_u32 field_count;
+    const char *text;
+    char repeated_path[64];
+    omc_u16 dataset;
     omc_u8 file[4096];
     omc_size size;
     omc_byte_ref ref;
     omc_const_bytes payload;
     omc_location_translation_opts opts;
+    omc_iptc_translation_opts combined_opts;
     omc_translation_res translation;
     omc_transfer_prepare_opts prepare;
     omc_transfer_exec exec;
@@ -2289,20 +2295,31 @@ test_location_persist(int remove_values, int tiff)
     omc_arena_init(&sidecar);
     omc_arena_init(&meta);
     omc_arena_init(&reread);
-    for (i = 0U; i < 5U; ++i) {
-        add_xmp_text_entry(&source, i == 1U || i == 4U ?
-            "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/" :
-            "http://ns.adobe.com/photoshop/1.0/", paths[i], values[i]);
+    field_count = combined ? 20U : 5U;
+    for (i = 0U; i < field_count; ++i) {
+        add_xmp_text_entry(&source, combined ? omc_iptc_test_fields[i].ns :
+            i == 1U || i == 4U ? "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/" :
+            "http://ns.adobe.com/photoshop/1.0/",
+            combined ? omc_iptc_test_fields[i].path : paths[i],
+            combined ? omc_iptc_test_fields[i].value : values[i]);
         source.entries[source.entry_count - 1U].flags = OMC_ENTRY_FLAG_DIRTY |
             (remove_values ? OMC_ENTRY_FLAG_DELETED : 0U);
         source.entries[source.entry_count - 1U].origin.block = OMC_INVALID_BLOCK_ID;
+        if (combined && (i == 2U || i == 3U || i == 18U)) {
+            strcpy(repeated_path, omc_iptc_test_fields[i].path);
+            repeated_path[strlen(repeated_path) - 2U] = '2';
+            add_xmp_text_entry(&source, omc_iptc_test_fields[i].ns, repeated_path, "Second");
+            source.entries[source.entry_count - 1U].flags = OMC_ENTRY_FLAG_DIRTY |
+                (remove_values ? OMC_ENTRY_FLAG_DELETED : 0U);
+            source.entries[source.entry_count - 1U].origin.block = OMC_INVALID_BLOCK_ID;
+        }
         memset(&e, 0, sizeof(e));
-        omc_key_make_iptc_dataset(&e.key, 2U, datasets[i]);
+        omc_key_make_iptc_dataset(&e.key, 2U, combined ? omc_iptc_test_fields[i].dataset : datasets[i]);
         omc_val_make_bytes(&e.value, append_store_bytes(&source.arena, "OLD"));
         e.origin.block = OMC_INVALID_BLOCK_ID;
         assert(omc_store_add_entry(&source, &e, NULL) == OMC_STATUS_OK);
     }
-    omc_key_make_iptc_dataset(&e.key, 2U, 120U);
+    omc_key_make_iptc_dataset(&e.key, 2U, combined ? 130U : 120U);
     omc_val_make_bytes(&e.value, append_store_bytes(&source.arena, "Keep caption"));
     assert(omc_store_add_entry(&source, &e, NULL) == OMC_STATUS_OK);
     omc_key_make_photoshop_irb(&e.key, 0x0404U);
@@ -2311,10 +2328,13 @@ test_location_persist(int remove_values, int tiff)
     assert(omc_store_add_entry(&source, &e, NULL) == OMC_STATUS_OK);
     omc_location_translation_opts_init(&opts);
     opts.conflict = OMC_TRANSLATION_REPLACE;
-    translation = omc_translate_xmp_location(&source, &translated, &opts);
+    omc_iptc_translation_opts_init(&combined_opts);
+    combined_opts.conflict = OMC_TRANSLATION_REPLACE;
+    translation = combined ? omc_translate_xmp_iptc(&source, &translated, &combined_opts) :
+                             omc_translate_xmp_location(&source, &translated, &opts);
     assert(translation.status == OMC_TRANSLATION_OK);
-    assert(translation.groups_translated == 5U);
-    assert(translation.entries_removed == (remove_values ? 5U : 0U));
+    assert(translation.groups_translated == field_count);
+    assert(translation.entries_removed == (remove_values ? field_count : 0U));
     assert(translation.utf8_charset_added == !remove_values);
     size = tiff ? make_test_tiff_le_with_make_only(file) :
                   make_test_jpeg_with_old_xmp_comment_and_irb(file);
@@ -2339,16 +2359,22 @@ test_location_persist(int remove_values, int tiff)
                             0U, NULL).status == OMC_IPTC_OK);
         native = &iim;
     }
-    assert_u8_blob_value(native, find_iptc_entry(native, 2U, 120U, 0U),
+    assert_u8_blob_value(native, find_iptc_entry(native, 2U, combined ? 130U : 120U, 0U),
                           (const omc_u8 *)"Keep caption", 12U);
-    for (i = 0U; i < 5U; ++i) {
-        entry = find_iptc_entry(native, 2U, datasets[i], 0U);
+    for (i = 0U; i < field_count; ++i) {
+        dataset = combined ? omc_iptc_test_fields[i].dataset : datasets[i];
+        text = combined ? omc_iptc_test_fields[i].value : values[i];
+        entry = find_iptc_entry(native, 2U, dataset, 0U);
         if (remove_values)
             assert(entry == NULL);
         else {
-            assert_u8_blob_value(native, entry, (const omc_u8 *)values[i],
-                                 (omc_u32)strlen(values[i]));
-            assert(find_iptc_entry(native, 2U, datasets[i], 1U) == NULL);
+            assert_u8_blob_value(native, entry, (const omc_u8 *)text, (omc_u32)strlen(text));
+            if (combined && (i == 2U || i == 3U || i == 18U)) {
+                assert_u8_blob_value(native, find_iptc_entry(native, 2U, dataset, 1U),
+                                      (const omc_u8 *)"Second", 6U);
+                assert(find_iptc_entry(native, 2U, dataset, 2U) == NULL);
+            } else
+                assert(find_iptc_entry(native, 2U, dataset, 1U) == NULL);
         }
     }
     assert(remove(path) == 0);
@@ -4444,10 +4470,14 @@ test_transfer_persist_dng_template_sidecar_only_requires_output_path(void)
 int
 main(void)
 {
-    test_location_persist(0, 0);
-    test_location_persist(0, 1);
-    test_location_persist(1, 0);
-    test_location_persist(1, 1);
+    test_iptc_persist(0, 0, 0);
+    test_iptc_persist(0, 0, 1);
+    test_iptc_persist(0, 1, 0);
+    test_iptc_persist(0, 1, 1);
+    test_iptc_persist(1, 0, 0);
+    test_iptc_persist(1, 0, 1);
+    test_iptc_persist(1, 1, 0);
+    test_iptc_persist(1, 1, 1);
     test_transfer_persist_writes_png_output_and_sidecar();
     test_transfer_persist_writes_bigtiff_output_and_sidecar_with_preserve();
     test_transfer_persist_writes_heif_output_and_sidecar_with_strip();

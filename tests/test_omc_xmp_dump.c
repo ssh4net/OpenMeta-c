@@ -369,7 +369,7 @@ test_sidecar_portable_exif_and_iptc_projection(void)
     assert(status == OMC_STATUS_OK);
 
     memset(&entry, 0, sizeof(entry));
-    omc_key_make_iptc_dataset(&entry.key, 2U, 101U);
+    omc_key_make_iptc_dataset(&entry.key, 2U, 100U);
     omc_val_make_bytes(&entry.value, country_code_ref);
     status = omc_store_add_entry(&store, &entry, NULL);
     assert(status == OMC_STATUS_OK);
@@ -3243,7 +3243,7 @@ test_sidecar_portable_formats_common_exif_and_gps_values(void)
     assert(contains_text(full, (omc_size)res.written,
                          "<exif:ShutterSpeedValue>1/64</exif:ShutterSpeedValue>"));
     assert(contains_text(full, (omc_size)res.written,
-                         "<exif:GPSVersionID>2</exif:GPSVersionID>"));
+                         "<exif:GPSVersionID>2.3.0.0</exif:GPSVersionID>"));
     assert(contains_text(full, (omc_size)res.written,
                          "<exif:GPSLatitude>41,24.5N</exif:GPSLatitude>"));
     assert(contains_text(full, (omc_size)res.written,
@@ -3326,6 +3326,13 @@ test_sidecar_portable_skips_invalid_gps_values(void)
     status = omc_store_add_entry(&store, &entry, NULL);
     assert(status == OMC_STATUS_OK);
 
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_exif_tag(&entry.key, append_bytes(&store.arena, "gpsifd"), 0U);
+    omc_val_make_array(&entry.value, OMC_ELEM_U8, 3U,
+                        append_raw(&store.arena, (const omc_u8 *)"\002\003\000", 3U),
+                        OMC_BYTE_ORDER_NATIVE);
+    assert(omc_store_add_entry(&store, &entry, NULL) == OMC_STATUS_OK);
+
     omc_xmp_sidecar_opts_init(&opts);
     opts.include_existing_xmp = 0;
     opts.include_exif = 1;
@@ -3341,6 +3348,8 @@ test_sidecar_portable_skips_invalid_gps_values(void)
     assert(!contains_text(full, (omc_size)res.written, "<exif:GPSLatitude>"));
     assert(!contains_text(full, (omc_size)res.written, "<exif:GPSTimeStamp>"));
     assert(!contains_text(full, (omc_size)res.written, "<exif:GPSAltitude>"));
+
+    assert(!contains_text(full, (omc_size)res.written, "<exif:GPSVersionID>"));
 
     omc_store_fini(&store);
 }
