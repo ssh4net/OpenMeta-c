@@ -1,6 +1,6 @@
 # OpenMeta-c Porting Plan
 
-Updated: 2026-09-08.
+Updated: 2026-09-14.
 
 ## Goal And Reference Baseline
 
@@ -46,6 +46,163 @@ completion or count intentionally excluded C++ features as C defects.
 The conversational estimate of about 75% used the narrower boundary and is
 not a completion estimate for this clarified scope. Define feature cases for
 interpretation and non-fuzzy query before publishing revised percentages.
+
+## Upstream 0.5 Convergence Roadmap
+
+This section supersedes the earlier next-batch order and the conditional
+EXIF-only patch proposal. Completed B0-B4, RD0-RD6 and IPTC work remains the
+foundation. This is a source-reviewed plan, not a new implementation or test
+checkpoint. No C 0.5-reference parity run was performed for this documentation
+update; the accepted C results below still belong to the 0.4.132 reference.
+
+| Role | Version / revision | Treatment |
+| --- | --- | --- |
+| Current C implementation | 0.10.0, `a7f673a34b301235c7118c35b03a4481b2c14afe` | Retain existing C APIs, defaults and acceptance evidence |
+| Last accepted C++ reference | 0.4.132, `7f0ec70617d7286a33b8d821c459241245520615` | Keep its source/library and regression results reproducible |
+| New reviewed C++ target | 0.5.2, `646cc2773f9cb690ededb2a60639687a47d7b0c7` | Freeze matching source/build for UP0 before claiming new parity |
+| Upstream work in progress | Working-tree 0.5.3 APEX changes observed on 2026-09-14 | Watch list only; require a committed, reviewed pin before implementation acceptance |
+
+The review uses the committed range `7f0ec706..646cc27`, notably the breaking
+patch release `561bab7`, container corrections `8b13f7b`, and identity writeback
+`646cc27`. Reference documents are `docs/migration_0_5.md`,
+`docs/canonical_patching.md`, `docs/api_stability.md`,
+`docs/host_adoption_profile.md`, `docs/translation.md`, and
+`docs/writer_target_contract.md` in the C++ repository. Uncommitted C++ changes
+must not be mixed into a reference build or described as released behavior.
+
+### Breaking Changes And C Consequences
+
+| C++ change | Consequence for the C port |
+| --- | --- |
+| `exif_tiff_patch.h` and `ExifTiffPatch*` removed without aliases | Replace the old W12/B5 target with `metadata_patch.h`. C has no equivalent old patch API to migrate; do not implement it first or add obsolete wrappers. |
+| One `PreparedMetadataPatchPlan` / `PreparedMetadataPatchInstance` supports canonical EXIF and scalar XMP | Plan one C primitive for both payloads, with a shared all-or-nothing update batch. Existing transfer payload/package replay is not an equivalent patch worker. |
+| `options.serialization` becomes `options.exif`; validation is shared; payload access takes a family | New C options separate EXIF serialization and XMP output policy while sharing validation, requests, handles and transaction results. Exact C names/layouts are an implementation decision. |
+| Required host-issued nonzero 48-bit `plan_id`; no patch atomics, mutexes or global ID allocator | Preserve generation identity and explicit host synchronization. Zero/default ID is invalid; never silently allocate or wrap IDs. Do not require a C threads runtime. |
+| ABI 2 becomes 3; `openmeta-3.dll`; CMake changes to same-minor compatibility | Rebuild C++ parity consumers against a matched 0.5 SDK. Do not mix old headers/libraries or copy the C++ ABI number into C. A C ABI/layout change needs its own release decision. |
+| Host Adoption Profile v1 and target-specific Prepared Transfer Handoff remain separate | Preserve their portable read/state/diagnostic/replay semantics as C targets. C++ owning wrappers remain above C; standalone patching does not replace container operations or imply profile compatibility. |
+| Translation APIs grow without widening existing option defaults | Add bounded C group domains and explicit status mappings; keep `omc_translate_xmp()` and the location/IPTC APIs stable. Do not silently extend their default masks. |
+
+No existing C parity adapter includes the removed patch header. The immediate
+compatibility task is reference/package qualification and new adapters, not a
+mechanical rename in current C runtime code. Compare new error distinctions
+explicitly, including incomplete/unsupported source shapes, precision, versions,
+and encoding. Preserve the C distinct-source/output rule; any intentional API
+ownership difference belongs in the fixture mapping rather than being hidden.
+
+### Ordered Implementation Batches
+
+| Batch | Work | Exit gate |
+| --- | --- | --- |
+| UP0: reference refresh | Freeze committed C++ 0.5.2; rebuild Clang 20 direct/parity targets in fresh directories; verify package/contract detection. Retain the old pin as history. | Record exact versions, source/build pairing, ABI, discovered tests, dependency flags and every difference. Separate compile/link failures from changed metadata behavior; never update expected results solely to make a test pass. |
+| UP1: existing behavior corrections | Audit TIFF/BigTIFF malformed roots, JP2/JPH EXIF/XMP UUID replacement, terminal/extended boxes, TIFF deletion propagation, and scoped XMP whitespace/projection changes. Fix only demonstrated C differences. | Direct and C/C++ memory/callback fixtures agree on values and failure status. Replacement preserves unselected UUID families and image bytes; explicit deletion cannot resurrect stale metadata. |
+| UP2: unified prepared patch core | Implement the current EXIF/scalar-XMP contract through C data, explicit lifecycle and bounded preparation/worker storage. Reuse canonical serializers, typed values and validation. | Mixed-family rollback, generation/alias checks, exact escaped widths, stable payload storage, independent worker lifetimes, and zero allocations in successful/rejected patch, payload access and library replay. |
+| UP3: complete GPS families | Primary position/altitude, UTC/navigation, destination, receiver quality, then encoded GPS text. Share exact rational, version, companion and conflict rules. | Per-family paired fixtures and JPEG/Classic TIFF/BigTIFF persistence cover the reference's 32 standard GPS tag IDs, including removals and companions. Projection/encoding/unit deltas travel with each group. |
+| UP4: capture and identity convergence | Closed capture settings; exact rational/sentinel fields; Flash and LightSource; sensitivity companions; camera/lens/spectral text; LensSpecification and ImageUniqueID. Preserve existing basic capture mappings. | Coherent groups agree on types, aliases, ambiguity, sentinels, bounds and transaction failure. Validate, serialize, project, persist and reread each group; do not infer round-trip correctness from translation alone. |
+| UP5: structured locations | Port reconciliation and explicit flat-to-structured construction separately. Preserve Created/Shown scope, dense record indexing, RDF Bag output and removal policies. | Paired structured fixtures retain unrelated records/qualifiers; malformed, mixed and partial inputs reject atomically. Flat IPTC writeback remains an independent operation. |
+| UP6: snapshot and transfer convergence | Add bounded decoded-state persistence/reconciliation semantics and close the recorded broad transfer/lifecycle gaps by carrier. Keep raw-carrier entry links and tombstones across deferred operations. | Transactional snapshot v1 interoperation where promised, stable entry identity/order, explicit completion diagnostics, selected-family replacement/removal and actual file readback. C++ integration-profile compatibility requires its own consumer gate. |
+| UP7: rich semantic stages | Continue I1/I2/Q1/Q2 by metadata family, sharing accepted normalization and applicability rules with translation/transfer. | Non-fuzzy interpretation, candidates, provenance, confidence, preference/conflict and unknown outcomes match the pinned reference. |
+
+Default order is **UP0 -> UP1 -> UP2 -> UP3 -> UP4 -> UP5 -> UP6 -> UP7**.
+UP2 and the translation families have no dependency on each other's completion;
+the default brings the replacement patch contract forward before further
+per-tag expansion. GPS remains the next translation batch. Split UP3/UP4 into
+the listed coherent groups so each can be committed and verified independently.
+Do not build a general synchronization engine as a prerequisite.
+
+Apply E1 resource checks to every changed module and qualify one declared
+embedded configuration separately. Snapshot serialization is not a prerequisite
+for initial patch or translation tests: use existing C stores and native file
+readback first. Neither OIIO/iRAW integration nor an external checkout is a gate
+for these C-library batches. The optional B5 C++-uses-C experiment follows an
+accepted primitive and does not authorize changing C++ production dispatch.
+
+### UP1 And Translation Drift Inventory
+
+These are behavior changes to test, not blanket claims that every C path is
+broken. The C TIFF scanner already checks the first IFD range; test the direct
+EXIF decoder and positional entry points independently.
+
+- C++ 0.5.1 rejects an out-of-range nonzero root IFD as Malformed. Zero remains
+  an empty root. Preserve this distinction for classic TIFF, BigTIFF, both
+  byte orders and nonzero positional source bases.
+- JP2/JPH replacement removes all selected EXIF/XMP top-level and standard UUID
+  carriers. Preserve unknown, IPTC, GeoTIFF and unselected UUIDs. Check extended
+  size overflow, truncated UUIDs and insertion before a preserved size-zero
+  final box. Boxed JPH metadata belongs to the existing JP2-family core scope;
+  a distinct format enum is not a prerequisite. Raw codestream wrapping and
+  pixel codecs remain host responsibilities.
+- Test deletion of the last ExifIFD/GPS fields through actual TIFF/BigTIFF
+  output and XMP stripping. Ordinary omission must still preserve target data.
+  C++ snapshot deletion-marker handling is a reference for UP6, not an existing
+  C snapshot capability.
+- The six camera/lens/spectral text fields from 0.4.142, plus ImageUniqueID in
+  0.5.2, preserve boundary whitespace in their exact namespaces/aliases. C's
+  XMP decoder still uses general trimming paths. Cover description attributes,
+  `rdf:resource` and element text; do not disable trimming globally.
+- Bring canonical exifEX names and historical aliases into projection tests
+  for sensitivity and camera/lens fields. LensSpecification uses exact fraction
+  output, four rational components and narrowly defined unknown-aperture `0/0`
+  slots. Generic validation must agree without relaxing all rational checks.
+  ImageUniqueID requires 32 ASCII hex characters and preserves case/zeros.
+- GPS destination distance unit N means nautical miles; the historical Knots
+  spelling is only a distance-input alias. GPS speed unit N remains knots.
+  GPS processing/area text projection must decode only supported encodings and
+  retain unsupported native values without inventing display text.
+- LightSource codes 1 and 25 must not collapse to the same reversible label.
+  Preserve finite values versus sentinels in capture rationals, full Flash bit
+  structure and sensitivity companion relationships in UP4.
+
+### UP2 Contract And Resource Gates
+
+The reusable behavior is in `metadata_patch.h` / `metadata_patch.cc`, with
+serializer-recorded XMP slots and tests in `metadata_patch_xmp_test.cc`,
+`exif_tiff_patch_test.cc` (its filename is historical) and
+`metadata_patch_allocation_test.cc`. Port that contract without C++ owner
+classes or application-visible TIFF/XML offsets.
+
+- Prepare after validation and serialization. Bind EXIF by key, occurrence and
+  native shape; bind XMP by emitted namespace URI/simple property identity after
+  conflict resolution. Do not locate patch slots by sentinels or reparsing XML
+  during execution. Only requested payload families are generated.
+- Make preparation/worker capacity queries, ownership and teardown explicit.
+  Prefer caller-provided storage for the C execution primitive; any allocating
+  setup convenience must be explicit. Immutable plan data and independent
+  worker payload/slot storage must permit workers to survive plan destruction.
+  Existing C store/read allocations need separate E1 work.
+- Follow the host-issued ID lifetime contract, including 48-bit exhaustion.
+  Reject foreign/stale handles when IDs obey that contract; document that the
+  library cannot detect a host assigning the same ID to different live plans.
+  Do not serialize process-local handles in snapshots.
+- Validate the full update batch before either payload changes. Reject
+  duplicate handles and values aliasing either worker payload. Failed prepare
+  or worker creation preserves the previous output and output handles.
+- EXIF retains compiled kind/type/count/encoding and canonical little-endian
+  storage. XMP takes logical ASCII/UTF-8, validates XML characters and measures
+  escaped width, including `&amp;` and CR as `&#xD;`. Preserve leading zeros and
+  fraction/subsecond spelling; reject padding, truncation, raw XML, structural
+  paths, additions and resizing. Respect per-API rational/sentinel rules.
+- Retain documented reference ceilings: 4096 default requests, 65534 hard
+  handles, 64 MiB default EXIF and 16 MiB/65536-entry default XMP output bounds.
+  C callers may choose smaller limits. Oversized preparation must not publish
+  a partial plan. Freeze exact defaults with the implementation's reference.
+- Verify stable payload addresses/lengths and zero allocations on successful
+  and rejected patching, payload access and library replay. Replay is synchronous
+  EXIF then XMP. Callback failure stops replay; prior host output effects are
+  not rolled back. The host owns synchronization, framing, checksums and I/O.
+- Include installed shared-library consumers, C90/Clang 20, sanitizers and
+  native Windows x64/Win32. Measure preparation separately from patch/replay;
+  record C-heap interception coverage rather than assuming a C++ allocation
+  counter measures C. No workstation timing constitutes an embedded deadline.
+
+### Pending Upstream Watch List
+
+The observed 0.5.3 work adds a coherent APEX transaction and changes portable
+ShutterSpeedValue/ApertureValue output from seconds/f-numbers to exact APEX
+fractions, with explicit unknown-brightness handling. Treat it as a pending
+UP4 extension until committed and reviewed. Old portable APEX packets may need
+regeneration from native EXIF; never reinterpret them silently as exact APEX.
+Focal-plane/subject contracts are subsequent upstream plans, not implemented
+reference features. Recheck the handoff and commit history before each batch.
 
 ## Execution Checkpoint: Typed Writer and Translation
 
@@ -104,10 +261,10 @@ combined target covers 120 fixtures plus six legacy ordering variants. Existing
 20 groups, repeated growth, unowned data and stale raw IRB precedence. Native
 Windows retains existing CRT/decoder warnings, with none from the new module.
 
-The next translation batch is primary GPS writeback. Structured locations,
-caller-owned execution workspaces, broader transfer/lifecycle acceptance and
-rich interpretation/query remain separate work. This checkpoint does not
-establish new corpus, performance, embedded-device or whole-project parity.
+At this checkpoint primary GPS was the next batch. The Upstream 0.5
+Convergence Roadmap above now inserts UP0/UP1 and unified patching first; GPS
+remains the next translation family. This checkpoint does not establish new
+corpus, performance, embedded-device or whole-project parity.
 
 ## Previous Translation Checkpoint: Version 0.9.0
 
@@ -309,8 +466,10 @@ dependencies included in a distribution.
 
 ## Parity Matrix
 
-The matrix combines source evidence with the scoped verification above.
-Presence alone does not establish complete reference parity:
+The matrix combines the C 0.10.0 implementation evidence with the 0.5.2
+source review and UP0-UP7 plan. Earlier measured rows retain their recorded
+reference pins; they have not been reaccepted against 0.5.2. Presence alone
+does not establish complete reference parity:
 
 - **Present**: implementation and direct tests exist for a bounded C contract.
   Broader reference parity needs the listed acceptance cases.
@@ -326,13 +485,13 @@ Presence alone does not establish complete reference parity:
 | ID | Capability | Current C evidence | Status and decision |
 | --- | --- | --- | --- |
 | R1 | Store, keys, values, origins, edits | `omc_store.h`, `omc_val.h`, `omc_edit.h`; add/set/tombstone and reserve operations | Present and tested: typed makers, array byte order, candidate publication on commit/compact, and failure preservation. |
-| R2 | Contiguous scan, payload assembly, decode | `omc_scan.h`, `omc_pay.h`, `omc_read.h`; direct EXIF/XMP/ICC/IPTC/IRB/JUMBF/EXR tests | Present, broad bounded coverage. Promote C++ differences by fixture; no universal camera/read-parity claim. |
+| R2 | Contiguous scan, payload assembly, decode | `omc_scan.h`, `omc_pay.h`, `omc_read.h`; direct EXIF/XMP/ICC/IPTC/IRB/JUMBF/EXR tests | Present, broad bounded coverage under the old pin. UP1 checks 0.5.1 TIFF root outcomes and scoped XMP whitespace changes; no universal camera/read-parity claim. |
 | R3 | MakerNote/native RAW and modern-container enrichment | `src/read/omc_exif.c`, `omc_bmff.c`, naming and read tests | Bounded parity verified against the pin for the public inventory and selected corpus, including CMT3, vendor offsets and model-selected derived tables. Uncovered model/subtable variants remain planned; preserve raw/unknown values. |
 | R4 | BMFF derived fields | Item semantics, properties, `ipma` associations and `grpl` summaries in `omc_bmff.c` | Implemented bounded scene/component, grid/overlay/identity/tile, primary/display-transform and property/reference summaries. 68 memory and callback cases match the pin. Read-side summaries do not imply writer remapping or unbounded graph support. |
 | R5 | Positional source, read budgets, source ranges/windows | `omc_source.h`, `omc_read_source.h`, direct and focused C++ source tests | Implemented fixed-size memory/callback sources, exact reads, sticky budgets, shared scanners/payload extraction, direct TIFF/MakerNote values, modern containers, native RAW and standalone XMP. Explicit undeclared RAW-search and embedded-memory limits remain; see `read_decode_parity.md`. |
 | R6 | Runtime capabilities, preview, CCM/DNG helpers | `omc_capabilities.h`, `omc_preview.h`, `omc_ccm_query.h` and direct tests | Present bounded helpers. Capabilities must report actual C support and enabled compression features. |
-| R7 | Detached entry/store validation | `omc_validate.h` exposes file/read diagnostics and CCM checks | Implemented initial detached schema in `omc_store_validate.h`; bounded diagnostics, wire/value checks, singleton and image-context tests. |
-| R8 | Decoded snapshots, source provenance and persistence | C callers retain stores/bytes; transfer packages retain output source ranges | Missing named snapshot API; Conditional. C++ snapshot v1 exists. Positional input does not require its owning or serialized snapshot object first. |
+| R7 | Detached entry/store validation | `omc_store_validate.h`; bounded diagnostics, wire/value checks, singleton and image-context tests | Present initial schema. UP1/UP4 add the exact LensSpecification sentinel and related field-shape rules; preserve ordinary denominator rejection. |
+| R8 | Decoded snapshots, source provenance and persistence | C callers retain stores/bytes; transfer packages retain output source ranges | Missing named decoded-state snapshot API; planned UP6. Preserve v1 wire/state semantics, entry identity and raw-carrier links through C lifecycle functions. Existing readers and UP2 do not depend on it. |
 
 ### Interpretation And Non-Fuzzy Query
 
@@ -353,16 +512,16 @@ semantics. C++ ownership and presentation APIs need not be reproduced.
 | --- | --- | --- | --- |
 | W1 | Typed authoring | C++ `create_metadata_store()` preflights, copies, validates and publishes atomically. C has typed value makers, explicit array byte order, and candidate-based edit publication. | Implemented bounded typed helpers and output-preserving transactions; see `authoring.md`. Owning logical builders and FlatHost wrappers remain above C; reusable metadata construction and validation semantics remain C targets. |
 | W2 | Canonical TIFF/EXIF serialization | C++ `serialize_exif_tiff()` is target-neutral and honors supported wire hints. C's public serializer builds typed TIFF; internal transfer payloads apply target framing above it. | Implemented `omc_serialize_exif_tiff()` with direct tests and exact C++ byte comparison. Carrier wrappers reuse canonical output; TIFF/BigTIFF retain target layout. |
-| W3 | EXIF/IPTC to portable XMP | C already has projection, all three conflict policies, custom namespaces and managed-namespace canonicalization | Paired IPTC creation/digital-creation projection implemented and tested. Broader structured XMP parity remains partial. |
-| W4 | Explicit XMP to native metadata | C exposes the original groups, flat locations and the C++ 0.4.132 combined 20-group IPTC surface. | Implemented bounded 0.10.0 IPTC checkpoint with 119 paired fixtures and JPEG/TIFF persistence. Primary GPS and structured location writeback remain separate batches. |
-| W5 | Native IPTC-IIM emission | Internal `omc_transfer_build_iptc_iim()` emits datasets; JPEG IRB and TIFF tag `33723` carrier paths exist | Present bounded mechanism. Reuse it for descriptive/date translation; add charset, repetition, tombstone and stale-IRB checks. A separate public IPTC writer is not a prerequisite. |
+| W3 | EXIF/IPTC to portable XMP | C has projection, conflict policies, custom namespaces and managed canonicalization | Partial. Retain paired IPTC dates and the 0.10.0 fixes. UP1/UP3-UP5 cover exifEX names, exact lens fractions, GPS text/units and structured Bags. APEX correction is pending upstream acceptance. |
+| W4 | Explicit XMP to native metadata | C exposes original groups, flat locations and combined 20-group IPTC | Partial against 0.5.2; 119 paired IPTC fixtures remain accepted at 0.4.132. UP3 GPS, UP4 capture/identity and UP5 structured locations close the newer groups without widening old defaults. |
+| W5 | Native IPTC-IIM emission | Internal `omc_transfer_build_iptc_iim()`; JPEG IRB and TIFF tag `33723` carriers | Present bounded mechanism with 0.10.0 charset, repeated growth, tombstone and stale-IRB persistence tests. Broader transfer remains UP6. A separate public IPTC writer is not a prerequisite. |
 | W6 | Target image facts and transfer safety | C has target image spec, CompatibleFile/RenderedImage and diagnostics; C++ has wider source-processing classification and a RAW-data descriptor | Partial. C has no source descriptor or explicit lens/preview/general-processing audit categories. Verify selected fields through actual transfer paths; share classification with interpretation/query as those operations are ported. Full query completion need not block a bounded safety fix. |
-| W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h` and direct tests | Present bounded pipeline. Existing `omc_transfer_compile()` does not imply parity with C++ compiled worker/handoff APIs. Extend the pipeline rather than replacing it. |
+| W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h` and direct tests | Present bounded pipeline; UP1/UP6 close deletion/lifecycle behavior. UP2 standalone payload patching is separate from target-specific handoff and container replay. |
 | W8 | XMP carrier merge and lifecycle | C has destination embedded/sidecar stores, precedence, writeback and persistence options | Present controls, Partial lifecycle parity. Test modes/defaults, strip/overwrite/failure behavior and source/destination conflicts. |
 | W9 | Payload/package artifacts | C has `OMTPLD01` v1, `OMTPKG01` v2, semantic views, replay, executed-output materialization and artifact inspection | Present bounded wire families. Test interoperation in both directions; matching version/magic does not establish complete builder/execution parity. |
 | W10 | BMFF package item insertion | C has Exif/XMP/JUMBF/C2PA routes, ICC, synthesized `idat`, inserted 32-bit IDs and bounded method-2 references | Shared bounded materializer now replaces managed families and remaps unambiguous IDs. Append layout preserves existing media addresses; physical byte layout differs from C++. |
 | W11 | Newer bounded BMFF writer rules | C++ compact `iloc`, self-contained `dref`, managed-item replacement/remapping and multiple `ipma` consolidation | Implemented bounded normalization, local `dref`, family replacement, `iref`/version-0 `grpl`/`ipma` remapping, and multiple-table ICC association consolidation. See `bmff_writing.md` for limits and validation. |
-| W12 | Prepared canonical TIFF patching | C++ `exif_tiff_patch.h` has plan-scoped handles, fixed-width typed transactions and independent workers | Missing; Conditional for the first writer milestone. Useful later as a small reusable execution primitive after W1/W2, without C++ owner classes. |
+| W12 | Transactional canonical EXIF/scalar-XMP patching | C++ 0.5 replaces the removed EXIF-only API with `metadata_patch.h`; C has serializers but no equivalent patch plan/worker | Missing; planned UP2. One bounded C primitive must preserve mixed-family atomicity, host-issued generations, exact shapes/escaped widths and allocation-free execution. C++ classes remain outside the C API. |
 | W13 | MakerNote trust and C2PA | C has conservative rendered filtering and bounded JUMBF/C2PA routes; C++ has richer MakerNote layout audits and optional verification | Partial safety facts. Keep opaque preservation distinct from verified relocation. Bounded OpenSSL verification logic is eligible as an optional C backend. Rendered C2PA invalidation/drop stays explicit; full asset binding, signing and trust remain outside the first writer milestone. |
 
 ### Excluded Integrations And Conditional Features
@@ -372,11 +531,11 @@ semantics. C++ ownership and presentation APIs need not be reproduced.
 | Owning C++ query/interpretation objects and presentation helpers | C++ layer. Underlying candidates, confidence, provenance, concept resolution and interpretation semantics are C targets in I1/I2/Q1/Q2. |
 | Fuzzy search, Unicode/transliteration policy and optional search indexes | C++ layer. Independent capability; not a metadata-core parity gate. |
 | Owning logical builders, FlatHost object adapters and typed codec wrappers | C++ layer for object/host integration. Portable metadata construction, validation and reconciliation rules remain C targets; wrapper placement does not exclude their underlying semantics. |
-| Host Adoption Profile, PreparedTransferHandoff, generic adapter views and owning compiled plans | C++ layer. Wire payloads and narrow replay primitives remain the C bridge. |
+| Host Adoption Profile descriptors, PreparedTransferHandoff and owning C++ plans | C++ wrapper shapes stay above C. Portable read/state/reconciliation and typed replay behavior remain UP6 targets; unified standalone patch semantics are UP2. Neither contract is implied by existing C payload replay. |
 | OCIO, EXR host adapters, Adobe DNG SDK and LibRaw integration | C++ layer. EXR header read remains in C; host emission is Conditional, and full EXR file rewrite is outside scope. |
 | OIIO adapter | Removed from the current C++ tree. Do not list it as an implemented feature to port; any future bridge is separate integration work. |
 | Python/nanobind, CLI feature duplication and downstream host wrappers | C++ layer. A small C diagnostic test tool may be justified without a second product CLI. |
-| Snapshot v1 serialization, raw-carrier provenance and deferred snapshot ownership | Conditional. Revisit after positional readers for a concrete persistence or deferred-prepare workflow. |
+| Snapshot v1 serialization, raw-carrier provenance and deferred state | Planned UP6 as portable core behavior with explicit C ownership. Raw-carrier passthrough policy is separate; no owning C++ class is required. |
 | Full prepared-bundle serialization, arbitrary container graph editing, full RDF and general cross-family sync | Not current C commitments. Several also exceed the bounded C++ contract. |
 | Full C2PA asset binding, signing/resigning, external-signer packages and trust policy | Outside this core milestone. Keep structural decode and safe bounded transfer behavior. |
 | Pixel decoding/encoding, color transforms and application of RAW curves/LUTs | Host responsibility. Metadata about a processing operation is not authorization to apply it. |
@@ -391,12 +550,13 @@ format-wide parity. Check each metadata family, route and writeback mode.
 | JPEG | EXIF/XMP, ICC APP2, IPTC APP13 IRB `0x0404`, bounded JUMBF packages | First typed author/edit/translate/write/readback fixture; preserve unrelated IRB resources |
 | TIFF / BigTIFF | EXIF/XMP, ICC `34675`, IPTC `33723`, executed-output pointer/tail chunks | Native types, companion deletion, retained directories/previews and rendered safety |
 | DNG | Existing/template/minimal-fresh-scaffold modes, ICC/IPTC carriage | Target-owned layout/calibration; no-target fresh output and persist parity |
-| PNG / WebP / JP2 | Bounded EXIF/XMP/ICC lanes and format-aware packages | Canonical EXIF wrapping, preservation, XMP lifecycle and semantic readback |
+| PNG / WebP | Bounded EXIF/XMP/ICC lanes and format-aware packages | Canonical EXIF wrapping, preservation, XMP lifecycle and semantic readback |
+| JP2-family including boxed JPH | Bounded JP2 EXIF/XMP/ICC lanes | UP1 adds selected UUID-family replacement and terminal/extended-box checks; JPH metadata qualification must prove codestream preservation. |
 | JXL | EXIF including replacement of `brob(Exif)`, XMP/JUMBF, serialized encoder ICC handoff | Brotli on/off and wire interoperation; ICC handoff is not an in-place ICC writer |
 | HEIF / AVIF / CR3 | Bounded EXIF/XMP/ICC rewrite and explicit package graph materialization | Newer `iloc`/reference/property rules; test direct rewrite and package materialization separately |
 | EXR | Header decode | Maintain read parity; host-emitter work does not block writer convergence |
 
-## Fastest Delivery Route
+## Original Delivery Foundation (B0-B5)
 
 Close shared behavior once and reuse it across targets. Do not rebuild every
 C++ header or wait for all read enrichment before shipping a useful writer
@@ -416,11 +576,10 @@ schedule. Establish timings in B0 before assigning calendar estimates.
 | B5 | Optional common-core reuse experiment | Selected B1-B4 or S1/S2 operation accepted; bounded experiment | Isolated C++ consumer delegates one operation to C with behavior/cost evidence; production switch is a separate decision |
 
 The first implementation sequence was **B0 -> B1 -> B2 -> B3 -> B4**. Its
-bounded slices are recorded above; do not restart completed work. Next,
-follow the reading/decoding convergence batches in
-[read_decode_parity.md](read_decode_parity.md). Keep decoder-generated semantic
-fields in that inventory. S1/S2 and remaining transfer/lifecycle parity follow
-in bounded increments after the current reading/decoding priority.
+bounded slices and RD0-RD6 are recorded above; do not restart completed work.
+The current order is UP0-UP7. Retain [read_decode_parity.md](read_decode_parity.md)
+and its decoder-generated semantic fields as a regression inventory. S1/S2
+and remaining transfer/lifecycle parity continue through UP6/UP7.
 Apply E1 as those modules become candidates for embedded use. B5 can use any
 accepted operation and does not gate semantic porting or require full parity.
 
@@ -526,9 +685,9 @@ or missing time handling and generated-vs-existing precedence. Custom namespace
 support already exists in C; audit compatibility instead of implementing it
 again. Native EXIF/IPTC emission stays independent of XMP projection toggles.
 
-The pinned C++ 0.4.132 also has primary GPS and structured location writeback.
-Port primary GPS next, then assess the structured contract against a fresh
-frozen reference. Pin and close one reference batch before advancing it.
+The older C++ 0.4.132 pin already had primary GPS and structured location
+writeback. UP3-UP5 now cover those contracts and their growth through 0.5.2,
+after UP0-UP2. Pin and close one reference batch before advancing it.
 
 ### B3: Close Specific BMFF Deltas
 
@@ -658,11 +817,11 @@ rich metadata algorithms themselves may be the delegated operation. If a call
 needs repeated full-store copies, resolve ownership/layout costs before
 replacing production code.
 
-Add a C fixed-width patch primitive only when repeated-frame measurements or
-the consumer requires it. Preserve plan-scoped handles, typed/width/alias
-validation, atomic patches, immutable plans and per-worker storage. Do not
-expose private TIFF offsets as a shortcut. A successful experiment supports a
-later migration decision; it is not authorization to switch C++.
+UP2 will implement the reusable EXIF/scalar-XMP patch primitive directly
+against `metadata_patch.h`; it no longer waits for this reuse experiment.
+B5 may later compare that accepted primitive or another accepted operation.
+A successful experiment supports a later migration decision; it is not
+authorization to switch C++ production code.
 
 ## Acceptance And Ongoing Upstream Tracking
 
@@ -715,11 +874,10 @@ C++ paths refer to the public OpenMeta repository at the revision above.
 | BMFF/packages/safety | [package API](src/omc/omc_transfer_package.h), [package tests](tests/test_omc_transfer_package.c), [diagnostic tests](tests/test_omc_transfer_diagnostics.c) | `src/openmeta/metadata_transfer.cc`, `tests/metadata_transfer_api_test.cc`, `docs/writer_target_contract.md` |
 | Positional read | [source API](src/omc/omc_source.h), [source reader](src/omc/omc_read_source.h), [source tests](tests/test_omc_read_source.c) | `src/include/openmeta/random_access_source.h`, `src/openmeta/random_access_source.cc`, `tests/random_access_source_test.cc`, `docs/random_access_input.md` |
 | Differential gate | [parity tests](tests/test_omc_parity.cc), [test configuration](tests/CMakeLists.txt) | `docs/development.md`, `docs/api_stability.md`, public format tests |
-| Conditional patch/reuse | Existing C payload/package views and replay | `src/include/openmeta/exif_tiff_patch.h`, implementation in `src/openmeta/metadata_transfer.cc`, `docs/canonical_patching.md` |
+| Unified patch/reuse | Existing canonical serializers and typed values; new C plan/worker pending UP2 | `src/include/openmeta/metadata_patch.h`, `src/openmeta/metadata_patch.cc`, `tests/metadata_patch_xmp_test.cc`, `tests/metadata_patch_allocation_test.cc`, `docs/migration_0_5.md`, `docs/canonical_patching.md` |
 
-Current priority: continue bounded native translation after the completed
-0.10.0 IPTC batch, starting with primary GPS writeback. Retain the reading and
-decoding inventories in [read_decode_parity.md](read_decode_parity.md) and the
-implemented B0-B4 foundation. S1/S2 interpretation and queries remain in scope.
-Future C++ reuse must not narrow the C library's standalone metadata-processing
-scope.
+Current priority: UP0 reference qualification, UP1 existing-behavior corrections,
+then UP2 unified patching. GPS is the next translation family in UP3; richer
+capture and structured groups follow. Retain the reading/decoding inventories
+and implemented B0-B4 foundation. S1/S2 remain part of UP7. Future C++ reuse
+must not narrow the C library's standalone metadata-processing scope.

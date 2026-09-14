@@ -236,3 +236,10 @@ failures. `omc_test_parity --all` explicitly enables those historical cases.
 The separate reading/decoding checkpoint covers structured XMP and bounded
 BMFF summaries. Broader source-processing classification and native mapping
 groups beyond the pinned reference remain separate acceptance work.
+
+The [upstream 0.5 roadmap](porting_plan.md#upstream-05-convergence-roadmap)
+now targets `metadata_patch.h` for a future C EXIF/scalar-XMP patch primitive.
+The removed C++ EXIF-only patch API will not be ported first. This is planned
+UP2 work; the current C serializers and transfer replay are not patch workers.
+Current C translation defaults remain unchanged. Later GPS, capture/identity
+and structured-location contracts have separate planned batches.

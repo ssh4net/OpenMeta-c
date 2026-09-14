@@ -33,6 +33,13 @@ the explicit location API (0.9.0) and combined 20-group IPTC API (0.10.0).
 Versions 0.2.0 and 0.8.0 change `omc_val` and `omc_xmp_limits`, respectively;
 rebuild consumers and initialize options with their public initializers.
 
+The [upstream 0.5 roadmap](porting_plan.md#upstream-05-convergence-roadmap)
+reviews committed C++ 0.5.2. It replaces the obsolete EXIF-only patch proposal
+with unified EXIF/scalar-XMP patching and schedules correctness, GPS, capture,
+structured-location and snapshot parity work. C remains at 0.10.0; existing
+acceptance results use frozen C++ 0.4.132. The roadmap update does not establish
+0.5.2 parity or change the C ABI.
+
 Version 0.8.0 adds bounded BMFF scene/derived-image summaries, structured XMP,
 JUMBF and MakerNote parity fixes, standalone XMP callbacks and Canon CMT3.
 The [reading/decoding checkpoint](read_decode_parity.md) records 208 exact
@@ -380,8 +387,9 @@ JUMBF decoded output now follows the reference: parent labels use `jumb_label`,
 `c2pa.verify.require_trusted_chain` reflects the option. Consumers matching the
 old label key or scalar type must update. No crypto backend was added.
 
-The next work follows [read_decode_parity.md](read_decode_parity.md): RD5
-remaining decoder and standalone-input differences, then RD6 stage acceptance.
+RD5/RD6 subsequently reached the 0.8.0 checkpoint. Current work follows the
+[upstream 0.5 roadmap](porting_plan.md#upstream-05-convergence-roadmap), retaining
+the reading/decoding inventory as a regression gate.
 
 Remaining portable-core work includes:
 

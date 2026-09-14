@@ -5,6 +5,12 @@ Updated: 2026-09-08. Reference: C++ `0.4.127`, commit
 version `0.3.0`. This plan implements the reading/input and decoding stages
 of [porting_plan.md](porting_plan.md).
 
+The 2026-09-14 [upstream 0.5 roadmap](porting_plan.md#upstream-05-convergence-roadmap)
+adds UP0/UP1 qualification against committed C++ 0.5.2. In particular, test
+TIFF/BigTIFF malformed-root outcomes and the scoped camera/lens/spectral and
+ImageUniqueID XMP whitespace changes through both access modes. Existing RD
+results below retain their recorded pins; they are not 0.5.2 acceptance.
+
 ## Target And Comparison Rules
 
 Match the pinned C++ metadata read behavior through C89/C90 APIs: carrier
