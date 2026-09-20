@@ -1,15 +1,18 @@
 # Reading And Decoding Parity
 
-Updated: 2026-09-08. Reference: C++ `0.4.127`, commit
+Updated: 2026-09-20. Historical RD reference: C++ `0.4.127`, commit
 `f11de3e06e93b35146b0ff54ae4a2c790f5bab98`. Initial C code: `71357c9`,
-version `0.3.0`. This plan implements the reading/input and decoding stages
-of [porting_plan.md](porting_plan.md).
+version `0.3.0`. The current upstream review reference is C++ `0.5.10`, commit
+`8594030c5acf0bb930a02c13c874ae25845f087f`; existing RD results retain their
+recorded pins. This plan implements the reading/input and decoding stages of
+[porting_plan.md](porting_plan.md).
 
-The 2026-09-14 [upstream 0.5 roadmap](porting_plan.md#upstream-05-convergence-roadmap)
-adds UP0/UP1 qualification against committed C++ 0.5.2. In particular, test
-TIFF/BigTIFF malformed-root outcomes and the scoped camera/lens/spectral and
-ImageUniqueID XMP whitespace changes through both access modes. Existing RD
-results below retain their recorded pins; they are not 0.5.2 acceptance.
+The 2026-09-20 [upstream 0.5.10 roadmap](porting_plan.md#upstream-0510-convergence-roadmap)
+adds UP0/UP1 qualification against committed C++ 0.5.10. In particular, test
+TIFF/BigTIFF malformed-root outcomes, scoped camera/lens/spectral and
+ImageUniqueID XMP whitespace changes, and the shared native-shape validation
+rules through both access modes. Existing RD results below retain their
+recorded pins; they are not 0.5.10 acceptance.
 
 ## Target And Comparison Rules
 

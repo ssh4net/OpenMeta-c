@@ -237,9 +237,20 @@ The separate reading/decoding checkpoint covers structured XMP and bounded
 BMFF summaries. Broader source-processing classification and native mapping
 groups beyond the pinned reference remain separate acceptance work.
 
-The [upstream 0.5 roadmap](porting_plan.md#upstream-05-convergence-roadmap)
+The current C++ reference is 0.5.10 at `8594030c`. Since the 0.10.0 C gate,
+the reference added transactional APEX, focal-plane/subject, exact capture,
+environment, encoding, composite, structured-capture and EXIF-text/UserComment
+writeback, plus shared validation for 64 reverse targets, five legal Interop
+fields, three structural pointers and all 32 standard GPS tag IDs. These are
+source-reviewed C-port targets; the C 0.10.0 acceptance gate remains pinned to
+C++ 0.4.132 and does not claim those features.
+
+The [upstream 0.5.10 roadmap](porting_plan.md#upstream-0510-convergence-roadmap)
 now targets `metadata_patch.h` for a future C EXIF/scalar-XMP patch primitive.
 The removed C++ EXIF-only patch API will not be ported first. This is planned
 UP2 work; the current C serializers and transfer replay are not patch workers.
-Current C translation defaults remain unchanged. Later GPS, capture/identity
-and structured-location contracts have separate planned batches.
+Current C translation defaults remain unchanged. GPS, the committed
+capture/identity families, structured capture and the EXIF 3.1
+development/correction family have separate planned batches. The intended XMP
+name for the latter retains the C++ spelling `DevelopmentCharacterstic`; the
+host policy for `ExifVersion` 0300 versus 0310 must be explicit.

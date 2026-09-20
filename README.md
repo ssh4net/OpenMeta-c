@@ -23,22 +23,24 @@ allocation, stack use and target-toolchain requirements still need validation.
 The C library may later serve as the C++ implementation core. Temporary
 implementation overlap is expected while behavior is ported and verified.
 
-The [porting plan](porting_plan.md) records the source-reviewed baseline as of
-2026-09-07 against C++ `0.4.127`, the scope clarification of 2026-09-08, the
-parity matrix, and acceptance gates. Earlier percentage estimates based on a
-narrower core boundary do not measure this scope. The
+The [porting plan](porting_plan.md) records the source-reviewed history from
+C++ `0.4.127`, the scope clarification of 2026-09-08, the current C++ `0.5.10`
+reference review, the parity matrix and acceptance gates. Earlier percentage
+estimates based on a narrower core boundary do not measure this scope. The
 [authoring contract](authoring.md) documents typed construction, detached
 validation, canonical EXIF, the original five reverse-translation groups and
 the explicit location API (0.9.0) and combined 20-group IPTC API (0.10.0).
 Versions 0.2.0 and 0.8.0 change `omc_val` and `omc_xmp_limits`, respectively;
 rebuild consumers and initialize options with their public initializers.
 
-The [upstream 0.5 roadmap](porting_plan.md#upstream-05-convergence-roadmap)
-reviews committed C++ 0.5.2. It replaces the obsolete EXIF-only patch proposal
-with unified EXIF/scalar-XMP patching and schedules correctness, GPS, capture,
-structured-location and snapshot parity work. C remains at 0.10.0; existing
-acceptance results use frozen C++ 0.4.132. The roadmap update does not establish
-0.5.2 parity or change the C ABI.
+The [upstream 0.5.10 roadmap](porting_plan.md#upstream-0510-convergence-roadmap)
+reviews committed C++ 0.5.10 at `8594030c`. It replaces the obsolete EXIF-only
+patch proposal with unified EXIF/scalar-XMP patching and tracks the committed
+GPS, capture, structured-capture, EXIF-text and standard-validation families.
+C remains at 0.10.0; existing acceptance results use frozen C++ 0.4.132. The
+roadmap update does not establish 0.5.10 parity or change the C ABI. The C++
+reference currently covers 75 distinct capture tags and 32 standard GPS tag
+IDs; these are the next C-port comparison families, not C implementation claims.
 
 Version 0.8.0 adds bounded BMFF scene/derived-image summaries, structured XMP,
 JUMBF and MakerNote parity fixes, standalone XMP callbacks and Canon CMT3.
@@ -388,7 +390,7 @@ JUMBF decoded output now follows the reference: parent labels use `jumb_label`,
 old label key or scalar type must update. No crypto backend was added.
 
 RD5/RD6 subsequently reached the 0.8.0 checkpoint. Current work follows the
-[upstream 0.5 roadmap](porting_plan.md#upstream-05-convergence-roadmap), retaining
+[upstream 0.5.10 roadmap](porting_plan.md#upstream-0510-convergence-roadmap), retaining
 the reading/decoding inventory as a regression gate.
 
 Remaining portable-core work includes:
