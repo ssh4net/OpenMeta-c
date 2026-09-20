@@ -83,6 +83,8 @@ typedef struct omc_xmp_ctx {
 static const char k_ns_meta[] = "adobe:ns:meta/";
 static const char k_ns_rdf[] = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 static const char k_ns_xml[] = "http://www.w3.org/XML/1998/namespace";
+static const char k_ns_exif[] = "http://ns.adobe.com/exif/1.0/";
+static const char k_ns_cipa_exif[] = "http://cipa.jp/exif/1.0/";
 
 static void
 omc_xmp_ctx_fini(omc_xmp_ctx* ctx);
@@ -292,6 +294,33 @@ omc_xmp_trim_value(const omc_xmp_ctx* ctx, omc_xmp_span in, omc_xmp_span* out)
         end -= 1U;
     }
     *out = omc_xmp_span_make(start, end - start);
+}
+
+static int
+omc_xmp_preserve_camera_text(const omc_xmp_ctx* ctx, omc_xmp_span ns,
+                             omc_xmp_span name)
+{
+    if ((!omc_xmp_span_eq_lit(ctx, ns, k_ns_exif) &&
+         !omc_xmp_span_eq_lit(ctx, ns, k_ns_cipa_exif)) ||
+        !(omc_xmp_span_eq_lit(ctx, name, "SpectralSensitivity") ||
+          omc_xmp_span_eq_lit(ctx, name, "CameraOwnerName") ||
+          omc_xmp_span_eq_lit(ctx, name, "BodySerialNumber") ||
+          omc_xmp_span_eq_lit(ctx, name, "LensMake") ||
+          omc_xmp_span_eq_lit(ctx, name, "LensModel") ||
+          omc_xmp_span_eq_lit(ctx, name, "LensSerialNumber")))
+        return 0;
+    return 1;
+}
+
+static void
+omc_xmp_prepare_value(const omc_xmp_ctx* ctx, omc_xmp_span input,
+                      omc_xmp_span ns, omc_xmp_span name,
+                      omc_xmp_span* output)
+{
+    if (omc_xmp_preserve_camera_text(ctx, ns, name))
+        *output = input;
+    else
+        omc_xmp_trim_value(ctx, input, output);
 }
 
 static void
@@ -1113,7 +1142,8 @@ omc_xmp_emit_description_attrs(omc_xmp_ctx* ctx, const omc_xmp_attr* attrs,
             !omc_xmp_lookup_ns(ctx, attrs[i].prefix, &attr_ns)) {
             continue;
         }
-        omc_xmp_trim_value(ctx, attrs[i].value, &value_trim);
+        omc_xmp_prepare_value(ctx, attrs[i].value, attr_ns, attrs[i].local,
+                              &value_trim);
         if (omc_xmp_span_eq_lit(ctx, attr_ns, k_ns_rdf)) {
             if (value_trim.len && omc_xmp_span_eq_lit(ctx, attrs[i].local, "about")) {
                 status = omc_xmp_add_property(ctx, attr_ns, (const omc_u8 *)"About", 5U,
@@ -1407,7 +1437,8 @@ omc_xmp_parse_start_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
                 return 0;
         }
         if (omc_xmp_attr_find_resource(ctx, attrs, attr_count, &value)) {
-            omc_xmp_trim_value(ctx, value, &value);
+            omc_xmp_prepare_value(ctx, value, frame.prop_ns_uri, frame.prop_name,
+                                  &value);
             ctx->res.status = omc_xmp_emit_property_from_frame_path(ctx, &frame, value);
             if (ctx->res.status != OMC_XMP_OK)
                 return 0;
@@ -1482,7 +1513,11 @@ omc_xmp_parse_end_tag(omc_xmp_ctx* ctx, omc_u32* io_pos)
             *io_pos = pos;
             return 0;
         }
-        omc_xmp_trim_value(ctx, raw_text, &value_span);
+        if (frame.kind == OMC_XMP_FRAME_PROPERTY)
+            omc_xmp_prepare_value(ctx, raw_text, frame.prop_ns_uri,
+                                  frame.prop_name, &value_span);
+        else
+            omc_xmp_trim_value(ctx, raw_text, &value_span);
         status = omc_xmp_emit_property_from_frame_path(ctx, &frame,
                                                        value_span);
         if (status != OMC_XMP_OK) {

@@ -42,6 +42,13 @@ roadmap update does not establish 0.5.10 parity or change the C ABI. The C++
 reference currently covers 75 distinct capture tags and 32 standard GPS tag
 IDs; these are the next C-port comparison families, not C implementation claims.
 
+The current local convergence batch uses committed C++ 0.5.10 as its reference.
+It adds the first primary GPS XMP-to-EXIF slice (latitude, longitude and
+altitude), canonical TIFF readback, and the first UP1 TIFF-root and scoped XMP
+whitespace corrections. Full GPS navigation, destination, quality and text
+families remain planned; the broad 0.5.10 inventory residuals remain visible in
+the porting plan.
+
 Version 0.8.0 adds bounded BMFF scene/derived-image summaries, structured XMP,
 JUMBF and MakerNote parity fixes, standalone XMP callbacks and Canon CMT3.
 The [reading/decoding checkpoint](read_decode_parity.md) records 208 exact

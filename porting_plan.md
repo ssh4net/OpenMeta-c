@@ -52,14 +52,14 @@ interpretation and non-fuzzy query before publishing revised percentages.
 This section supersedes the earlier next-batch order and the conditional
 EXIF-only patch proposal. Completed B0-B4, RD0-RD6 and IPTC work remains the
 foundation. The C++ reference has moved from 0.5.2 to 0.5.10, so the feature
-inventory and the next C batches are refreshed here. This is a source-reviewed
-plan, not a new implementation or parity checkpoint. No C 0.5-reference parity
-run was performed for this documentation update; the accepted C results below
-still belong to the 0.4.132 reference.
+inventory and the next C batches are refreshed here. This section started as a
+source-reviewed plan; the 2026-09-20 execution now has a fresh committed-
+reference baseline and focused UP1/primary-GPS results. The older accepted C
+results below still belong to the 0.4.132 reference.
 
 | Role | Version / revision | Treatment |
 | --- | --- | --- |
-| Current C implementation | 0.10.0, `a7f673a34b301235c7118c35b03a4481b2c14afe` | Retain existing C APIs, defaults and acceptance evidence |
+| Current C implementation | 0.10.0, `58326d440d8fd7dd5288fdda83969246a8875efc` | Retain existing C APIs, defaults and acceptance evidence; the current working batch adds the first 0.5.10 GPS/UP1 slice |
 | Last accepted C++ reference | 0.4.132, `7f0ec70617d7286a33b8d821c459241245520615` | Keep its source/library and regression results reproducible |
 | Previous reviewed C++ target | 0.5.2, `646cc2773f9cb690ededb2a60639687a47d7b0c7` | Retain as the intermediate review pin and migration history |
 | Current reviewed C++ target | 0.5.10, `8594030c5acf0bb930a02c13c874ae25845f087f` | Freeze this committed source/build for UP0; public tree was clean at review |
@@ -123,7 +123,7 @@ ownership difference belongs in the fixture mapping rather than being hidden.
 | Batch | Work | Exit gate |
 | --- | --- | --- |
 | UP0: reference refresh | Freeze committed C++ 0.5.10; rebuild Clang 20 direct/parity targets in fresh directories; verify package/contract detection and the 0.5.10 schema counts. Retain 0.4.132 and 0.5.2 as history. | Record exact versions, source/build pairing, ABI, discovered tests, dependency flags and every difference. Separate compile/link failures from changed metadata behavior; never update expected results solely to make a test pass. |
-| UP1: existing behavior corrections | Audit TIFF/BigTIFF malformed roots, JP2/JPH EXIF/XMP UUID replacement, terminal/extended boxes, TIFF deletion propagation, and scoped XMP whitespace/projection changes. Fix only demonstrated C differences. | Direct and C/C++ memory/callback fixtures agree on values and failure status. Replacement preserves unselected UUID families and image bytes; explicit deletion cannot resurrect stale metadata. |
+| UP1: existing behavior corrections | Audit TIFF/BigTIFF malformed roots, JP2/JPH EXIF/XMP UUID replacement, terminal/extended boxes, TIFF deletion propagation, and scoped XMP whitespace/projection changes. Fix only demonstrated C differences. | **Started:** C++-matching classic/BigTIFF root outcomes pass through contiguous and callback C paths; scoped camera/lens/spectral whitespace now matches. JP2/JPH and deletion checks remain open. |
 | UP2: unified prepared patch core | Implement the current EXIF/scalar-XMP contract through C data, explicit lifecycle and bounded preparation/worker storage. Reuse canonical serializers, typed values and validation. | Mixed-family rollback, generation/alias checks, exact escaped widths, stable payload storage, independent worker lifetimes, and zero allocations in successful/rejected patch, payload access and library replay. |
 | UP3: complete GPS families | Primary position/altitude, UTC/navigation, destination, receiver quality, then encoded GPS text. Share exact rational, version, companion and conflict rules. | Per-family paired fixtures and JPEG/Classic TIFF/BigTIFF persistence cover the reference's 32 standard GPS tag IDs, including removals and companions. Projection/encoding/unit deltas travel with each group. |
 | UP4: capture and identity convergence | Port the committed APEX, focal-plane/subject, capture-rational, Flash, LightSource, sensitivity, camera/lens/spectral text, LensSpecification, ImageUniqueID, environment, encoding, composite, structured-capture and UserComment groups. Then add the six EXIF 3.1 development/correction fields `A40D`-`A412`. Preserve existing basic capture mappings. | Coherent groups agree on types, aliases, ambiguity, sentinels, bounds and transaction failure. Validate, serialize, project, persist and reread each group; do not infer round-trip correctness from translation alone. |
@@ -228,7 +228,9 @@ classes or application-visible TIFF/XML offsets.
 
 ### Current Upstream Watch List
 
-The current 0.5.10 source is committed and reviewed. The next upstream family
+UP0 is complete for the pinned commit. The first UP1 correction checks and the
+primary UP3 GPS slice are implemented in the current working batch. The C++
+0.5.10 source is committed and reviewed. The next upstream family
 is the six EXIF 3.1 development/correction fields `A40D`-`A412`:
 `DevelopmentType`, `DevelopmentTypeDescription`, `DistortionCorrection`,
 `ChromaticAberrationCorrection`, `ShadingCorrection` and `NoiseReduction`.
@@ -300,6 +302,41 @@ At this checkpoint primary GPS was the next batch. The Upstream 0.5
 Convergence Roadmap above now inserts UP0/UP1 and unified patching first; GPS
 remains the next translation family. This checkpoint does not establish new
 corpus, performance, embedded-device or whole-project parity.
+
+## Current 0.5.10 convergence work: UP0, UP1 and primary GPS
+
+UP0 now uses an isolated detached worktree at C++ commit
+`8594030c5acf0bb930a02c13c874ae25845f087f` (version 0.5.10) and a fresh
+Clang 20/libc++ build in `/tmp/openmeta-cpp-baseline-20260920-libcxx`.
+The five C++ CTest targets and the focused `MetadataGpsTranslation.*` plus
+`MetadataStandardValidation.*` run pass (22 tests). The installed dependency
+set is zlib, Brotli and Expat; RapidFuzz, Adobe DNG, C2PA and OpenSSL are not
+part of this baseline. The dirty main C++ checkout, including later EXIF 3.1
+correction fields, is excluded from the reference.
+
+The first UP1 slice adds `omc_test_up1`: classic and BigTIFF zero roots decode
+as empty and nonzero out-of-range roots return Malformed through contiguous and
+callback C paths. The same fixture covers the demonstrated XMP correction for
+six camera/lens/spectral text properties in both EXIF and CIPA namespaces. Only
+those scoped values retain boundary whitespace; unrelated text remains trimmed.
+The existing C decoder already matched these root outcomes in the contiguous
+path, so the code correction is limited to XMP value projection.
+
+The first UP3 slice adds `omc_translate_xmp_gps()` for primary latitude,
+longitude and altitude pairs. It has exact DMS/rational parsing, GPS 2.3/2.4
+version handling, duplicate/incomplete source checks, conflict policies,
+bounded limits, tombstone removal, output-preserving transactions and canonical
+TIFF readback. `omc_test_gps_parity` compares primary and altitude-only cases
+with the pinned C++ implementation. Navigation, destination, receiver/quality
+and encoded GPS text remain later UP3 groups.
+
+The fresh C tree passes 49 of 57 CTest targets. The eight failures are the
+pre-existing broad inventory targets (`omc_test_parity`, remaining-source,
+read/callback inventory and BMFF/box/TIFF source parity); their reported
+0.5.10 deltas are LensSpecification namespace/fractions, rational display and
+GPS destination-unit projection plus broader inventory changes. They are kept
+as residuals and were not re-baselined. The new GPS, UP1, XMP and focused parity
+targets pass.
 
 ## Previous Translation Checkpoint: Version 0.9.0
 
@@ -547,8 +584,8 @@ semantics. C++ ownership and presentation APIs need not be reproduced.
 | --- | --- | --- | --- |
 | W1 | Typed authoring | C++ `create_metadata_store()` preflights, copies, validates and publishes atomically. C has typed value makers, explicit array byte order, and candidate-based edit publication. | Implemented bounded typed helpers and output-preserving transactions; see `authoring.md`. Owning logical builders and FlatHost wrappers remain above C; reusable metadata construction and validation semantics remain C targets. |
 | W2 | Canonical TIFF/EXIF serialization | C++ `serialize_exif_tiff()` is target-neutral and honors supported wire hints. C's public serializer builds typed TIFF; internal transfer payloads apply target framing above it. | Implemented `omc_serialize_exif_tiff()` with direct tests and exact C++ byte comparison. Carrier wrappers reuse canonical output; TIFF/BigTIFF retain target layout. |
-| W3 | EXIF/IPTC to portable XMP | C has projection, conflict policies, custom namespaces and managed canonicalization | Partial against 0.5.10. Retain paired IPTC dates and the 0.10.0 fixes. UP1/UP3-UP5 cover exifEX names, exact lens fractions, GPS text/units, 75 capture tags and structured Bags. APEX is committed in the reference and is a C UP4 requirement. |
-| W4 | Explicit XMP to native metadata | C exposes original groups, flat locations and combined 20-group IPTC | Partial against 0.5.10; 119 paired IPTC fixtures remain accepted at 0.4.132. UP3 ports the 32-tag GPS families, UP4 ports the committed capture/identity groups and the next development/correction family, and UP5 closes structured locations without widening old defaults. |
+| W3 | EXIF/IPTC to portable XMP | C has projection, conflict policies, custom namespaces and managed canonicalization | Partial against 0.5.10. Retain paired IPTC dates and the 0.10.0 fixes. Primary GPS native-to-XMP projection remains covered; UP1/UP3-UP5 cover exifEX names, exact lens fractions, GPS text/units, 75 capture tags and structured Bags. APEX is committed in the reference and is a C UP4 requirement. |
+| W4 | Explicit XMP to native metadata | C exposes original groups, flat locations and combined 20-group IPTC | Partial against 0.5.10; 119 paired IPTC fixtures remain accepted at 0.4.132. UP3 now starts with primary position/altitude GPS; the remaining 32-tag GPS families, UP4 capture/identity groups and the next development/correction family follow. UP5 closes structured locations without widening old defaults. |
 | W5 | Native IPTC-IIM emission | Internal `omc_transfer_build_iptc_iim()`; JPEG IRB and TIFF tag `33723` carriers | Present bounded mechanism with 0.10.0 charset, repeated growth, tombstone and stale-IRB persistence tests. Broader transfer remains UP6. A separate public IPTC writer is not a prerequisite. |
 | W6 | Target image facts and transfer safety | C has target image spec, CompatibleFile/RenderedImage and diagnostics; C++ has wider source-processing classification and a RAW-data descriptor | Partial. C has no source descriptor or explicit lens/preview/general-processing audit categories. Verify selected fields through actual transfer paths; share classification with interpretation/query as those operations are ported. Full query completion need not block a bounded safety fix. |
 | W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h` and direct tests | Present bounded pipeline; UP1/UP6 close deletion/lifecycle behavior. UP2 standalone payload patching is separate from target-specific handoff and container replay. |
@@ -911,9 +948,11 @@ C++ paths refer to the public OpenMeta repository at the revision above.
 | Differential gate | [parity tests](tests/test_omc_parity.cc), [test configuration](tests/CMakeLists.txt) | `docs/development.md`, `docs/api_stability.md`, public format tests |
 | Unified patch/reuse | Existing canonical serializers and typed values; new C plan/worker pending UP2 | `src/include/openmeta/metadata_patch.h`, `src/openmeta/metadata_patch.cc`, `tests/metadata_patch_xmp_test.cc`, `tests/metadata_patch_allocation_test.cc`, `docs/migration_0_5.md`, `docs/canonical_patching.md` |
 
-Current priority: UP0 reference qualification against C++ 0.5.10, UP1
-existing-behavior corrections, then UP2 unified patching. GPS is the first
-translation family in UP3; the committed richer capture groups and the EXIF 3.1
+Current priority: finish the remaining UP1 JP2/JPH and deletion checks, then
+UP2 unified patching. The UP0 reference qualification and first UP1 correction
+slice are complete. Primary position/altitude GPS is the first implemented UP3
+translation slice; navigation, destination, quality and text follow. The
+committed richer capture groups and the EXIF 3.1
 development/correction family follow in UP4. Retain the reading/decoding inventories
 and implemented B0-B4 foundation. S1/S2 remain part of UP7. Future C++ reuse
 must not narrow the C library's standalone metadata-processing scope.

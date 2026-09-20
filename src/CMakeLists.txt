@@ -54,6 +54,7 @@ set(OMC_SOURCES
   edit/omc_exif_tiff_serialize.c
   edit/omc_transfer.c
   edit/omc_translation.c
+  edit/omc_translation_gps.c
   edit/omc_translation_iptc.c
   edit/omc_transfer_persist.c
   edit/omc_xmp_apply.c

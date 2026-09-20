@@ -7,6 +7,26 @@ version `0.3.0`. The current upstream review reference is C++ `0.5.10`, commit
 recorded pins. This plan implements the reading/input and decoding stages of
 [porting_plan.md](porting_plan.md).
 
+## 2026-09-20 reference and focused correction baseline
+
+The current committed C++ comparison uses version 0.5.10 at commit
+`8594030c5acf0bb930a02c13c874ae25845f087f`, checked out in the detached
+worktree `/tmp/openmeta-cpp-0.5.10-20260920` and built with Clang 20/libc++ in
+`/tmp/openmeta-cpp-baseline-20260920-libcxx`. Its five CTest targets pass, as do
+22 focused GPS and shared-validation tests. The later dirty C++ EXIF 3.1
+correction work is excluded from this pin.
+
+The fresh C build is `/tmp/openmeta-c-up0-20260920`. It passes 49 of 57 CTest
+targets. The eight failures remain the broad historical inventory targets and
+report known 0.5.10 projection/source deltas; they are retained as residuals,
+not accepted by changing expected output. The new `omc_test_up1` fixture passes
+classic and BigTIFF empty-root versus malformed nonzero-root outcomes through
+contiguous and callback EXIF paths. It also verifies the scoped camera/lens/
+spectral XMP whitespace rule: six exact EXIF/CIPA properties preserve boundary
+spaces in attribute, resource and element forms while unrelated text is still
+trimmed. The direct GPS translation and paired GPS parity tests are recorded in
+`authoring.md` because they cross the decoder/serializer boundary.
+
 The 2026-09-20 [upstream 0.5.10 roadmap](porting_plan.md#upstream-0510-convergence-roadmap)
 adds UP0/UP1 qualification against committed C++ 0.5.10. In particular, test
 TIFF/BigTIFF malformed-root outcomes, scoped camera/lens/spectral and

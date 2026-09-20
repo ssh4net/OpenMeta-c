@@ -186,6 +186,36 @@ TransmissionReference. It corrects CountryCode to dataset 2:100 and Country to
 2:101. EXIF GPSVersionID now emits all four components, such as `2.3.0.0`, and
 skips arrays with the wrong length. Primary GPS writeback remains separate work.
 
+## Primary GPS reverse translation against C++ 0.5.10
+
+The first GPS slice is now implemented in `omc_translate_xmp_gps()`. It uses a
+separate mask domain and preserves the existing `omc_translate_xmp()` defaults.
+The slice covers complete dirty XMP groups for latitude, longitude and the
+altitude/altitude-reference pair. It accepts exact D/M or D/M/S coordinates,
+non-negative scalar or rational altitude values, duplicate and incomplete-source
+checks, GPS 2.3/2.4 version handling, conflict policies, bounded operation and
+text budgets, removal tombstones, and output-preserving edit publication.
+
+Native coordinates use unsigned DMS rationals. GPS 2.4 altitude references are
+stored as 2/3 while the XMP input remains 0/1. Existing origin wire-name
+provenance is copied to generated entries. A complete native GPS group is
+idempotent; removal deletes GPSVersionID only after the selected GPS values are
+gone. The source and initialized output stores must be distinct, as required by
+the C transaction contract.
+
+The direct fixture `omc_test_gps_translation` covers exact fractions, poles,
+typed altitude values, conflicts, limits, idempotence, removal and canonical
+TIFF serialize/readback. `omc_test_gps_parity` compares primary and altitude
+only cases with C++ 0.5.10. Navigation, destination, receiver/quality and GPS
+text families remain the later UP3 groups.
+
+The same C++ pin also exposed one UP1 XMP reader correction. Camera/lens/spectral
+text values in the EXIF and CIPA namespaces now retain boundary whitespace for
+attribute, `rdf:resource` and element forms; unrelated properties keep the
+existing trim behavior. `omc_test_up1` covers this rule and the classic/BigTIFF
+zero-root versus malformed nonzero-root result through contiguous and callback
+EXIF paths.
+
 ## Verification and remaining scope
 
 The Clang 20 direct suite covers failure preservation, typed arrays,
@@ -244,6 +274,17 @@ writeback, plus shared validation for 64 reverse targets, five legal Interop
 fields, three structural pointers and all 32 standard GPS tag IDs. These are
 source-reviewed C-port targets; the C 0.10.0 acceptance gate remains pinned to
 C++ 0.4.132 and does not claim those features.
+
+The fresh 0.5.10 Clang 20/libc++ build used for the new work is isolated at
+`/tmp/openmeta-cpp-baseline-20260920-libcxx` and uses C++ commit
+`8594030c5acf0bb930a02c13c874ae25845f087f`. Its five CTest targets and the
+22 focused GPS/validation tests pass. The fresh C build at
+`/tmp/openmeta-c-up0-20260920` passes 49 of 57 CTest targets; the eight failing
+legacy inventory targets retain the known 0.5.10 LensSpecification, rational
+display, GPS destination-unit and broader source-inventory differences. The
+new direct GPS, paired GPS, UP1 and existing XMP targets pass. The committed
+C++ tree was used; later uncommitted EXIF 3.1 correction fields were not mixed
+into this comparison.
 
 The [upstream 0.5.10 roadmap](porting_plan.md#upstream-0510-convergence-roadmap)
 now targets `metadata_patch.h` for a future C EXIF/scalar-XMP patch primitive.

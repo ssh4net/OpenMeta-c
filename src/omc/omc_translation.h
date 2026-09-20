@@ -70,6 +70,13 @@ OMC_EXTERN_C_BEGIN
 #define OMC_IPTC_TRANSLATE_WORKFLOW 0x0F8000U
 #define OMC_IPTC_TRANSLATE_ALL 0x0FFFFFU
 
+/* Separate mask domain for the primary GPS reverse-translation slice. */
+#define OMC_GPS_TRANSLATE_LATITUDE 0x000001U
+#define OMC_GPS_TRANSLATE_LONGITUDE 0x000002U
+#define OMC_GPS_TRANSLATE_ALTITUDE 0x000004U
+#define OMC_GPS_TRANSLATE_VERSION 0x000008U
+#define OMC_GPS_TRANSLATE_ALL 0x000007U
+
 typedef enum omc_translation_conflict {
     OMC_TRANSLATION_PRESERVE = 0,
     OMC_TRANSLATION_FAIL = 1,
@@ -122,6 +129,49 @@ typedef struct omc_iptc_translation_opts {
     omc_u64 max_total_text_bytes;
 } omc_iptc_translation_opts;
 
+typedef enum omc_gps_translation_status {
+    OMC_GPS_TRANSLATION_OK = 0,
+    OMC_GPS_TRANSLATION_NULL_OUTPUT,
+    OMC_GPS_TRANSLATION_INVALID_OPTIONS,
+    OMC_GPS_TRANSLATION_AMBIGUOUS_SOURCE,
+    OMC_GPS_TRANSLATION_INCOMPLETE_SOURCE,
+    OMC_GPS_TRANSLATION_INVALID_SOURCE,
+    OMC_GPS_TRANSLATION_VALUE_OUT_OF_RANGE,
+    OMC_GPS_TRANSLATION_UNSUPPORTED_PRECISION,
+    OMC_GPS_TRANSLATION_UNSUPPORTED_VERSION,
+    OMC_GPS_TRANSLATION_VALUE_TOO_LONG,
+    OMC_GPS_TRANSLATION_SOURCE_LIMIT,
+    OMC_GPS_TRANSLATION_NATIVE_CONFLICT,
+    OMC_GPS_TRANSLATION_ENTRY_LIMIT,
+    OMC_GPS_TRANSLATION_OPERATION_LIMIT,
+    OMC_GPS_TRANSLATION_NO_MEMORY,
+    OMC_GPS_TRANSLATION_INTERNAL
+} omc_gps_translation_status;
+
+typedef struct omc_gps_translation_opts {
+    omc_u32 mappings;
+    int all_sources;
+    omc_translation_conflict conflict;
+    omc_u32 max_source_properties;
+    omc_u32 max_added_entries;
+    omc_u32 max_operations;
+    omc_u32 max_text_bytes_per_property;
+    omc_u64 max_total_text_bytes;
+} omc_gps_translation_opts;
+
+typedef struct omc_gps_translation_res {
+    omc_gps_translation_status status;
+    omc_u32 failed_mapping;
+    omc_entry_id failed_source;
+    omc_u32 source_properties;
+    omc_u32 groups_translated;
+    omc_u32 groups_preserved;
+    omc_u32 groups_unchanged;
+    omc_u32 entries_added;
+    omc_u32 entries_updated;
+    omc_u32 entries_removed;
+} omc_gps_translation_res;
+
 typedef struct omc_translation_res {
     omc_translation_status status;
     omc_u32 failed_mapping;
@@ -170,6 +220,19 @@ OMC_API void omc_iptc_translation_opts_init(omc_iptc_translation_opts *opts);
  * Source and initialized out must be distinct. Failure preserves both. */
 OMC_API omc_translation_res omc_translate_xmp_iptc(
     const omc_store *source, omc_store *out, const omc_iptc_translation_opts *opts);
+
+OMC_API void omc_gps_translation_opts_init(omc_gps_translation_opts *opts);
+
+/* Primary GPS reverse translation. The selected XMP properties are
+ * exif:GPSLatitude, exif:GPSLongitude and the complete
+ * exif:GPSAltitude/exif:GPSAltitudeRef pair. Coordinates are converted to
+ * exact unsigned GPS DMS rationals. The source and initialized output must
+ * be distinct. Preparation may allocate, while commit preserves output on
+ * every failure. GPSVersionID is retained or added as 2.3.0.0 when selected
+ * native output needs it; OMC_GPS_TRANSLATE_VERSION is diagnostic only. */
+OMC_API omc_gps_translation_res omc_translate_xmp_gps(
+    const omc_store *source, omc_store *out,
+    const omc_gps_translation_opts *opts);
 
 OMC_EXTERN_C_END
 #endif

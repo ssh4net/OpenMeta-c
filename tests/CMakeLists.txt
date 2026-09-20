@@ -27,6 +27,15 @@ add_executable(omc_test_translation test_omc_translation.c)
 target_link_libraries(omc_test_translation PRIVATE omc)
 add_test(NAME omc_test_translation COMMAND omc_test_translation)
 
+add_executable(omc_test_gps_translation test_omc_gps_translation.c)
+target_link_libraries(omc_test_gps_translation PRIVATE omc)
+set_target_properties(omc_test_gps_translation PROPERTIES
+  C_STANDARD 90
+  C_STANDARD_REQUIRED ON
+  C_EXTENSIONS OFF
+)
+add_test(NAME omc_test_gps_translation COMMAND omc_test_gps_translation)
+
 add_executable(omc_test_iptc_translation test_omc_iptc_translation.c)
 target_link_libraries(omc_test_iptc_translation PRIVATE omc)
 omc_apply_warnings(omc_test_iptc_translation)
@@ -57,6 +66,15 @@ add_test(NAME omc_test_scan COMMAND omc_test_scan)
 add_executable(omc_test_exif test_omc_exif.c)
 target_link_libraries(omc_test_exif PRIVATE omc)
 add_test(NAME omc_test_exif COMMAND omc_test_exif)
+
+add_executable(omc_test_up1 test_omc_up1.c)
+target_link_libraries(omc_test_up1 PRIVATE omc)
+set_target_properties(omc_test_up1 PROPERTIES
+  C_STANDARD 90
+  C_STANDARD_REQUIRED ON
+  C_EXTENSIONS OFF
+)
+add_test(NAME omc_test_up1 COMMAND omc_test_up1)
 
 add_executable(omc_test_exr test_omc_exr.c)
 target_link_libraries(omc_test_exr PRIVATE omc)
@@ -257,6 +275,18 @@ if(OMC_BUILD_PARITY_TESTS)
   endif()
   add_test(NAME omc_test_parity COMMAND omc_test_parity)
   add_test(NAME omc_test_authoring_parity COMMAND omc_test_parity --core-authoring)
+  add_executable(omc_test_gps_parity test_omc_gps_parity.cc)
+  set_target_properties(omc_test_gps_parity PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+  )
+  target_link_libraries(omc_test_gps_parity PRIVATE omc OpenMeta::openmeta)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(omc_test_gps_parity PRIVATE -stdlib=libc++)
+    target_link_options(omc_test_gps_parity PRIVATE -stdlib=libc++)
+  endif()
+  add_test(NAME omc_test_gps_parity COMMAND omc_test_gps_parity)
   # Discover optional location (0.4.128) and combined IPTC (0.4.130) contracts.
   include(CheckCXXSourceCompiles)
   function(omc_check_translation_contracts)
