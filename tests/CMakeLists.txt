@@ -180,6 +180,10 @@ add_executable(omc_test_jp2_rewrite test_omc_jp2_rewrite.c)
 target_link_libraries(omc_test_jp2_rewrite PRIVATE omc)
 add_test(NAME omc_test_jp2_rewrite COMMAND omc_test_jp2_rewrite)
 
+add_executable(omc_test_up1_deletion test_omc_up1_deletion.c)
+target_link_libraries(omc_test_up1_deletion PRIVATE omc)
+add_test(NAME omc_test_up1_deletion COMMAND omc_test_up1_deletion)
+
 add_executable(omc_test_transfer test_omc_transfer.c)
 target_link_libraries(omc_test_transfer PRIVATE omc)
 add_test(NAME omc_test_transfer COMMAND omc_test_transfer)

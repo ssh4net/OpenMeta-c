@@ -165,6 +165,12 @@ omc_jp2_rewrite(const omc_u8 *input, omc_size input_size,
         }
         box_size = (omc_size)box_size_u64;
         payload_offset = offset + header_size;
+        if (type == (omc_u32)OMC_FOURCC('u', 'u', 'i', 'd')
+            && box_size - header_size < 16U) {
+            result->status = OMC_JP2_REWRITE_MALFORMED;
+            omc_arena_reset(out);
+            return OMC_STATUS_OK;
+        }
         remove = 0;
         if (type == (omc_u32)OMC_FOURCC('j', 'P', ' ', ' '))
             saw_signature = 1;

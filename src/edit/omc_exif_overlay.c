@@ -277,7 +277,7 @@ omc_exif_overlay_tiff(const omc_u8 *file, omc_size size, const omc_store *source
             res->status = OMC_EXIF_WRITE_LIMIT;
             goto done;
         }
-        if (used != 0U || d == 0 || oldoff[d] != 0U) {
+        if (used != 0U || d == 0) {
             qsort(records, used, es, omc_overlay_compare);
             if (out->size % align != 0U) {
                 status = omc_overlay_append(out, zero, align - out->size % align);
