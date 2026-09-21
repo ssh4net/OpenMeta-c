@@ -49,12 +49,16 @@ set(OMC_SOURCES
   core/omc_store_validate.c
   core/omc_store.c
   edit/omc_bmff_rewrite.c
+  edit/omc_jp2_rewrite.c
+  edit/omc_metadata_patch.c
   edit/omc_exif_write.c
   edit/omc_exif_overlay.c
   edit/omc_exif_tiff_serialize.c
   edit/omc_transfer.c
   edit/omc_translation.c
   edit/omc_translation_gps.c
+  edit/omc_translation_gps_groups.c
+  edit/omc_translation_exif_text.c
   edit/omc_translation_iptc.c
   edit/omc_transfer_persist.c
   edit/omc_xmp_apply.c

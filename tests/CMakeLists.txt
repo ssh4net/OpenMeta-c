@@ -36,6 +36,18 @@ set_target_properties(omc_test_gps_translation PROPERTIES
 )
 add_test(NAME omc_test_gps_translation COMMAND omc_test_gps_translation)
 
+add_executable(omc_test_gps_groups test_omc_gps_groups.c)
+target_link_libraries(omc_test_gps_groups PRIVATE omc)
+add_test(NAME omc_test_gps_groups COMMAND omc_test_gps_groups)
+
+add_executable(omc_test_exif_text test_omc_exif_text.c)
+target_link_libraries(omc_test_exif_text PRIVATE omc)
+add_test(NAME omc_test_exif_text COMMAND omc_test_exif_text)
+
+add_executable(omc_test_metadata_patch test_omc_metadata_patch.c)
+target_link_libraries(omc_test_metadata_patch PRIVATE omc)
+add_test(NAME omc_test_metadata_patch COMMAND omc_test_metadata_patch)
+
 add_executable(omc_test_iptc_translation test_omc_iptc_translation.c)
 target_link_libraries(omc_test_iptc_translation PRIVATE omc)
 omc_apply_warnings(omc_test_iptc_translation)
@@ -163,6 +175,10 @@ add_test(NAME omc_test_xmp_apply COMMAND omc_test_xmp_apply)
 add_executable(omc_test_xmp_write test_omc_xmp_write.c)
 target_link_libraries(omc_test_xmp_write PRIVATE omc)
 add_test(NAME omc_test_xmp_write COMMAND omc_test_xmp_write)
+
+add_executable(omc_test_jp2_rewrite test_omc_jp2_rewrite.c)
+target_link_libraries(omc_test_jp2_rewrite PRIVATE omc)
+add_test(NAME omc_test_jp2_rewrite COMMAND omc_test_jp2_rewrite)
 
 add_executable(omc_test_transfer test_omc_transfer.c)
 target_link_libraries(omc_test_transfer PRIVATE omc)

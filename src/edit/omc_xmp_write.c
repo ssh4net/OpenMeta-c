@@ -1,6 +1,7 @@
 #include "omc_bmff_rewrite.h"
 #include "../base/omc_crc32.h"
 #include "omc/omc_xmp_write.h"
+#include "omc/omc_jp2_rewrite.h"
 
 #include <string.h>
 
@@ -1113,83 +1114,37 @@ omc_xmp_write_rewrite_jp2(const omc_u8* file_bytes, omc_size file_size,
                           int strip_existing_xmp, int insert_xmp,
                           omc_arena* out, omc_xmp_write_res* out_res)
 {
-    omc_size offset;
+    omc_jp2_rewrite_opts rewrite_opts;
+    omc_jp2_rewrite_res rewrite_res;
     omc_status status;
-    int saw_signature;
 
-    if (file_size < sizeof(k_omc_xmp_write_jp2_sig)
-        || memcmp(file_bytes, k_omc_xmp_write_jp2_sig,
-                  sizeof(k_omc_xmp_write_jp2_sig))
-               != 0) {
-        out_res->status = OMC_XMP_WRITE_MALFORMED;
-        return OMC_STATUS_OK;
-    }
-    if (insert_xmp && payload_size > (omc_size)(0xFFFFFFFFU - 8U)) {
-        out_res->status = OMC_XMP_WRITE_LIMIT;
-        return OMC_STATUS_OK;
-    }
-
-    omc_arena_reset(out);
-    status = omc_arena_reserve(out, file_size + (insert_xmp ? payload_size + 8U : 0U));
-    if (status != OMC_STATUS_OK) {
+    omc_jp2_rewrite_opts_init(&rewrite_opts);
+    rewrite_opts.replace_exif = 0;
+    rewrite_opts.replace_xmp = strip_existing_xmp || insert_xmp;
+    status = omc_jp2_rewrite(file_bytes, file_size, (const omc_u8 *)0, 0U,
+                             payload, payload_size, &rewrite_opts, out,
+                             &rewrite_res);
+    if (status != OMC_STATUS_OK)
         return status;
+    switch (rewrite_res.status) {
+    case OMC_JP2_REWRITE_OK: out_res->status = OMC_XMP_WRITE_OK; break;
+    case OMC_JP2_REWRITE_LIMIT: out_res->status = OMC_XMP_WRITE_LIMIT; break;
+    case OMC_JP2_REWRITE_UNSUPPORTED:
+        out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
+        break;
+    default: out_res->status = OMC_XMP_WRITE_MALFORMED; break;
     }
-
-    saw_signature = 0;
-    offset = 0U;
-    while (offset + 8U <= file_size) {
-        omc_u32 box_size_u32;
-        omc_u32 box_type;
-        omc_size box_size;
-
-        box_size_u32 = omc_xmp_write_read_u32be(file_bytes + offset);
-        box_type = omc_xmp_write_read_u32be(file_bytes + offset + 4U);
-        if (box_size_u32 == 0U || box_size_u32 == 1U) {
-            out_res->status = OMC_XMP_WRITE_UNSUPPORTED;
-            return OMC_STATUS_OK;
-        }
-        if (box_size_u32 < 8U) {
-            out_res->status = OMC_XMP_WRITE_MALFORMED;
-            return OMC_STATUS_OK;
-        }
-        box_size = (omc_size)box_size_u32;
-        if (offset + box_size > file_size) {
-            out_res->status = OMC_XMP_WRITE_MALFORMED;
-            return OMC_STATUS_OK;
-        }
-
-        if (box_type == omc_xmp_write_fourcc('j', 'P', ' ', ' ')) {
-            saw_signature = 1;
-        }
-        if (box_type == omc_xmp_write_fourcc('x', 'm', 'l', ' ')
-            && strip_existing_xmp) {
-            out_res->removed_xmp_blocks += 1U;
-        } else {
-            status = omc_xmp_write_append(out, file_bytes + offset, box_size);
-            if (status != OMC_STATUS_OK) {
-                return status;
-            }
-        }
-        offset += box_size;
+    out_res->removed_xmp_blocks = rewrite_res.removed_xmp;
+    out_res->inserted_xmp_blocks = insert_xmp ? rewrite_res.inserted_xmp : 0U;
+    if (!insert_xmp && strip_existing_xmp) {
+        /* The generic helper accepts a replacement payload. A strip-only call
+         * therefore reports no insertion and still retains the filtered file. */
+        out_res->inserted_xmp_blocks = 0U;
     }
-
-    if (!saw_signature || offset != file_size) {
-        out_res->status = OMC_XMP_WRITE_MALFORMED;
-        return OMC_STATUS_OK;
+    if (out_res->status == OMC_XMP_WRITE_OK) {
+        out_res->needed = out->size;
+        out_res->written = out->size;
     }
-
-    if (insert_xmp) {
-        status = omc_xmp_write_append_jp2_box(
-            out, omc_xmp_write_fourcc('x', 'm', 'l', ' '), payload,
-            payload_size);
-        if (status != OMC_STATUS_OK) {
-            return status;
-        }
-        out_res->inserted_xmp_blocks = 1U;
-    }
-    out_res->status = OMC_XMP_WRITE_OK;
-    out_res->needed = out->size;
-    out_res->written = out->size;
     return OMC_STATUS_OK;
 }
 
