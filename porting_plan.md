@@ -375,6 +375,12 @@ unit aliases, version injection, conflict policies, dirty tombstones and edit
 publication. The direct tests cover representative mappings; the exit gate is
 still paired C++ coverage of all 32 standard GPS tags with file persistence.
 
+The pinned C++ 0.5.10 `MetadataGps*` filter passes 64/64 tests. The C primary
+GPS parity target passes both cross-language cases, and the C Release and
+ASan/UBSan suites pass the existing GPS-group and transfer-persistence tests.
+The four additional C group APIs still have representative direct tests only;
+the full 32-tag paired persistence matrix remains the next UP3 gate.
+
 UP4 starts with `omc_translate_xmp_exif_text()`: ExifVersion, FlashpixVersion,
 UserComment and ImageTitle. It preserves ASCII, EXIF 3 UTF-8 and legacy
 UTF-16LE UserComment forms, requires EXIF 3 for ImageTitle, and verifies
