@@ -206,11 +206,11 @@ the C transaction contract.
 The direct fixture `omc_test_gps_translation` covers exact fractions, poles,
 typed altitude values, conflicts, limits, idempotence, removal and canonical
 TIFF serialize/readback. `omc_test_gps_parity` compares primary and altitude
-only cases with C++ 0.5.10. The current `omc_test_gps_groups` matrix covers all
-four additional group APIs, all of their native members, UTF-8 GPS text,
-offset-normalized timestamps, removal and canonical TIFF serialize/readback.
-The dedicated cross-language group parity target and JPEG/Classic
-TIFF/BigTIFF transfer lifecycle cases remain open.
+cases with C++ 0.5.10 and one complete case for each additional GPS group. The
+current `omc_test_gps_groups` matrix covers all four additional group APIs, all
+of their native members, UTF-8 GPS text, offset-normalized timestamps, removal
+and canonical TIFF serialize/readback. JPEG/Classic TIFF/BigTIFF transfer
+lifecycle cases remain open.
 
 The same C++ pin also exposed one UP1 XMP reader correction. Camera/lens/spectral
 text values in the EXIF and CIPA namespaces now retain boundary whitespace for
@@ -244,8 +244,9 @@ encodings, and keeps source/output unchanged on rejection.
 
 `omc_test_gps_groups` is the C-side paired transaction and TIFF persistence
 gate. Together with `omc_test_gps_translation`, it covers all 32 standard GPS
-IDs. A dedicated C/C++ parity target for the four group APIs and JPEG/Classic
-TIFF/BigTIFF transfer lifecycle coverage remain UP3 acceptance work.
+IDs. The dedicated C/C++ parity target now covers one complete case for each of
+the four group APIs. JPEG/Classic TIFF/BigTIFF transfer lifecycle coverage
+remains UP3 acceptance work.
 
 ## Unified prepared metadata patch core
 

@@ -312,6 +312,7 @@ if(OMC_BUILD_PARITY_TESTS)
     target_compile_options(omc_test_gps_parity PRIVATE -stdlib=libc++)
     target_link_options(omc_test_gps_parity PRIVATE -stdlib=libc++)
   endif()
+  target_compile_options(omc_test_gps_parity PRIVATE -UNDEBUG)
   add_test(NAME omc_test_gps_parity COMMAND omc_test_gps_parity)
   # Discover optional location (0.4.128) and combined IPTC (0.4.130) contracts.
   include(CheckCXXSourceCompiles)

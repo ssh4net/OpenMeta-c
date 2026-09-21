@@ -47,11 +47,12 @@ It adds JP2/JPH EXIF/XMP replacement, a first unified EXIF/scalar-XMP prepared
 patch core, all four additional GPS reverse-translation groups, the first EXIF
 text/version family, canonical TIFF readback, and the UP1 TIFF-root and scoped
 XMP whitespace corrections. The C-side paired GPS matrix now covers all 32
-standard IDs through the four group APIs and canonical TIFF round-trip; a
-dedicated cross-language group parity target, transfer lifecycle persistence,
-repeated patch-slot binding, the remaining EXIF text fields and broader
-capture/identity families remain open. The 0.5.10 inventory residuals remain
-visible in the porting plan.
+standard IDs through the four group APIs and canonical TIFF round-trip. The
+cross-language group parity target is also covered for one complete case per
+group. Transfer lifecycle
+persistence, repeated patch-slot binding, the remaining EXIF text fields and
+broader capture/identity families remain open. The 0.5.10 inventory residuals
+remain visible in the porting plan.
 
 Version 0.8.0 adds bounded BMFF scene/derived-image summaries, structured XMP,
 JUMBF and MakerNote parity fixes, standalone XMP callbacks and Canon CMT3.
