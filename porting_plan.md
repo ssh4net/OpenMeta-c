@@ -123,7 +123,7 @@ ownership difference belongs in the fixture mapping rather than being hidden.
 | Batch | Work | Exit gate |
 | --- | --- | --- |
 | UP0: reference refresh | Freeze committed C++ 0.5.10; rebuild Clang 20 direct/parity targets in fresh directories; verify package/contract detection and the 0.5.10 schema counts. Retain 0.4.132 and 0.5.2 as history. | Record exact versions, source/build pairing, ABI, discovered tests, dependency flags and every difference. Separate compile/link failures from changed metadata behavior; never update expected results solely to make a test pass. |
-| UP1: existing behavior corrections | Audit TIFF/BigTIFF malformed roots, JP2/JPH EXIF/XMP UUID replacement, terminal/extended boxes, TIFF deletion propagation, and scoped XMP whitespace/projection changes. Fix only demonstrated C differences. | **Implemented bounded slice:** classic/BigTIFF root outcomes pass through contiguous and callback C paths; scoped camera/lens/spectral whitespace matches; `omc_jp2_rewrite()` replaces selected direct/UUID carriers for JP2/JPH and preserves terminal size-zero boxes. Full file-corpus deletion/readback remains an acceptance gate. |
+| UP1: existing behavior corrections | Audit TIFF/BigTIFF malformed roots, JP2/JPH EXIF/XMP UUID replacement, terminal/extended boxes, TIFF deletion propagation, and scoped XMP whitespace/projection changes. Fix only demonstrated C differences. | **Implemented bounded slice:** classic/BigTIFF root outcomes pass through contiguous and callback C paths; scoped camera/lens/spectral whitespace matches; `omc_jp2_rewrite()` replaces selected direct/UUID carriers for JP2/JPH and preserves terminal size-zero boxes. The follow-up matrix now covers malformed short UUID payloads and classic/BigTIFF empty ExifIFD deletion with XMP preserve/strip readback. Full file-corpus deletion/readback remains an acceptance gate. |
 | UP2: unified prepared patch core | Implement the current EXIF/scalar-XMP contract through C data, explicit lifecycle and bounded preparation/worker storage. Reuse canonical serializers, typed values and validation. | **Initial C core implemented:** mixed-family plan/instance lifecycle, host-issued generation tokens, all-or-nothing update validation, fixed EXIF/escaped XMP widths and synchronous EXIF-then-XMP replay. Exact serializer-recorded repeated-value binding, alias checks and the C++ allocation-free gate remain open. |
 | UP3: complete GPS families | Primary position/altitude, UTC/navigation, destination, receiver quality, then encoded GPS text. Share exact rational, version, companion and conflict rules. | **Initial four-family C slice implemented:** navigation, destination, quality and encoded text APIs now share bounded rational/unit/version/conflict handling. Paired 32-tag fixture coverage and JPEG/Classic TIFF/BigTIFF persistence remain the UP3 exit gate. |
 | UP4: capture and identity convergence | Port the committed APEX, focal-plane/subject, capture-rational, Flash, LightSource, sensitivity, camera/lens/spectral text, LensSpecification, ImageUniqueID, environment, encoding, composite, structured-capture and UserComment groups. Then add the six EXIF 3.1 development/correction fields `A40D`-`A412`. Preserve existing basic capture mappings. | **First family implemented:** bounded ExifVersion, FlashpixVersion, UserComment and ImageTitle translation, including EXIF 3 UTF-8 and legacy UTF-16LE comments, conflicts, tombstones and TIFF reread. Remaining ten EXIF text fields and the other capture/identity groups remain open. |
@@ -375,6 +375,27 @@ UserComment and ImageTitle. It preserves ASCII, EXIF 3 UTF-8 and legacy
 UTF-16LE UserComment forms, requires EXIF 3 for ImageTitle, and verifies
 canonical TIFF readback. The ten remaining EXIF text fields and the other
 capture/identity groups remain planned.
+
+## 2026-09-21 follow-up qualification: UP1 carrier and deletion gaps
+
+The pinned C++ 0.5.10 tests were rerun for the JP2 rewrite groups, the
+BigTIFF boundary checks and `MetadataTransferApi.EmptyExifIfdRemovalIsExplicitAndSurvivesXmpStripping`.
+The C port now matches the demonstrated malformed UUID rule: a `uuid` box with
+fewer than 16 UUID bytes returns `OMC_JP2_REWRITE_MALFORMED` without output.
+The JP2/JPH C matrix covers direct and standard UUID EXIF/XMP carriers,
+unknown/IPTC/GeoTIFF UUID preservation, extended boxes, terminal size-zero
+boxes and the selected replacement combinations.
+
+The TIFF overlay now removes a child pointer when its resulting directory has
+no records. `tests/test_omc_up1_deletion.c` exercises classic TIFF and
+BigTIFF, explicit final ExifIFD deletion, XMP preserve and strip modes, and
+decoded output readback. This closes the demonstrated UP1 deletion case while
+leaving the full camera-file corpus and the paired GPS persistence matrix as
+the remaining UP1/UP3 acceptance work.
+
+Release Clang 20 C90 with zlib/Brotli passes 47/47 CTest targets, including
+the new deletion test. The matching ASan/UBSan tree also passes 47/47. The
+reference C++ filter passes all 8 selected JP2, BigTIFF and deletion tests.
 
 ## Previous Translation Checkpoint: Version 0.9.0
 
