@@ -344,11 +344,11 @@ targets pass.
 The local C batch uses the same pinned C++ 0.5.10 source and keeps the dirty
 main C++ checkout out of the comparison. Release configuration
 `/tmp/openmeta-c-up14-20260921` uses Clang 20, C90, disabled parity tests and
-warnings as errors. Its broad direct suite passes `46/46`; the focused UP1-UP4
+warnings as errors. Its broad direct suite passes `47/47`; the focused UP1-UP4
 set (`omc_test_up1`, `omc_test_jp2_rewrite`, `omc_test_gps_groups`,
 `omc_test_exif_text`, `omc_test_metadata_patch`, `omc_test_gps_translation` and
 `omc_test_xmp_write`) passes `7/7`. A fresh Clang 20 ASan/UBSan build in
-`/tmp/openmeta-c-up14-asan-20260921` passes the four changed-family tests.
+`/tmp/openmeta-c-up14-asan-20260921` passes `47/47`.
 
 UP1 now has a bounded JP2/JPH top-level replacement helper. It removes all
 selected direct and standard UUID EXIF/XMP carriers, accepts normal and extended
@@ -360,9 +360,14 @@ still required.
 UP2 now has `omc_metadata_patch.h` with explicit plan and worker lifetimes,
 canonical EXIF and portable XMP payloads, host-issued plan IDs, typed request
 shapes, bounded handles, fixed-width/escaped-width updates and synchronous
-replay. The C core validates a complete batch before mutation. It is not yet a
-claim of the C++ resource contract: repeated raw-value slot binding, alias
-checks and allocation interception remain open.
+replay. The C core validates a complete batch before mutation. The follow-up
+gate binds XMP slots by emitted namespace URI and simple property identity,
+accepts variable-length logical text when escaped width is fixed, supports
+typed EXIF arrays, rejects borrowed views that overlap either worker payload,
+and keeps successful and rejected apply/replay calls allocation-free. The
+remaining parity work is conflict-policy and serializer-record evidence for
+all repeated/native-projected properties; the C API keeps its bounded
+caller-owned model.
 
 UP3 now exposes navigation, destination, receiver-quality and GPS-text reverse
 translation groups. The groups share fixed bounded records, rational parsing,
@@ -396,6 +401,31 @@ the remaining UP1/UP3 acceptance work.
 Release Clang 20 C90 with zlib/Brotli passes 47/47 CTest targets, including
 the new deletion test. The matching ASan/UBSan tree also passes 47/47. The
 reference C++ filter passes all 8 selected JP2, BigTIFF and deletion tests.
+
+## 2026-09-21 UP2 patch-core qualification
+
+The C patch core now records the emitted XMP namespace URI and simple property
+identity during preparation, then applies only compiled offsets. It rejects
+structural XMP paths, invalid initial or replacement UTF-8/XML text, malformed
+borrowed views, duplicate or foreign handles, and input views that overlap
+either worker payload. XMP updates may change logical length when the escaped
+width remains fixed. EXIF updates cover scalar, text, bytes and typed arrays;
+all updates validate before either payload changes. A null replay callback has
+its own result code and replay remains EXIF then XMP.
+
+`tests/test_omc_metadata_patch.c` now covers worker lifetime after plan reset,
+transactional failures, alias rejection across both families, host-generation
+separation, namespace-prefix changes, all XML escape forms, variable-length
+UTF-8, typed arrays and 1,000 repeated updates. The Linux test target links
+malloc/calloc/realloc wrappers and observed zero allocations during the
+successful apply loop and replay. Release Clang 20 C90 and ASan/UBSan each pass
+47/47 CTest targets. The pinned C++ 0.5.10 reference passes all 14 metadata
+patch unit tests plus its standalone allocation test.
+
+The current main C++ checkout is now beyond the pinned patch reference: commit
+`6e17c84` adds the EXIF 3.1 development/correction writeback family A40D-A412.
+That family remains a later C-only roadmap slice and is not mixed into this UP2
+qualification.
 
 ## Previous Translation Checkpoint: Version 0.9.0
 
@@ -652,7 +682,7 @@ semantics. C++ ownership and presentation APIs need not be reproduced.
 | W9 | Payload/package artifacts | C has `OMTPLD01` v1, `OMTPKG01` v2, semantic views, replay, executed-output materialization and artifact inspection | Present bounded wire families. Test interoperation in both directions; matching version/magic does not establish complete builder/execution parity. |
 | W10 | BMFF package item insertion | C has Exif/XMP/JUMBF/C2PA routes, ICC, synthesized `idat`, inserted 32-bit IDs and bounded method-2 references | Shared bounded materializer now replaces managed families and remaps unambiguous IDs. Append layout preserves existing media addresses; physical byte layout differs from C++. |
 | W11 | Newer bounded BMFF writer rules | C++ compact `iloc`, self-contained `dref`, managed-item replacement/remapping and multiple `ipma` consolidation | Implemented bounded normalization, local `dref`, family replacement, `iref`/version-0 `grpl`/`ipma` remapping, and multiple-table ICC association consolidation. See `bmff_writing.md` for limits and validation. |
-| W12 | Transactional canonical EXIF/scalar-XMP patching | C++ 0.5 replaces the removed EXIF-only API with `metadata_patch.h`; C now has an initial `omc_metadata_patch.h` plan/worker/replay core | Partial. The C primitive provides mixed-family atomic update validation, host-issued generations, exact typed shapes, escaped widths and replay order. Exact serializer-recorded repeated-value binding, alias checks and allocation-free execution remain UP2 acceptance work. |
+| W12 | Transactional canonical EXIF/scalar-XMP patching | C++ 0.5 replaces the removed EXIF-only API with `metadata_patch.h`; C has `omc_metadata_patch.h` plan/worker/replay plus typed arrays and bounded borrowed views | Partial. The C primitive provides mixed-family atomic update validation, host-issued generations, emitted namespace-URI/simple-property binding, variable logical XMP text with fixed escaped widths, alias rejection, typed scalar/array EXIF updates, and allocation-free apply/replay checks. Full serializer-record evidence for repeated and native-projected properties remains open. |
 | W13 | MakerNote trust and C2PA | C has conservative rendered filtering and bounded JUMBF/C2PA routes; C++ has richer MakerNote layout audits and optional verification | Partial safety facts. Keep opaque preservation distinct from verified relocation. Bounded OpenSSL verification logic is eligible as an optional C backend. Rendered C2PA invalidation/drop stays explicit; full asset binding, signing and trust remain outside the first writer milestone. |
 
 ### Excluded Integrations And Conditional Features
