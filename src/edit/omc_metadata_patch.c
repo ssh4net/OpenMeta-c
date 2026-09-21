@@ -84,6 +84,89 @@ omc_patch_scalar_size(const omc_val *value)
     return omc_elem_size(value->elem_type);
 }
 
+static int
+omc_patch_scalar_valid(const omc_val *value)
+{
+    if (value == (const omc_val *)0 || value->kind != OMC_VAL_SCALAR
+        || value->count != 1U)
+        return 0;
+    switch (value->elem_type) {
+    case OMC_ELEM_U8: return value->u.u64 <= 255U;
+    case OMC_ELEM_I8: return value->u.i64 >= -128 && value->u.i64 <= 127;
+    case OMC_ELEM_U16: return value->u.u64 <= 65535U;
+    case OMC_ELEM_I16: return value->u.i64 >= -32768 && value->u.i64 <= 32767;
+    case OMC_ELEM_U32: return value->u.u64 <= 0xFFFFFFFFU;
+    case OMC_ELEM_I32:
+        return value->u.i64 >= (-2147483647 - 1) && value->u.i64 <= 2147483647;
+    case OMC_ELEM_URATIONAL: return value->u.ur.denom != 0U;
+    case OMC_ELEM_SRATIONAL: return value->u.sr.denom != 0;
+    default: return 1;
+    }
+}
+
+static omc_u64
+omc_patch_pointer_value(const void *pointer)
+{
+    return (omc_u64)pointer;
+}
+
+static int
+omc_patch_ranges_overlap(const omc_u8 *a, omc_size a_size,
+                         const omc_u8 *b, omc_size b_size)
+{
+    omc_u64 a_start;
+    omc_u64 b_start;
+    omc_u64 a_end;
+    omc_u64 b_end;
+    if (a == (const omc_u8 *)0 || b == (const omc_u8 *)0
+        || a_size == 0U || b_size == 0U)
+        return 0;
+    a_start = omc_patch_pointer_value(a);
+    b_start = omc_patch_pointer_value(b);
+    a_end = (omc_u64)a_size > ~(omc_u64)0 - a_start
+                 ? ~(omc_u64)0
+                 : a_start + (omc_u64)a_size;
+    b_end = (omc_u64)b_size > ~(omc_u64)0 - b_start
+                 ? ~(omc_u64)0
+                 : b_start + (omc_u64)b_size;
+    return a_start < b_end && b_start < a_end;
+}
+
+static int
+omc_patch_xml_chars_valid(const omc_u8 *bytes, omc_size size)
+{
+    omc_size i;
+    for (i = 0U; i < size; ++i) {
+        if (bytes[i] == 0U || (bytes[i] < 0x20U && bytes[i] != '\t'
+                               && bytes[i] != '\n' && bytes[i] != '\r'))
+            return 0;
+    }
+    if (size >= 3U) {
+        for (i = 0U; i + 2U < size; ++i) {
+            if (bytes[i] == 0xEFU && bytes[i + 1U] == 0xBFU
+                && (bytes[i + 2U] == 0xBEU || bytes[i + 2U] == 0xBFU))
+                return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+omc_patch_xmp_simple_name(const omc_const_bytes path)
+{
+    omc_size i;
+    if (path.data == (const omc_u8 *)0 || path.size == 0U)
+        return 0;
+    for (i = 0U; i < path.size; ++i) {
+        omc_u8 c = path.data[i];
+        if (c == '/' || c == '[' || c == ']' || c == ':' || c == ' '
+            || c == '\t' || c == '\r' || c == '\n' || c == '<'
+            || c == '>' || c == '&' || c == '"' || c == '\'')
+            return 0;
+    }
+    return 1;
+}
+
 static omc_size
 omc_patch_escaped_width(const omc_u8 *bytes, omc_size size)
 {
@@ -143,33 +226,133 @@ omc_patch_find(const omc_u8 *haystack, omc_size haystack_size,
     return (omc_size)~(omc_size)0;
 }
 
+static int
+omc_patch_xmp_namespace_matches(const omc_arena *payload,
+                                omc_size path_offset,
+                                omc_const_bytes schema_ns)
+{
+    omc_size tag_start;
+    omc_size colon;
+    omc_size prefix_start;
+    omc_size prefix_size;
+    omc_size cursor;
+    if (payload == (const omc_arena *)0 || schema_ns.data == (const omc_u8 *)0
+        || schema_ns.size == 0U || path_offset == 0U
+        || path_offset >= payload->size)
+        return 0;
+    tag_start = path_offset;
+    while (tag_start > 0U && payload->data[tag_start - 1U] != (omc_u8)'<')
+        --tag_start;
+    if (tag_start == 0U || payload->data[tag_start - 1U] != (omc_u8)'<')
+        return 0;
+    --tag_start;
+    if (tag_start >= path_offset || payload->data[tag_start] != (omc_u8)'<'
+        || tag_start + 1U >= payload->size
+        || payload->data[tag_start + 1U] == (omc_u8)'/')
+        return 0;
+    colon = path_offset - 1U;
+    if (payload->data[colon] != (omc_u8)':') {
+        return 0;
+    }
+    prefix_start = tag_start + 1U;
+    prefix_size = colon - prefix_start;
+    if (prefix_size == 0U) {
+        return 0;
+    }
+    cursor = 0U;
+    while (cursor + 6U + prefix_size + 2U < payload->size) {
+        omc_size decl;
+        omc_size value_start;
+        omc_u8 quote;
+        decl = omc_patch_find(payload->data + cursor, payload->size - cursor,
+                              (const omc_u8 *)"xmlns:", 6U, 0U);
+        if (decl == (omc_size)~(omc_size)0)
+            break;
+        decl += cursor;
+        if (decl + 6U + prefix_size + 1U < payload->size
+            && memcmp(payload->data + decl + 6U, payload->data + prefix_start,
+                      prefix_size) == 0
+            && payload->data[decl + 6U + prefix_size] == (omc_u8)'=') {
+            value_start = decl + 7U + prefix_size;
+            if (value_start < payload->size
+                && (payload->data[value_start] == (omc_u8)'"'
+                    || payload->data[value_start] == (omc_u8)'\'')) {
+                quote = payload->data[value_start++];
+                if (value_start + schema_ns.size < payload->size
+                    && memcmp(payload->data + value_start, schema_ns.data,
+                              schema_ns.size) == 0
+                    && payload->data[value_start + schema_ns.size] == quote) {
+                    return 1;
+                }
+            }
+        }
+        cursor = decl + 6U;
+    }
+    return 0;
+}
+
 static omc_size
 omc_patch_value_bytes(const omc_store *store, const omc_val *value,
                       omc_u8 *scratch, omc_size scratch_size)
 {
     omc_size width;
     omc_u64 number;
+    if (value == (const omc_val *)0 || scratch == (omc_u8 *)0)
+        return 0U;
     if (value->kind == OMC_VAL_TEXT || value->kind == OMC_VAL_BYTES) {
-        omc_const_bytes bytes = omc_arena_view(&store->arena, value->u.ref);
+        omc_const_bytes bytes;
+        if (store == (const omc_store *)0)
+            return 0U;
+        bytes = omc_arena_view(&store->arena, value->u.ref);
         if (bytes.size > scratch_size)
             return 0U;
-        memcpy(scratch, bytes.data, bytes.size);
+        if (bytes.size != 0U)
+            memcpy(scratch, bytes.data, bytes.size);
         return bytes.size;
     }
-    if (value->kind != OMC_VAL_SCALAR)
+    if (value->kind == OMC_VAL_ARRAY) {
+        omc_size array_width;
+        omc_size i;
+        omc_val scalar;
+        omc_size scalar_size;
+        if (store == (const omc_store *)0
+            || !omc_value_shape_valid(value, &store->arena))
+            return 0U;
+        array_width = (omc_size)value->count * omc_elem_size(value->elem_type);
+        if (array_width > scratch_size)
+            return 0U;
+        for (i = 0U; i < value->count; ++i) {
+            omc_value_array_scalar(value, &store->arena, (omc_u32)i, &scalar);
+            scalar_size = omc_patch_value_bytes((const omc_store *)0,
+                                                 &scalar, scratch + i * omc_elem_size(value->elem_type),
+                                                 scratch_size - i * omc_elem_size(value->elem_type));
+            if (scalar_size != omc_elem_size(value->elem_type))
+                return 0U;
+        }
+        return array_width;
+    }
+    if (value->kind != OMC_VAL_SCALAR || !omc_patch_scalar_valid(value))
         return 0U;
     width = omc_patch_scalar_size(value);
     if (width == 0U || width > scratch_size)
         return 0U;
-    number = value->elem_type == OMC_ELEM_I8 || value->elem_type == OMC_ELEM_I16
-             || value->elem_type == OMC_ELEM_I32 || value->elem_type == OMC_ELEM_I64
-             ? (omc_u64)value->u.i64 : value->u.u64;
+    if (value->elem_type == OMC_ELEM_URATIONAL) {
+        number = (omc_u64)value->u.ur.numer
+                 | ((omc_u64)value->u.ur.denom << 32U);
+    } else if (value->elem_type == OMC_ELEM_SRATIONAL) {
+        number = (omc_u64)(omc_u32)value->u.sr.numer
+                 | ((omc_u64)(omc_u32)value->u.sr.denom << 32U);
+    } else {
+        number = value->elem_type == OMC_ELEM_I8 || value->elem_type == OMC_ELEM_I16
+                 || value->elem_type == OMC_ELEM_I32 || value->elem_type == OMC_ELEM_I64
+                     ? (omc_u64)value->u.i64 : value->u.u64;
+    }
     {
         omc_size i;
         for (i = 0U; i < width; ++i)
             scratch[i] = (omc_u8)(number >> (8U * i));
     }
-    return omc_elem_size(value->elem_type);
+    return width;
 }
 
 static int
@@ -189,6 +372,9 @@ omc_patch_find_xmp_slot(const omc_store *store, const omc_key *key,
     if (value->kind != OMC_VAL_TEXT)
         return 0;
     text = omc_arena_view(&store->arena, value->u.ref);
+    path = omc_arena_view(&store->arena, key->u.xmp_property.property_path);
+    if (!omc_patch_xmp_simple_name(path))
+        return 0;
     escaped_size = omc_patch_escaped_width(text.data, text.size);
     escaped = escaped_small;
     if (escaped_size > sizeof(escaped_small)) {
@@ -203,7 +389,6 @@ omc_patch_find_xmp_slot(const omc_store *store, const omc_key *key,
             free(escaped);
         return 0;
     }
-    path = omc_arena_view(&store->arena, key->u.xmp_property.property_path);
     while (cursor < payload->size) {
         omc_size p = omc_patch_find(payload->data + cursor, payload->size - cursor,
                                     path.data, path.size, 0U);
@@ -215,8 +400,11 @@ omc_patch_find_xmp_slot(const omc_store *store, const omc_key *key,
             return 0;
         }
         p += cursor;
-        if (p == 0U || (payload->data[p - 1U] != ':'
-                        && payload->data[p - 1U] != '<')) {
+        if (p == 0U || payload->data[p - 1U] != ':'
+            || !omc_patch_xmp_namespace_matches(
+                   payload, p,
+                   omc_arena_view(&store->arena,
+                                  key->u.xmp_property.schema_ns))) {
             cursor = p + path.size;
             continue;
         }
@@ -229,9 +417,12 @@ omc_patch_find_xmp_slot(const omc_store *store, const omc_key *key,
             return 0;
         }
         ++start;
-        end = omc_patch_find(payload->data + start, payload->size - start,
-                             escaped, escaped_size, 0U);
-        if (end != (omc_size)~(omc_size)0) {
+        end = escaped_size == 0U
+                  ? 0U
+                  : omc_patch_find(payload->data + start,
+                                   payload->size - start, escaped,
+                                   escaped_size, 0U);
+        if (escaped_size == 0U || end != (omc_size)~(omc_size)0) {
             end += start;
             if (found == occurrence) {
                 *offset = end;
@@ -249,61 +440,114 @@ omc_patch_find_xmp_slot(const omc_store *store, const omc_key *key,
     return 0;
 }
 
-static int
+static omc_metadata_patch_code
 omc_patch_find_slot(const omc_store *store, const omc_metadata_patch_request *request,
                     const omc_patch_state *state, omc_patch_slot *slot)
 {
     omc_size i;
     omc_u32 occurrence = 0U;
-    omc_u8 needle[64];
+    int matched = 0;
+    omc_u8 needle_small[64];
+    omc_u8 *needle = needle_small;
+    omc_size needle_capacity = sizeof(needle_small);
     omc_size needle_size;
+    omc_size allocated_size = 0U;
+    omc_metadata_patch_code code = OMC_METADATA_PATCH_KEY_NOT_FOUND;
+    omc_const_bytes path;
+    if (request->key.kind == OMC_KEY_XMP_PROPERTY) {
+        path = omc_arena_view(&store->arena,
+                              request->key.u.xmp_property.property_path);
+        if (request->occurrence != 0U)
+            return OMC_METADATA_PATCH_OCCURRENCE_OUT_OF_RANGE;
+        if (!omc_patch_xmp_simple_name(path))
+            return OMC_METADATA_PATCH_UNSUPPORTED_SHAPE;
+    }
     for (i = 0U; i < store->entry_count; ++i) {
         const omc_entry *entry = &store->entries[i];
         if ((entry->flags & OMC_ENTRY_FLAG_DELETED) != 0U)
             continue;
         if (!omc_patch_key_equal(store, &entry->key, &request->key))
             continue;
+        matched = 1;
         if (occurrence != request->occurrence) {
             ++occurrence;
             continue;
         }
         if (entry->key.kind == OMC_KEY_XMP_PROPERTY) {
             if (entry->value.kind != OMC_VAL_TEXT)
-                return 0;
+                return OMC_METADATA_PATCH_ENTRY_NOT_SERIALIZABLE;
+            if (entry->value.text_encoding != OMC_TEXT_ASCII
+                && entry->value.text_encoding != OMC_TEXT_UTF8)
+                return OMC_METADATA_PATCH_ENTRY_NOT_SERIALIZABLE;
+            {
+                omc_const_bytes initial = omc_arena_view(&store->arena,
+                                                         entry->value.u.ref);
+                if (!omc_utf8_valid(initial.data, initial.size,
+                                    entry->value.text_encoding == OMC_TEXT_ASCII)
+                    || !omc_patch_xml_chars_valid(initial.data, initial.size))
+                    return OMC_METADATA_PATCH_INVALID_METADATA;
+            }
             if (!omc_patch_spec_equal(&entry->value, &request->expected))
-                return 0;
+                return OMC_METADATA_PATCH_VALUE_TYPE_MISMATCH;
             slot->expected.kind = OMC_VAL_TEXT;
             slot->expected.elem_type = entry->value.elem_type;
             slot->expected.text_encoding = entry->value.text_encoding;
             slot->expected.count = entry->value.count;
-            if (request->escaped_width == 0U
-                || !omc_patch_find_xmp_slot(store, &entry->key, &entry->value,
-                                             request->occurrence, &state->xmp,
-                                             &slot->offset, &slot->width))
-                return 0;
+            if (!omc_patch_find_xmp_slot(store, &entry->key, &entry->value,
+                                         request->occurrence, &state->xmp,
+                                         &slot->offset, &slot->width)) {
+                return OMC_METADATA_PATCH_ENTRY_NOT_SERIALIZABLE;
+            }
             slot->family = OMC_METADATA_PATCH_XMP;
             if (slot->width != request->escaped_width)
-                return 0;
-            return 1;
+                return OMC_METADATA_PATCH_WIDTH_MISMATCH;
+            return OMC_METADATA_PATCH_NONE;
         }
         if (!omc_patch_spec_equal(&entry->value, &request->expected))
-            return 0;
+            return OMC_METADATA_PATCH_VALUE_TYPE_MISMATCH;
         slot->expected = request->expected;
         if (request->escaped_width != 0U)
-            return 0;
-        needle_size = omc_patch_value_bytes(store, &entry->value, needle,
-                                            sizeof(needle));
-        if (needle_size == 0U)
-            return 0;
+            return OMC_METADATA_PATCH_INVALID_REQUEST;
+        if (entry->value.kind == OMC_VAL_TEXT || entry->value.kind == OMC_VAL_BYTES) {
+            omc_const_bytes entry_bytes = omc_arena_view(&store->arena,
+                                                         entry->value.u.ref);
+            needle = (omc_u8 *)(void *)entry_bytes.data;
+            needle_capacity = entry_bytes.size;
+            needle_size = entry_bytes.size;
+        } else {
+            if (entry->value.kind == OMC_VAL_ARRAY) {
+                allocated_size = (omc_size)entry->value.count
+                                 * omc_elem_size(entry->value.elem_type);
+                if (allocated_size > needle_capacity) {
+                    needle = (omc_u8 *)malloc(allocated_size);
+                    if (needle == (omc_u8 *)0)
+                        return OMC_METADATA_PATCH_ALLOCATION_FAILED;
+                    needle_capacity = allocated_size;
+                }
+            }
+            needle_size = omc_patch_value_bytes(store, &entry->value, needle,
+                                                needle_capacity);
+            if (needle_size == 0U) {
+                if (needle != needle_small)
+                    free(needle);
+                return OMC_METADATA_PATCH_ENTRY_NOT_SERIALIZABLE;
+            }
+        }
         slot->offset = omc_patch_find(state->exif.data, state->exif.size,
                                       needle, needle_size, request->occurrence);
+        if (needle != needle_small
+            && entry->value.kind != OMC_VAL_TEXT
+            && entry->value.kind != OMC_VAL_BYTES)
+            free(needle);
         if (slot->offset == (omc_size)~(omc_size)0)
-            return 0;
+            return OMC_METADATA_PATCH_ENTRY_NOT_SERIALIZABLE;
         slot->width = needle_size;
         slot->family = OMC_METADATA_PATCH_EXIF_TIFF;
-        return 1;
+        return OMC_METADATA_PATCH_NONE;
     }
-    return 0;
+    if (matched)
+        code = OMC_METADATA_PATCH_OCCURRENCE_OUT_OF_RANGE;
+    return code;
 }
 
 void
@@ -368,7 +612,9 @@ omc_metadata_patch_code_name(omc_metadata_patch_code code)
         "occurrence_out_of_range", "value_type_mismatch", "duplicate_request",
         "allocation_failed", "invalid_plan", "invalid_instance", "empty_updates",
         "invalid_handle", "foreign_handle", "duplicate_handle", "width_mismatch",
-        "invalid_value", "replay_failed"
+        "invalid_value", "replay_failed", "entry_not_serializable",
+        "value_aliases_instance", "unsupported_shape", "ambiguous_property",
+        "null_replay_callback"
     };
     return code < (sizeof(names) / sizeof(names[0])) ? names[code] : "unknown";
 }
@@ -425,14 +671,22 @@ omc_metadata_patch_prepare(const omc_store *store,
     if (opts_in == (const omc_metadata_patch_opts *)0) {
         omc_metadata_patch_opts_init(&opts);
     } else opts = *opts_in;
-    if (store == (const omc_store *)0 || requests == (const omc_metadata_patch_request *)0
-        || handles == (omc_metadata_patch_handle *)0 || request_count == 0U
-        || request_count > OMC_PATCH_MAX_REQUESTS || handle_capacity != request_count
-        || opts.plan_id == 0U || opts.plan_id > OMC_METADATA_PATCH_MAX_PLAN_ID
-        || opts.max_patch_requests == 0U || opts.max_patch_requests > OMC_PATCH_MAX_REQUESTS
+    if (request_count == 0U)
+        return omc_patch_error(OMC_METADATA_PATCH_EMPTY_REQUESTS, 0U);
+    if (store == (const omc_store *)0
+        || requests == (const omc_metadata_patch_request *)0
+        || handles == (omc_metadata_patch_handle *)0
         || !omc_store_shape_valid(store))
-        return omc_patch_error(request_count == 0U ? OMC_METADATA_PATCH_EMPTY_REQUESTS
-                                                   : OMC_METADATA_PATCH_INVALID_OPTIONS, 0U);
+        return omc_patch_error(OMC_METADATA_PATCH_INVALID_OPTIONS, 0U);
+    if (handle_capacity != request_count)
+        return omc_patch_error(OMC_METADATA_PATCH_HANDLE_BUFFER_SIZE_MISMATCH, 0U);
+    if (request_count > OMC_PATCH_MAX_REQUESTS
+        || opts.max_patch_requests > OMC_PATCH_MAX_REQUESTS
+        || opts.max_patch_requests < request_count)
+        return omc_patch_error(OMC_METADATA_PATCH_LIMIT, 0U);
+    if (opts.plan_id == 0U || opts.plan_id > OMC_METADATA_PATCH_MAX_PLAN_ID
+        || opts.max_patch_requests == 0U)
+        return omc_patch_error(OMC_METADATA_PATCH_INVALID_OPTIONS, 0U);
     state = (omc_patch_state *)calloc(1U, sizeof(*state));
     if (state == (omc_patch_state *)0)
         return omc_patch_error(OMC_METADATA_PATCH_ALLOCATION_FAILED, 0U);
@@ -477,14 +731,16 @@ omc_metadata_patch_prepare(const omc_store *store,
                 && requests[j].occurrence == requests[i].occurrence
                 && omc_patch_key_equal(store, &requests[j].key, &requests[i].key))
                 goto duplicate_request;
-        if (!omc_patch_find_slot(store, &requests[i], state, &state->slots[i])) {
-            result.code = OMC_METADATA_PATCH_KEY_NOT_FOUND;
+        result.code = omc_patch_find_slot(store, &requests[i], state,
+                                          &state->slots[i]);
+        if (result.code != OMC_METADATA_PATCH_NONE) {
             result.failed_index = i;
             goto fail;
         }
-        handles[i].token = (opts.plan_id << 16U) | (omc_u64)(i + 1U);
     }
     state->slot_count = request_count;
+    for (i = 0U; i < request_count; ++i)
+        handles[i].token = (opts.plan_id << 16U) | (omc_u64)(i + 1U);
     omc_metadata_patch_plan_reset(out_plan);
     out_plan->state = state;
     result.code = OMC_METADATA_PATCH_NONE;
@@ -554,13 +810,68 @@ omc_metadata_patch_instance_create(const omc_metadata_patch_plan *plan,
 }
 
 static int
+omc_patch_update_view(const omc_metadata_patch_update *update,
+                      omc_const_bytes *out_bytes)
+{
+    const omc_val *value;
+    if (update == (const omc_metadata_patch_update *)0
+        || update->value == (const omc_val *)0)
+        return 0;
+    value = update->value;
+    if (value->kind == OMC_VAL_TEXT || value->kind == OMC_VAL_BYTES
+        || value->kind == OMC_VAL_ARRAY) {
+        if (update->arena == (const omc_arena *)0
+            || !omc_value_shape_valid(value, update->arena))
+            return 0;
+        *out_bytes = omc_arena_view(update->arena, value->u.ref);
+        return out_bytes->size == value->u.ref.size;
+    }
+    return value->kind == OMC_VAL_SCALAR && omc_value_shape_valid(
+                                                     value, update->arena)
+           && omc_patch_scalar_valid(value);
+}
+
+static int
+omc_patch_array_valid(const omc_metadata_patch_update *update)
+{
+    omc_u32 i;
+    omc_val scalar;
+    if (update == (const omc_metadata_patch_update *)0
+        || update->value == (const omc_val *)0
+        || update->value->kind != OMC_VAL_ARRAY
+        || update->arena == (const omc_arena *)0
+        || !omc_value_shape_valid(update->value, update->arena))
+        return 0;
+    for (i = 0U; i < update->value->count; ++i) {
+        omc_value_array_scalar(update->value, update->arena, i, &scalar);
+        if (!omc_patch_scalar_valid(&scalar))
+            return 0;
+    }
+    return 1;
+}
+
+static int
+omc_patch_update_aliases(const omc_patch_state *state,
+                         omc_const_bytes bytes)
+{
+    if (state == (const omc_patch_state *)0 || bytes.size == 0U)
+        return 0;
+    return omc_patch_ranges_overlap(bytes.data, bytes.size, state->exif.data,
+                                    state->exif.size)
+           || omc_patch_ranges_overlap(bytes.data, bytes.size, state->xmp.data,
+                                       state->xmp.size);
+}
+
+static int
 omc_patch_scalar_bytes_update(const omc_metadata_patch_update *update,
                               omc_u8 *scratch, omc_size cap, omc_size *size)
 {
     const omc_val *value = update->value;
-    if (value == (const omc_val *)0 || update->arena == (const omc_arena *)0
-        || !omc_value_shape_valid(value, update->arena)) return 0;
-    if (value->kind != OMC_VAL_SCALAR || omc_elem_size(value->elem_type) > cap) return 0;
+    if (value == (const omc_val *)0 || value->kind != OMC_VAL_SCALAR
+        || !omc_value_shape_valid(value, update->arena)
+        || !omc_patch_scalar_valid(value)
+        || omc_elem_size(value->elem_type) > cap)
+        return 0;
     *size = omc_patch_value_bytes((const omc_store *)0, value, scratch, cap);
     return *size != 0U;
 }
@@ -585,6 +896,8 @@ omc_metadata_patch_apply(omc_metadata_patch_instance *instance,
     for (i = 0U; i < update_count; ++i) {
         omc_u64 token = updates[i].handle.token;
         omc_u64 index;
+        omc_const_bytes input;
+        int is_reference;
         if (token == 0U) return omc_patch_error(OMC_METADATA_PATCH_INVALID_HANDLE, i);
         if ((token >> 16U) != state->plan_id)
             return omc_patch_error(OMC_METADATA_PATCH_FOREIGN_HANDLE, i);
@@ -595,13 +908,36 @@ omc_metadata_patch_apply(omc_metadata_patch_instance *instance,
             if (updates[j].handle.token == token)
                 return omc_patch_error(OMC_METADATA_PATCH_DUPLICATE_HANDLE, i);
         if (updates[i].value == (const omc_val *)0
-            || !omc_patch_spec_equal(updates[i].value, &state->slots[index - 1U].expected))
+            || (state->slots[index - 1U].family == OMC_METADATA_PATCH_XMP
+                ? (updates[i].value->kind != OMC_VAL_TEXT
+                   || updates[i].value->elem_type
+                          != state->slots[index - 1U].expected.elem_type
+                   || updates[i].value->text_encoding
+                          != state->slots[index - 1U].expected.text_encoding)
+                : !omc_patch_spec_equal(
+                      updates[i].value, &state->slots[index - 1U].expected)))
             return omc_patch_error(OMC_METADATA_PATCH_VALUE_TYPE_MISMATCH, i);
-        if (updates[i].value->kind == OMC_VAL_TEXT
-            || updates[i].value->kind == OMC_VAL_BYTES) {
-            bytes = omc_arena_view(updates[i].arena,
-                                   updates[i].value->u.ref);
+        is_reference = updates[i].value->kind == OMC_VAL_TEXT
+                       || updates[i].value->kind == OMC_VAL_BYTES
+                       || updates[i].value->kind == OMC_VAL_ARRAY;
+        if (is_reference) {
+            if (!omc_patch_update_view(&updates[i], &input)
+                || (updates[i].value->kind == OMC_VAL_ARRAY
+                    && !omc_patch_array_valid(&updates[i])))
+                return omc_patch_error(OMC_METADATA_PATCH_INVALID_VALUE, i);
+            bytes = input;
             size = bytes.size;
+            if (omc_patch_update_aliases(state, bytes))
+                return omc_patch_error(OMC_METADATA_PATCH_VALUE_ALIASES_INSTANCE,
+                                       i);
+            if (updates[i].value->kind == OMC_VAL_TEXT
+                && state->slots[index - 1U].family
+                       == OMC_METADATA_PATCH_XMP
+                && (!omc_utf8_valid(bytes.data, bytes.size,
+                                    updates[i].value->text_encoding
+                                        == OMC_TEXT_ASCII)
+                    || !omc_patch_xml_chars_valid(bytes.data, bytes.size)))
+                return omc_patch_error(OMC_METADATA_PATCH_INVALID_VALUE, i);
         } else if (!omc_patch_scalar_bytes_update(&updates[i], scratch,
                                                   sizeof(scratch), &size)) {
             return omc_patch_error(OMC_METADATA_PATCH_INVALID_VALUE, i);
@@ -620,7 +956,8 @@ omc_metadata_patch_apply(omc_metadata_patch_instance *instance,
         omc_patch_slot *slot = &state->slots[index - 1U];
         omc_arena *payload = slot->family == OMC_METADATA_PATCH_EXIF_TIFF ? &state->exif : &state->xmp;
         if (updates[i].value->kind == OMC_VAL_TEXT
-            || updates[i].value->kind == OMC_VAL_BYTES) {
+            || updates[i].value->kind == OMC_VAL_BYTES
+            || updates[i].value->kind == OMC_VAL_ARRAY) {
             bytes = omc_arena_view(updates[i].arena,
                                    updates[i].value->u.ref);
             size = bytes.size;
@@ -644,6 +981,20 @@ omc_metadata_patch_apply(omc_metadata_patch_instance *instance,
         } else if (updates[i].value->kind == OMC_VAL_TEXT
                    || updates[i].value->kind == OMC_VAL_BYTES) {
             memcpy(payload->data + slot->offset, bytes.data, size);
+        } else if (updates[i].value->kind == OMC_VAL_ARRAY) {
+            omc_u32 k;
+            omc_size width = omc_elem_size(updates[i].value->elem_type);
+            omc_val scalar;
+            for (k = 0U; k < updates[i].value->count; ++k) {
+                omc_value_array_scalar(updates[i].value, updates[i].arena, k,
+                                       &scalar);
+                if (omc_patch_value_bytes((const omc_store *)0, &scalar,
+                                           payload->data + slot->offset
+                                               + (omc_size)k * width,
+                                           width)
+                    != width)
+                    return omc_patch_error(OMC_METADATA_PATCH_INVALID_VALUE, i);
+            }
         } else {
             memcpy(payload->data + slot->offset, scratch, size);
         }
@@ -661,7 +1012,7 @@ omc_metadata_patch_replay(const omc_metadata_patch_instance *instance,
     if (instance == (const omc_metadata_patch_instance *)0 || instance->state == (void *)0)
         return omc_patch_error(OMC_METADATA_PATCH_INVALID_INSTANCE, 0U);
     if (callback == (omc_metadata_patch_replay_fn)0)
-        return omc_patch_error(OMC_METADATA_PATCH_REPLAY_FAILED, 0U);
+        return omc_patch_error(OMC_METADATA_PATCH_NULL_REPLAY_CALLBACK, 0U);
     payload = omc_metadata_patch_instance_payload(instance, OMC_METADATA_PATCH_EXIF_TIFF);
     if (payload.size != 0U && !callback(user, OMC_METADATA_PATCH_EXIF_TIFF, payload))
         return omc_patch_error(OMC_METADATA_PATCH_REPLAY_FAILED, 0U);

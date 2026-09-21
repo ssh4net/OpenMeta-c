@@ -46,6 +46,12 @@ add_test(NAME omc_test_exif_text COMMAND omc_test_exif_text)
 
 add_executable(omc_test_metadata_patch test_omc_metadata_patch.c)
 target_link_libraries(omc_test_metadata_patch PRIVATE omc)
+if(UNIX AND NOT APPLE)
+  target_compile_definitions(omc_test_metadata_patch PRIVATE
+    OMC_PATCH_TEST_WRAP_HEAP=1)
+  target_link_options(omc_test_metadata_patch PRIVATE
+    -Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc)
+endif()
 add_test(NAME omc_test_metadata_patch COMMAND omc_test_metadata_patch)
 
 add_executable(omc_test_iptc_translation test_omc_iptc_translation.c)
