@@ -206,9 +206,11 @@ the C transaction contract.
 The direct fixture `omc_test_gps_translation` covers exact fractions, poles,
 typed altitude values, conflicts, limits, idempotence, removal and canonical
 TIFF serialize/readback. `omc_test_gps_parity` compares primary and altitude
-only cases with C++ 0.5.10. `omc_test_gps_groups` covers representative
-navigation, destination, receiver/quality and GPS text mappings. Paired all-tag
-fixtures and JPEG/Classic TIFF/BigTIFF persistence remain the UP3 exit gate.
+only cases with C++ 0.5.10. The current `omc_test_gps_groups` matrix covers all
+four additional group APIs, all of their native members, UTF-8 GPS text,
+offset-normalized timestamps, removal and canonical TIFF serialize/readback.
+The dedicated cross-language group parity target and JPEG/Classic
+TIFF/BigTIFF transfer lifecycle cases remain open.
 
 The same C++ pin also exposed one UP1 XMP reader correction. Camera/lens/spectral
 text values in the EXIF and CIPA namespaces now retain boundary whitespace for
@@ -236,12 +238,14 @@ destination group covers latitude, longitude, bearing and distance. Quality
 covers status, measure mode, DOP, differential and horizontal error. Text covers
 satellites, map datum, processing method and area information. Inputs accept
 bounded decimal/rational values, exact DMS coordinates, the C++ unit aliases and
-ASCII-prefixed GPS text. The implementation injects the required GPS version
-for groups that need it and keeps source/output unchanged on rejection.
+canonical ASCII- or Unicode-prefixed GPS text. The implementation injects
+GPSVersionID `2.3.0.0` for every active group, preserves equivalent native
+encodings, and keeps source/output unchanged on rejection.
 
-`omc_test_gps_groups` is a direct smoke and transaction gate. Full C++ paired
-fixtures, all 32 standard GPS IDs, and JPEG/Classic TIFF/BigTIFF persistence are
-still UP3 acceptance work.
+`omc_test_gps_groups` is the C-side paired transaction and TIFF persistence
+gate. Together with `omc_test_gps_translation`, it covers all 32 standard GPS
+IDs. A dedicated C/C++ parity target for the four group APIs and JPEG/Classic
+TIFF/BigTIFF transfer lifecycle coverage remain UP3 acceptance work.
 
 ## Unified prepared metadata patch core
 

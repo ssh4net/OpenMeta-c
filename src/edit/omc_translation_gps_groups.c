@@ -36,6 +36,7 @@ typedef struct omc_gg_group {
     int selected;
     int present;
     int apply;
+    int text_ascii;
     omc_urational components[3];
     omc_urational magnitude;
     omc_u8 short_value;
@@ -62,7 +63,11 @@ typedef struct omc_gg_context {
     omc_u64 text_bytes;
     int need_version;
     int removed_group;
+    int remove_version;
 } omc_gg_context;
+
+static omc_gps_translation_status
+gg_reduce_rational(omc_u64 numer, omc_u64 denom, omc_urational *out);
 
 static int
 gg_ref_equal(const omc_arena *arena, omc_byte_ref ref, const char *literal)
@@ -249,6 +254,8 @@ gg_coordinate(const omc_store *store, const omc_val *value, int latitude,
             omc_u64 a = 60U; omc_u64 b = sec_denom;
             while (b != 0U) { omc_u64 r = a % b; a = b; b = r; }
             if (a == 0U) a = 1U;
+            if (sec_numer > (~(omc_u64)0U) / (60U / a))
+                return OMC_GPS_TRANSLATION_UNSUPPORTED_PRECISION;
             sec_denom /= a; sec_numer *= 60U / a;
         }
     } else {
@@ -265,16 +272,435 @@ gg_coordinate(const omc_store *store, const omc_val *value, int latitude,
         return OMC_GPS_TRANSLATION_VALUE_OUT_OF_RANGE;
     group->components[0].numer = (omc_u32)degrees; group->components[0].denom = 1U;
     group->components[1].numer = (omc_u32)minutes; group->components[1].denom = 1U;
-    group->components[2].numer = (omc_u32)sec_numer;
-    group->components[2].denom = (omc_u32)sec_denom;
-    return OMC_GPS_TRANSLATION_OK;
+    return gg_reduce_rational(sec_numer, sec_denom, &group->components[2]);
 }
 
 static int
 gg_copy_text(omc_gg_group *group, const omc_u8 *bytes, omc_size size)
 {
     if (size > sizeof(group->text)) return 0;
-    memcpy(group->text, bytes, size); group->text_size = size; return 1;
+    if (size != 0U && bytes == (const omc_u8 *)0) return 0;
+    if (size != 0U) memcpy(group->text, bytes, size);
+    group->text_size = size; return 1;
+}
+
+static int
+gg_utf8_decode(const omc_u8 *bytes, omc_size size, omc_size *used,
+               omc_u32 *codepoint)
+{
+    omc_u8 a;
+    omc_u8 b;
+    omc_u8 c;
+    omc_u8 d;
+    if (size == 0U) return 0;
+    a = bytes[0];
+    if (a < 0x80U) {
+        *used = 1U; *codepoint = (omc_u32)a; return 1;
+    }
+    if (a >= 0xC2U && a <= 0xDFU) {
+        if (size < 2U) return 0;
+        b = bytes[1];
+        if (b < 0x80U || b > 0xBFU) return 0;
+        *used = 2U; *codepoint = ((omc_u32)(a & 0x1FU) << 6)
+                                  | (omc_u32)(b & 0x3FU);
+        return 1;
+    }
+    if (a >= 0xE0U && a <= 0xEFU) {
+        if (size < 3U) return 0;
+        b = bytes[1]; c = bytes[2];
+        if (c < 0x80U || c > 0xBFU
+            || b < 0x80U || b > 0xBFU
+            || (a == 0xE0U && b < 0xA0U)
+            || (a == 0xEDU && b > 0x9FU)) return 0;
+        *used = 3U; *codepoint = ((omc_u32)(a & 0x0FU) << 12)
+                                  | ((omc_u32)(b & 0x3FU) << 6)
+                                  | (omc_u32)(c & 0x3FU);
+        return 1;
+    }
+    if (a < 0xF0U || a > 0xF4U || size < 4U) return 0;
+    b = bytes[1]; c = bytes[2]; d = bytes[3];
+    if (b < 0x80U || b > 0xBFU || c < 0x80U || c > 0xBFU
+        || d < 0x80U || d > 0xBFU
+        || (a == 0xF0U && b < 0x90U)
+        || (a == 0xF4U && b > 0x8FU)) return 0;
+    *used = 4U; *codepoint = ((omc_u32)(a & 0x07U) << 18)
+                              | ((omc_u32)(b & 0x3FU) << 12)
+                              | ((omc_u32)(c & 0x3FU) << 6)
+                              | (omc_u32)(d & 0x3FU);
+    return 1;
+}
+
+static int
+gg_valid_text(const omc_u8 *bytes, omc_size size, int ascii_only,
+              int *is_ascii)
+{
+    omc_size offset = 0U;
+    omc_size used;
+    omc_u32 codepoint;
+    int ascii = 1;
+    while (offset < size) {
+        if (!gg_utf8_decode(bytes + offset, size - offset, &used,
+                            &codepoint)) return 0;
+        if (codepoint == 0U || codepoint < 0x20U
+            || (codepoint >= 0x7FU && codepoint <= 0x9FU)) return 0;
+        if (codepoint > 0x7FU) ascii = 0;
+        if (ascii_only && codepoint > 0x7FU) return 0;
+        offset += used;
+    }
+    if (is_ascii != (int *)0) *is_ascii = ascii;
+    return 1;
+}
+
+static int
+gg_encoded_size(const omc_gg_group *group, omc_size *size_out)
+{
+    omc_size pos = 0U;
+    omc_size offset = 0U;
+    omc_size used;
+    omc_u32 codepoint;
+    omc_u32 units;
+    if (group->text_ascii) {
+        *size_out = 8U + group->text_size;
+        return *size_out <= 522U;
+    }
+    pos = 10U;
+    while (offset < group->text_size) {
+        if (!gg_utf8_decode((const omc_u8 *)group->text + offset,
+                            group->text_size - offset, &used,
+                            &codepoint)) return 0;
+        offset += used;
+        units = codepoint > 0xFFFFU ? 4U : 2U;
+        if (pos > 522U - units) return 0;
+        pos += units;
+    }
+    *size_out = pos;
+    return 1;
+}
+
+static int
+gg_build_encoded(const omc_gg_group *group, omc_u8 *output,
+                 omc_size capacity, omc_size *size_out, int little_endian)
+{
+    omc_size pos;
+    omc_size offset;
+    omc_size used;
+    omc_u32 codepoint;
+    omc_u32 unit;
+    omc_size size;
+    if (!gg_encoded_size(group, &size) || size > capacity) return 0;
+    if (group->text_ascii) {
+        memcpy(output, "ASCII\0\0\0", 8U);
+        if (group->text_size != 0U)
+            memcpy(output + 8U, group->text, group->text_size);
+        *size_out = size;
+        return 1;
+    }
+    memcpy(output, "UNICODE\0", 8U);
+    output[8] = little_endian ? 0xFFU : 0xFEU;
+    output[9] = little_endian ? 0xFEU : 0xFFU;
+    pos = 10U;
+    offset = 0U;
+    while (offset < group->text_size) {
+        if (!gg_utf8_decode((const omc_u8 *)group->text + offset,
+                            group->text_size - offset, &used,
+                            &codepoint)) return 0;
+        offset += used;
+        if (codepoint <= 0xFFFFU) {
+            unit = codepoint;
+            if (little_endian) {
+                output[pos++] = (omc_u8)(unit & 0xFFU);
+                output[pos++] = (omc_u8)(unit >> 8);
+            } else {
+                output[pos++] = (omc_u8)(unit >> 8);
+                output[pos++] = (omc_u8)(unit & 0xFFU);
+            }
+        } else {
+            omc_u32 scalar = codepoint - 0x10000U;
+            omc_u32 high = 0xD800U + (scalar >> 10);
+            omc_u32 low = 0xDC00U + (scalar & 0x3FFU);
+            if (little_endian) {
+                output[pos++] = (omc_u8)(high & 0xFFU);
+                output[pos++] = (omc_u8)(high >> 8);
+                output[pos++] = (omc_u8)(low & 0xFFU);
+                output[pos++] = (omc_u8)(low >> 8);
+            } else {
+                output[pos++] = (omc_u8)(high >> 8);
+                output[pos++] = (omc_u8)(high & 0xFFU);
+                output[pos++] = (omc_u8)(low >> 8);
+                output[pos++] = (omc_u8)(low & 0xFFU);
+            }
+        }
+    }
+    *size_out = pos;
+    return 1;
+}
+
+static int
+gg_text_matches(const omc_store *store, const omc_val *value,
+                const omc_gg_group *group)
+{
+    omc_const_bytes text;
+    omc_size size;
+    if (value->kind != OMC_VAL_TEXT
+        || !omc_value_shape_valid(value, &store->arena)) return 0;
+    text = omc_arena_view(&store->arena, value->u.ref);
+    size = text.size;
+    if (size == group->text_size)
+        return size == 0U || memcmp(text.data, group->text, size) == 0;
+    if (size == group->text_size + 1U && size != 0U
+        && text.data[size - 1U] == 0U) {
+        return group->text_size == 0U
+               || memcmp(text.data, group->text, group->text_size) == 0;
+    }
+    return 0;
+}
+
+static int
+gg_encoded_matches(const omc_gg_context *context, const omc_gg_group *group,
+                   const omc_val *value)
+{
+    omc_const_bytes bytes;
+    omc_u8 expected[522];
+    omc_size expected_size;
+    omc_size actual_size;
+    omc_size i;
+    if (value->kind != OMC_VAL_BYTES
+        || !omc_value_shape_valid(value, &context->source->arena)) return 0;
+    bytes = omc_arena_view(&context->source->arena, value->u.ref);
+    if (bytes.size >= 8U && memcmp(bytes.data, "ASCII\0\0\0", 8U) == 0) {
+        if (!group->text_ascii) return 0;
+        actual_size = bytes.size - 8U;
+        if (actual_size == group->text_size + 1U
+            && bytes.data[bytes.size - 1U] == 0U) --actual_size;
+        return actual_size == group->text_size
+               && (actual_size == 0U
+                   || memcmp(bytes.data + 8U, group->text, actual_size) == 0);
+    }
+    if (bytes.size < 10U || memcmp(bytes.data, "UNICODE\0", 8U) != 0
+        || group->text_ascii
+        || (bytes.size - 10U) % 2U != 0U)
+        return 0;
+    if (!gg_build_encoded(group, expected, sizeof(expected), &expected_size, 1))
+        return 0;
+    actual_size = bytes.size;
+    if (actual_size >= 12U && bytes.data[actual_size - 1U] == 0U
+        && bytes.data[actual_size - 2U] == 0U)
+        actual_size -= 2U;
+    if (actual_size != expected_size) return 0;
+    if (bytes.data[8] == 0xFFU && bytes.data[9] == 0xFEU)
+        return memcmp(bytes.data, expected, expected_size) == 0;
+    if (bytes.data[8] != 0xFEU || bytes.data[9] != 0xFFU) return 0;
+    for (i = 0U; i < expected_size; i += 2U) {
+        if (i < 8U) {
+            if (bytes.data[i] != expected[i]) return 0;
+        } else if (i == 8U) {
+            continue;
+        } else if (bytes.data[i] != expected[i + 1U]
+                   || bytes.data[i + 1U] != expected[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+gg_is_leap_year(omc_u32 year)
+{
+    return (year % 4U == 0U && (year % 100U != 0U || year % 400U == 0U));
+}
+
+static omc_u32
+gg_days_in_month(omc_u32 year, omc_u32 month)
+{
+    static const omc_u8 days[12] =
+        { 31U, 28U, 31U, 30U, 31U, 30U,
+          31U, 31U, 30U, 31U, 30U, 31U };
+    if (month == 2U && gg_is_leap_year(year)) return 29U;
+    return days[month - 1U];
+}
+
+static omc_gps_translation_status
+gg_fixed_digits(const omc_u8 *bytes, omc_size size, omc_u32 *out)
+{
+    omc_size i;
+    omc_u32 value = 0U;
+    if (size == 0U) return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+    for (i = 0U; i < size; ++i) {
+        if (bytes[i] < '0' || bytes[i] > '9')
+            return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+        value = value * 10U + (omc_u32)(bytes[i] - '0');
+    }
+    *out = value;
+    return OMC_GPS_TRANSLATION_OK;
+}
+
+static omc_gps_translation_status
+gg_reduce_rational(omc_u64 numer, omc_u64 denom, omc_urational *out)
+{
+    omc_u64 a;
+    omc_u64 b;
+    if (denom == 0U) return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+    a = numer;
+    b = denom;
+    while (b != 0U) {
+        omc_u64 remainder = a % b;
+        a = b;
+        b = remainder;
+    }
+    if (a == 0U) a = 1U;
+    numer /= a;
+    denom /= a;
+    if (numer > 0xFFFFFFFFU || denom > 0xFFFFFFFFU)
+        return OMC_GPS_TRANSLATION_UNSUPPORTED_PRECISION;
+    out->numer = (omc_u32)numer;
+    out->denom = (omc_u32)denom;
+    return OMC_GPS_TRANSLATION_OK;
+}
+
+static void
+gg_set_date(char *date, omc_u32 year, omc_u32 month, omc_u32 day)
+{
+    date[0] = (char)('0' + (year / 1000U) % 10U);
+    date[1] = (char)('0' + (year / 100U) % 10U);
+    date[2] = (char)('0' + (year / 10U) % 10U);
+    date[3] = (char)('0' + year % 10U);
+    date[4] = ':';
+    date[5] = (char)('0' + month / 10U);
+    date[6] = (char)('0' + month % 10U);
+    date[7] = ':';
+    date[8] = (char)('0' + day / 10U);
+    date[9] = (char)('0' + day % 10U);
+    date[10] = 0;
+}
+
+static omc_gps_translation_status
+gg_timestamp(const omc_store *store, const omc_val *value,
+             omc_gg_group *group)
+{
+    omc_const_bytes text;
+    omc_size zone;
+    omc_size seconds_size;
+    omc_u32 year;
+    omc_u32 month;
+    omc_u32 day;
+    omc_u32 hour;
+    omc_u32 minute;
+    omc_u32 second;
+    omc_u32 zone_hour = 0U;
+    omc_u32 zone_minute = 0U;
+    omc_u64 seconds_numer;
+    omc_u64 seconds_denom;
+    omc_gps_translation_status status;
+    int zone_negative = 0;
+    int has_fraction;
+
+    text = gg_value_text(store, value);
+    if (text.size < 20U) return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+    if (text.data[4] != '-' || text.data[7] != '-'
+        || text.data[10] != 'T' || text.data[13] != ':'
+        || text.data[16] != ':')
+        return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+    status = gg_fixed_digits(text.data, 4U, &year);
+    if (status != OMC_GPS_TRANSLATION_OK) return status;
+    status = gg_fixed_digits(text.data + 5U, 2U, &month);
+    if (status != OMC_GPS_TRANSLATION_OK) return status;
+    status = gg_fixed_digits(text.data + 8U, 2U, &day);
+    if (status != OMC_GPS_TRANSLATION_OK) return status;
+    status = gg_fixed_digits(text.data + 11U, 2U, &hour);
+    if (status != OMC_GPS_TRANSLATION_OK) return status;
+    status = gg_fixed_digits(text.data + 14U, 2U, &minute);
+    if (status != OMC_GPS_TRANSLATION_OK) return status;
+    if (year == 0U || month == 0U || month > 12U
+        || day == 0U || day > gg_days_in_month(year, month)
+        || hour > 23U || minute > 59U)
+        return OMC_GPS_TRANSLATION_VALUE_OUT_OF_RANGE;
+
+    if (text.data[text.size - 1U] == 'Z') {
+        zone = text.size - 1U;
+    } else {
+        if (text.size < 25U || (text.data[text.size - 6U] != '+'
+                                && text.data[text.size - 6U] != '-')
+            || text.data[text.size - 3U] != ':')
+            return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+        zone = text.size - 6U;
+        zone_negative = text.data[zone] == '-';
+        status = gg_fixed_digits(text.data + zone + 1U, 2U, &zone_hour);
+        if (status != OMC_GPS_TRANSLATION_OK) return status;
+        status = gg_fixed_digits(text.data + zone + 4U, 2U, &zone_minute);
+        if (status != OMC_GPS_TRANSLATION_OK) return status;
+        if (zone_hour > 23U || zone_minute > 59U)
+            return OMC_GPS_TRANSLATION_VALUE_OUT_OF_RANGE;
+    }
+    if (zone < 19U) return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+    seconds_size = zone - 17U;
+    has_fraction = seconds_size > 2U;
+    if (has_fraction && text.data[19] != '.')
+        return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+    if (!has_fraction && seconds_size != 2U)
+        return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+    status = gg_fixed_digits(text.data + 17U, 2U, &second);
+    if (status != OMC_GPS_TRANSLATION_OK) return status;
+    if (second > 59U) return OMC_GPS_TRANSLATION_VALUE_OUT_OF_RANGE;
+    status = gg_decimal(text.data + 17U, seconds_size,
+                        &seconds_numer, &seconds_denom);
+    if (status != OMC_GPS_TRANSLATION_OK) return status;
+    if (seconds_numer / seconds_denom >= 60U)
+        return OMC_GPS_TRANSLATION_VALUE_OUT_OF_RANGE;
+
+    {
+        omc_s32 total = (omc_s32)(hour * 60U + minute);
+        omc_s32 offset = (omc_s32)(zone_hour * 60U + zone_minute);
+        if (zone_negative) total += offset;
+        else total -= offset;
+        if (total < 0) {
+            total += 1440;
+            if (day == 1U) {
+                if (month == 1U) {
+                    if (year == 1U) return OMC_GPS_TRANSLATION_VALUE_OUT_OF_RANGE;
+                    --year; month = 12U;
+                } else {
+                    --month;
+                }
+                day = gg_days_in_month(year, month);
+            } else {
+                --day;
+            }
+        } else if (total >= 1440) {
+            total -= 1440;
+            if (day == gg_days_in_month(year, month)) {
+                day = 1U;
+                if (month == 12U) {
+                    if (year == 9999U) return OMC_GPS_TRANSLATION_VALUE_OUT_OF_RANGE;
+                    ++year; month = 1U;
+                } else {
+                    ++month;
+                }
+            } else {
+                ++day;
+            }
+        }
+        group->components[0].numer = (omc_u32)(total / 60);
+        group->components[0].denom = 1U;
+        group->components[1].numer = (omc_u32)(total % 60);
+        group->components[1].denom = 1U;
+    }
+    {
+        omc_u64 a = seconds_numer;
+        omc_u64 b = seconds_denom;
+        while (b != 0U) {
+            omc_u64 remainder = a % b;
+            a = b;
+            b = remainder;
+        }
+        if (a == 0U) a = 1U;
+        seconds_numer /= a;
+        seconds_denom /= a;
+    }
+    status = gg_reduce_rational(seconds_numer, seconds_denom,
+                                &group->components[2]);
+    if (status != OMC_GPS_TRANSLATION_OK) return status;
+    gg_set_date(group->date, year, month, day);
+    return OMC_GPS_TRANSLATION_OK;
 }
 
 static omc_gps_translation_status
@@ -283,11 +709,6 @@ gg_parse_group(omc_gg_context *context, omc_gg_group *group)
     const omc_store *store = context->source;
     const omc_val *value;
     omc_const_bytes text;
-    omc_u64 number;
-    omc_u64 h;
-    omc_u64 hour;
-    omc_u64 m;
-    omc_gps_translation_status status;
     value = &store->entries[group->source[0]].value;
     if (group->kind == OMC_GG_COORDINATE)
         return gg_coordinate(store, value, group->mapping == OMC_GPS_DEST_TRANSLATE_LATITUDE, group);
@@ -313,34 +734,107 @@ gg_parse_group(omc_gg_context *context, omc_gg_group *group)
             else if (text.size == 14U && memcmp(text.data, "Nautical miles", 14U) == 0) group->reference = 'N';
             else return OMC_GPS_TRANSLATION_INVALID_SOURCE;
         }
-        return gg_rational(store, &store->entries[group->source[1]].value,
-                           &group->magnitude);
+        {
+            omc_gps_translation_status rational_status;
+            rational_status = gg_rational(store,
+                                           &store->entries[group->source[1]].value,
+                                           &group->magnitude);
+            if (rational_status != OMC_GPS_TRANSLATION_OK)
+                return rational_status;
+            if ((group->mapping == OMC_GPS_NAV_TRANSLATE_TRACK
+                 || group->mapping == OMC_GPS_NAV_TRANSLATE_DIRECTION
+                 || group->mapping == OMC_GPS_DEST_TRANSLATE_BEARING)
+                && (omc_u64)group->magnitude.numer
+                   >= (omc_u64)group->magnitude.denom * 360U)
+                return OMC_GPS_TRANSLATION_VALUE_OUT_OF_RANGE;
+            return OMC_GPS_TRANSLATION_OK;
+        }
     }
     if (group->kind == OMC_GG_SINGLE_U16) {
         if (value->kind == OMC_VAL_TEXT) {
             text = gg_value_text(store, value);
-            if (text.size != 1U || (text.data[0] != '0' && text.data[0] != '1'))
+            if ((text.size == 1U && text.data[0] == '0')
+                || (text.size == 13U
+                    && memcmp(text.data, "No Correction", 13U) == 0))
+                group->short_value = 0U;
+            else if ((text.size == 1U && text.data[0] == '1')
+                     || (text.size == 22U
+                         && memcmp(text.data, "Differential Corrected", 22U) == 0))
+                group->short_value = 1U;
+            else
                 return OMC_GPS_TRANSLATION_INVALID_SOURCE;
-            group->short_value = (omc_u8)(text.data[0] - '0');
         } else if (value->kind == OMC_VAL_SCALAR && value->count == 1U
-                   && (value->elem_type == OMC_ELEM_U8 || value->elem_type == OMC_ELEM_U16)
-                   && value->u.u64 <= 1U)
-            group->short_value = (omc_u8)value->u.u64;
-        else return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+                   && (value->elem_type == OMC_ELEM_U8
+                       || value->elem_type == OMC_ELEM_U16
+                       || value->elem_type == OMC_ELEM_U32
+                       || value->elem_type == OMC_ELEM_U64
+                       || value->elem_type == OMC_ELEM_I8
+                       || value->elem_type == OMC_ELEM_I16
+                       || value->elem_type == OMC_ELEM_I32
+                       || value->elem_type == OMC_ELEM_I64)) {
+            if (value->elem_type == OMC_ELEM_I8
+                || value->elem_type == OMC_ELEM_I16
+                || value->elem_type == OMC_ELEM_I32
+                || value->elem_type == OMC_ELEM_I64) {
+                if (value->u.i64 < 0 || value->u.i64 > 1)
+                    return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+                group->short_value = (omc_u8)value->u.i64;
+            } else {
+                if (value->u.u64 > 1U)
+                    return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+                group->short_value = (omc_u8)value->u.u64;
+            }
+        } else return OMC_GPS_TRANSLATION_INVALID_SOURCE;
         return OMC_GPS_TRANSLATION_OK;
     }
     if (group->kind == OMC_GG_SINGLE_TEXT || group->kind == OMC_GG_PLAIN_TEXT
         || group->kind == OMC_GG_ENCODED_TEXT) {
+        if (group->mapping == OMC_GPS_QUALITY_TRANSLATE_MEASURE_MODE
+            && value->kind == OMC_VAL_SCALAR && value->count == 1U) {
+            omc_u64 mode;
+            if (value->elem_type == OMC_ELEM_I8
+                || value->elem_type == OMC_ELEM_I16
+                || value->elem_type == OMC_ELEM_I32
+                || value->elem_type == OMC_ELEM_I64) {
+                if (value->u.i64 < 0) return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+                mode = (omc_u64)value->u.i64;
+            } else if (value->elem_type == OMC_ELEM_U8
+                       || value->elem_type == OMC_ELEM_U16
+                       || value->elem_type == OMC_ELEM_U32
+                       || value->elem_type == OMC_ELEM_U64) {
+                mode = value->u.u64;
+            } else {
+                return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+            }
+            if (mode != 2U && mode != 3U)
+                return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+            group->text[0] = (char)('0' + (char)mode);
+            group->text_size = 1U;
+            return OMC_GPS_TRANSLATION_OK;
+        }
         text = gg_value_text(store, value);
         if (group->kind == OMC_GG_ENCODED_TEXT) {
             if (value->kind == OMC_VAL_BYTES) {
+                if (!omc_value_shape_valid(value, &store->arena))
+                    return OMC_GPS_TRANSLATION_INVALID_SOURCE;
                 text = omc_arena_view(&store->arena, value->u.ref);
                 if (text.size >= 8U && memcmp(text.data, "ASCII", 5U) == 0) {
                     text.data += 8U; text.size -= 8U;
                 }
             } else if (value->kind != OMC_VAL_TEXT) return OMC_GPS_TRANSLATION_INVALID_SOURCE;
         }
-        if (text.size == 0U || !gg_copy_text(group, text.data, text.size))
+        if (value->kind == OMC_VAL_TEXT
+            && (value->text_encoding != OMC_TEXT_ASCII
+                && value->text_encoding != OMC_TEXT_UTF8))
+            return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+        if (value->kind == OMC_VAL_TEXT
+            && !omc_value_shape_valid(value, &store->arena))
+            return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+        if (!gg_copy_text(group, text.data, text.size))
+            return OMC_GPS_TRANSLATION_INVALID_SOURCE;
+        if (!gg_valid_text(text.data, text.size,
+                           group->kind != OMC_GG_ENCODED_TEXT,
+                           &group->text_ascii))
             return OMC_GPS_TRANSLATION_INVALID_SOURCE;
         if (group->kind == OMC_GG_SINGLE_TEXT) {
             if (group->mapping == OMC_GPS_QUALITY_TRANSLATE_STATUS) {
@@ -358,36 +852,8 @@ gg_parse_group(omc_gg_context *context, omc_gg_group *group)
         }
         return OMC_GPS_TRANSLATION_OK;
     }
-    if (group->kind == OMC_GG_TIMESTAMP) {
-        text = gg_value_text(store, value);
-        if (text.size < 20U || text.data[4] != '-' || text.data[7] != '-'
-            || text.data[10] != 'T' || text.data[13] != ':' || text.data[16] != ':')
-            return OMC_GPS_TRANSLATION_INVALID_SOURCE;
-        status = gg_digits(text.data + 11U, 2U, &hour);
-        if (status != OMC_GPS_TRANSLATION_OK) return status;
-        status = gg_digits(text.data + 14U, 2U, &m);
-        if (status != OMC_GPS_TRANSLATION_OK) return status;
-        if (hour > 23U || m > 59U) return OMC_GPS_TRANSLATION_VALUE_OUT_OF_RANGE;
-        status = gg_decimal(text.data + 17U, text.size - 17U - (text.data[text.size - 1U] == 'Z' ? 1U : 0U),
-                            &number, &h);
-        if (status != OMC_GPS_TRANSLATION_OK || h == 0U || number / h >= 60U)
-            return OMC_GPS_TRANSLATION_VALUE_OUT_OF_RANGE;
-        {
-            omc_u64 a = number; omc_u64 b = h;
-            while (b != 0U) { omc_u64 r = a % b; a = b; b = r; }
-            if (a == 0U) a = 1U;
-            group->components[2].numer = (omc_u32)(number / a);
-            group->components[2].denom = (omc_u32)(h / a);
-        }
-        group->components[0].numer = (omc_u32)hour; group->components[0].denom = 1U;
-        group->components[1].numer = (omc_u32)m; group->components[1].denom = 1U;
-        if (text.size < 20U || text.data[text.size - 1U] != 'Z') return OMC_GPS_TRANSLATION_INVALID_SOURCE;
-        if (text.size < 10U || !gg_copy_text((omc_gg_group *)group, text.data, 10U)) return OMC_GPS_TRANSLATION_INVALID_SOURCE;
-        memcpy(group->date, text.data, 4U); group->date[4] = ':';
-        group->date[5] = (char)text.data[5]; group->date[6] = (char)text.data[6]; group->date[7] = ':';
-        group->date[8] = (char)text.data[8]; group->date[9] = (char)text.data[9]; group->date[10] = 0;
-        return OMC_GPS_TRANSLATION_OK;
-    }
+    if (group->kind == OMC_GG_TIMESTAMP)
+        return gg_timestamp(store, value, group);
     return OMC_GPS_TRANSLATION_INVALID_SOURCE;
 }
 
@@ -406,7 +872,9 @@ gg_native_match(const omc_gg_context *context, const omc_gg_group *group,
                 return gg_array_equal(context->source, value,
                                       group->components, 3U);
             text = gg_value_text(context->source, value);
-            return text.size == 1U && text.data[0] == (omc_u8)group->reference;
+            return (text.size == 1U && text.data[0] == (omc_u8)group->reference)
+                   || (text.size == 2U && text.data[0] == (omc_u8)group->reference
+                       && text.data[1] == 0U);
         }
         if (group->kind == OMC_GG_TIMESTAMP) {
             text = gg_value_text(context->source, value);
@@ -418,26 +886,53 @@ gg_native_match(const omc_gg_context *context, const omc_gg_group *group,
         return value->kind == OMC_VAL_SCALAR && value->elem_type == OMC_ELEM_URATIONAL
                && gg_ratio_equal(value->u.ur, group->magnitude);
     if (group->kind == OMC_GG_RATIONAL_PAIR)
-        return member == 0U ? (value->kind == OMC_VAL_TEXT && gg_value_text(context->source, value).size == 1U && gg_value_text(context->source, value).data[0] == (omc_u8)group->reference)
+        return member == 0U ? ((value->kind == OMC_VAL_TEXT
+                                && gg_value_text(context->source, value).size == 1U
+                                && gg_value_text(context->source, value).data[0] == (omc_u8)group->reference)
+                               || (value->kind == OMC_VAL_TEXT
+                                   && gg_value_text(context->source, value).size == 2U
+                                   && gg_value_text(context->source, value).data[0] == (omc_u8)group->reference
+                                   && gg_value_text(context->source, value).data[1] == 0U))
                             : (value->kind == OMC_VAL_SCALAR && value->elem_type == OMC_ELEM_URATIONAL && gg_ratio_equal(value->u.ur, group->magnitude));
     if (group->kind == OMC_GG_SINGLE_U16)
         return value->kind == OMC_VAL_SCALAR && (value->elem_type == OMC_ELEM_U8 || value->elem_type == OMC_ELEM_U16) && value->u.u64 == group->short_value;
-    if (group->kind == OMC_GG_PLAIN_TEXT || group->kind == OMC_GG_SINGLE_TEXT) {
-        text = gg_value_text(context->source, value);
-        return text.size == group->text_size && memcmp(text.data, group->text, text.size) == 0;
+    if (group->kind == OMC_GG_PLAIN_TEXT || group->kind == OMC_GG_SINGLE_TEXT)
+        return gg_text_matches(context->source, value, group);
+    return gg_encoded_matches(context, group, value);
+}
+
+static int
+gg_group_removes_tag(const omc_gg_context *context, omc_u16 tag)
+{
+    omc_u32 i;
+    omc_u32 j;
+    for (i = 0U; i < context->group_count; ++i) {
+        const omc_gg_group *group = &context->groups[i];
+        if (!group->selected || !group->apply || group->present)
+            continue;
+        for (j = 0U; j < group->native_count; ++j)
+            if (group->tags[j] == tag)
+                return 1;
     }
-    if (value->kind == OMC_VAL_BYTES) {
-        text = omc_arena_view(&context->source->arena, value->u.ref);
-        if (text.size >= 8U && memcmp(text.data, "ASCII", 5U) == 0) {
-            text.data += 8U;
-            text.size -= 8U;
-        }
-        return text.size == group->text_size
-               && memcmp(text.data, group->text, text.size) == 0;
+    return 0;
+}
+
+static int
+gg_has_remaining_gps(const omc_gg_context *context)
+{
+    omc_size i;
+    for (i = 0U; i < context->source->entry_count; ++i) {
+        const omc_entry *entry = &context->source->entries[i];
+        if ((entry->flags & OMC_ENTRY_FLAG_DELETED) != 0U
+            || entry->key.kind != OMC_KEY_EXIF_TAG
+            || !gg_ref_equal(&context->source->arena,
+                             entry->key.u.exif_tag.ifd, k_gg_ifd)
+            || entry->key.u.exif_tag.tag == 0U)
+            continue;
+        if (!gg_group_removes_tag(context, entry->key.u.exif_tag.tag))
+            return 1;
     }
-    text = gg_value_text(context->source, value);
-    return text.size == group->text_size
-           && memcmp(text.data, group->text, text.size) == 0;
+    return 0;
 }
 
 static omc_status
@@ -446,7 +941,8 @@ gg_make_value(omc_gg_context *context, const omc_gg_group *group,
 {
     omc_byte_ref ref;
     omc_urational components[3];
-    omc_u8 prefix[8] = { 'A','S','C','I','I',0U,0U,0U };
+    omc_u8 encoded[522];
+    omc_size encoded_size;
     if (group->kind == OMC_GG_COORDINATE) {
         if (member == 0U) {
             if (omc_arena_append(&context->edit.arena, &group->reference, 1U, &ref) != OMC_STATUS_OK) return OMC_STATUS_NO_MEMORY;
@@ -481,9 +977,11 @@ gg_make_value(omc_gg_context *context, const omc_gg_group *group,
         if (omc_arena_append(&context->edit.arena, group->text, group->text_size, &ref) != OMC_STATUS_OK) return OMC_STATUS_NO_MEMORY;
         omc_val_make_text(value, ref, OMC_TEXT_ASCII); return OMC_STATUS_OK;
     }
-    if (omc_arena_append(&context->edit.arena, prefix, sizeof(prefix), &ref) != OMC_STATUS_OK) return OMC_STATUS_NO_MEMORY;
-    if (omc_arena_append(&context->edit.arena, group->text, group->text_size, &ref) != OMC_STATUS_OK) return OMC_STATUS_NO_MEMORY;
-    ref.offset -= 8U; ref.size += 8U; omc_val_make_bytes(value, ref); return OMC_STATUS_OK;
+    if (!gg_build_encoded(group, encoded, sizeof(encoded), &encoded_size, 1))
+        return OMC_STATUS_STATE;
+    if (omc_arena_append(&context->edit.arena, encoded, encoded_size, &ref) != OMC_STATUS_OK)
+        return OMC_STATUS_NO_MEMORY;
+    omc_val_make_bytes(value, ref); return OMC_STATUS_OK;
 }
 
 static omc_status
@@ -557,9 +1055,9 @@ gg_apply(omc_gg_context *context)
             context->result.failed_source = group->source[0];
             return context->result;
         }
-        if (group->present && group->native_seen[0] == 1U && group->matches[0] && (group->native_count == 1U || (group->native_seen[1] == 1U && group->matches[1]))) { ++context->result.groups_unchanged; continue; }
+        if (group->present && group->native_seen[0] == 1U && group->matches[0] && (group->native_count == 1U || (group->native_seen[1] == 1U && group->matches[1]))) { if (context->version_count == 0U) context->need_version = 1; ++context->result.groups_unchanged; continue; }
         group->apply = 1;
-        if (group->present) context->need_version = context->need_version || group->kind == OMC_GG_TIMESTAMP || group->mapping == OMC_GPS_QUALITY_TRANSLATE_DIFFERENTIAL || group->mapping == OMC_GPS_QUALITY_TRANSLATE_ERROR || group->kind == OMC_GG_ENCODED_TEXT;
+        if (group->present) context->need_version = 1;
         else context->removed_group = 1;
         for (j = 0U; j < group->native_count; ++j) {
             if (!group->present) context->operations += group->native_seen[j];
@@ -567,6 +1065,11 @@ gg_apply(omc_gg_context *context)
             else context->operations += (omc_u64)group->native_seen[j] - 1U + (group->matches[j] ? 0U : 1U);
         }
         ++context->result.groups_translated;
+    }
+    if (context->removed_group && context->version_count != 0U
+        && !gg_has_remaining_gps(context)) {
+        context->remove_version = 1;
+        ++context->operations;
     }
     if (context->need_version && context->version_count == 0U) { ++context->added; ++context->operations; }
     if (context->added > context->opts.max_added_entries) return (context->result.status = OMC_GPS_TRANSLATION_ENTRY_LIMIT, context->result);
@@ -586,6 +1089,14 @@ gg_apply(omc_gg_context *context)
             }
             if (group->present && group->native_seen[j] == 0U) { status = gg_make_value(context, group, j, &value); if (status == OMC_STATUS_OK) status = gg_append(context, group, j, &value); ++context->result.entries_added; if (status != OMC_STATUS_OK) { context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY; return context->result; } }
         }
+    }
+    if (context->remove_version) {
+        status = omc_edit_tombstone(&context->edit, context->version_entry);
+        if (status != OMC_STATUS_OK) {
+            context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY;
+            return context->result;
+        }
+        ++context->result.entries_removed;
     }
     if (context->need_version && context->version_count == 0U) {
         omc_gg_group version_group; memset(&version_group, 0, sizeof(version_group)); version_group.source[0] = context->version_source; version_group.source_count = 1U; version_group.tags[0] = 0U; version_group.kind = OMC_GG_PLAIN_TEXT;
@@ -632,7 +1143,7 @@ gg_translate(const omc_store *source, omc_store *out,
         }
         for (j = 0U; j < group->source_count; ++j) { found = found || props[j].first != OMC_INVALID_ENTRY_ID; dirty = dirty || props[j].dirty; }
         if ((context.opts.mappings & group->mapping) == 0U || !found || (!context.opts.all_sources && !dirty)) continue;
-        group->selected = 1; for (j = 0U; j < group->source_count; ++j) { if (props[j].duplicate != OMC_INVALID_ENTRY_ID) { context.result.status = OMC_GPS_TRANSLATION_AMBIGUOUS_SOURCE; context.result.failed_mapping = group->mapping; context.result.failed_source = props[j].duplicate; return context.result; } if (props[j].first == OMC_INVALID_ENTRY_ID) { context.result.status = OMC_GPS_TRANSLATION_INCOMPLETE_SOURCE; context.result.failed_mapping = group->mapping; return context.result; } group->source[j] = props[j].first; ++context.result.source_properties; if (source->entries[group->source[j]].value.kind == OMC_VAL_TEXT) { omc_size size = source->entries[group->source[j]].value.u.ref.size; if (size > context.opts.max_text_bytes_per_property || size > context.opts.max_total_text_bytes || context.text_bytes > context.opts.max_total_text_bytes - size) { context.result.status = OMC_GPS_TRANSLATION_VALUE_TOO_LONG; context.result.failed_mapping = group->mapping; context.result.failed_source = group->source[j]; return context.result; } context.text_bytes += size; } }
+        group->selected = 1; for (j = 0U; j < group->source_count; ++j) { if (props[j].duplicate != OMC_INVALID_ENTRY_ID) { context.result.status = OMC_GPS_TRANSLATION_AMBIGUOUS_SOURCE; context.result.failed_mapping = group->mapping; context.result.failed_source = props[j].duplicate; return context.result; } if (props[j].first == OMC_INVALID_ENTRY_ID) { context.result.status = OMC_GPS_TRANSLATION_INCOMPLETE_SOURCE; context.result.failed_mapping = group->mapping; return context.result; } if (context.result.source_properties >= context.opts.max_source_properties) { context.result.status = OMC_GPS_TRANSLATION_SOURCE_LIMIT; context.result.failed_mapping = group->mapping; context.result.failed_source = props[j].first; return context.result; } group->source[j] = props[j].first; ++context.result.source_properties; if (source->entries[group->source[j]].value.kind == OMC_VAL_TEXT) { omc_size size = source->entries[group->source[j]].value.u.ref.size; if (size > context.opts.max_text_bytes_per_property || size > context.opts.max_total_text_bytes || context.text_bytes > context.opts.max_total_text_bytes - size) { context.result.status = OMC_GPS_TRANSLATION_VALUE_TOO_LONG; context.result.failed_mapping = group->mapping; context.result.failed_source = group->source[j]; return context.result; } context.text_bytes += size; } }
         group->present = (source->entries[group->source[0]].flags & OMC_ENTRY_FLAG_DELETED) == 0U;
         for (j = 1U; j < group->source_count; ++j) if (((source->entries[group->source[j]].flags & OMC_ENTRY_FLAG_DELETED) == 0U) != group->present) { context.result.status = OMC_GPS_TRANSLATION_INCOMPLETE_SOURCE; context.result.failed_mapping = group->mapping; context.result.failed_source = group->source[j]; return context.result; }
         if (group->present) { omc_gps_translation_status s = gg_parse_group(&context, group); if (s != OMC_GPS_TRANSLATION_OK) { context.result.status = s; context.result.failed_mapping = group->mapping; context.result.failed_source = group->source[0]; return context.result; } }
@@ -652,7 +1163,7 @@ omc_translate_xmp_gps_navigation(const omc_store *source, omc_store *out, const 
     if (opts != (const omc_gps_translation_opts *)0) { local = *opts; if (local.max_added_entries == 7U) local.max_added_entries = 9U; opts = &local; }
     groups[0].kind = OMC_GG_TIMESTAMP; groups[0].mapping = OMC_GPS_NAV_TRANSLATE_TIMESTAMP; groups[0].paths[0] = "GPSTimeStamp"; groups[0].source_count = 1U; groups[0].tags[0] = 7U; groups[0].tags[1] = 29U;
     groups[1].kind = OMC_GG_RATIONAL_PAIR; groups[1].mapping = OMC_GPS_NAV_TRANSLATE_SPEED; groups[1].paths[0] = "GPSSpeedRef"; groups[1].paths[1] = "GPSSpeed"; groups[1].source_count = 2U; groups[1].tags[0] = 12U; groups[1].tags[1] = 13U;
-    groups[2].kind = OMC_GG_RATIONAL_PAIR; groups[2].mapping = OMC_GPS_NAV_TRANSLATE_TRACK; groups[2].paths[0] = "GPSTrackRef"; groups[2].paths[1] = "GPSTrack"; groups[2].source_count = 2U; groups[2].tags[0] = 23U; groups[2].tags[1] = 24U;
+    groups[2].kind = OMC_GG_RATIONAL_PAIR; groups[2].mapping = OMC_GPS_NAV_TRANSLATE_TRACK; groups[2].paths[0] = "GPSTrackRef"; groups[2].paths[1] = "GPSTrack"; groups[2].source_count = 2U; groups[2].tags[0] = 14U; groups[2].tags[1] = 15U;
     groups[3].kind = OMC_GG_RATIONAL_PAIR; groups[3].mapping = OMC_GPS_NAV_TRANSLATE_DIRECTION; groups[3].paths[0] = "GPSImgDirectionRef"; groups[3].paths[1] = "GPSImgDirection"; groups[3].source_count = 2U; groups[3].tags[0] = 16U; groups[3].tags[1] = 17U;
     return gg_translate(source, out, opts, groups, 4U, OMC_GPS_NAV_TRANSLATE_ALL);
 }

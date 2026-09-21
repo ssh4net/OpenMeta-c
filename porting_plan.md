@@ -378,8 +378,32 @@ still paired C++ coverage of all 32 standard GPS tags with file persistence.
 The pinned C++ 0.5.10 `MetadataGps*` filter passes 64/64 tests. The C primary
 GPS parity target passes both cross-language cases, and the C Release and
 ASan/UBSan suites pass the existing GPS-group and transfer-persistence tests.
-The four additional C group APIs still have representative direct tests only;
-the full 32-tag paired persistence matrix remains the next UP3 gate.
+At that point the four additional C group APIs still had representative direct
+tests only; the full 32-tag paired persistence matrix was the next UP3 gate.
+
+## 2026-09-21 UP3 paired GPS group persistence batch
+
+The next UP3 batch closes the C-side paired matrix for the complete standard
+GPS tag range. `omc_test_gps_groups` now exercises navigation, destination,
+receiver-quality and encoded-text writeback with all of their native members,
+including `GPSVersionID`, and round-trips each result through the canonical
+TIFF serializer and EXIF decoder. Together with `omc_test_gps_translation`,
+the direct matrix covers tags `0x0000` through `0x001F`; the existing transfer
+persistence fixture also checks the complete native GPS record.
+
+The group implementation now maps navigation track to tags `0x000E` and
+`0x000F`, emits version `2.3.0.0` for every active group, removes that version
+only after the last GPS value is removed, and retains equivalent native text
+terminators and UTF-16LE/BE encodings. Timestamp input accepts exact UTC
+offsets, validates calendar boundaries, normalizes date changes, and retains
+representable fractions. Quality aliases, typed integer modes, bearing/track
+range checks, and UTF-8 GPS text conversion are covered by the direct tests.
+
+The Release and ASan/UBSan Clang 20 suites pass `47/47` after this batch. The
+pinned C++ 0.5.10 GPS filter remains `64/64`, and the primary cross-language
+parity target passes its two cases. A dedicated C/C++ parity target for the
+four group APIs and broader corpus evidence remain open; the C API keeps its
+bounded group text storage and does not claim test-for-test C++ coverage.
 
 UP4 starts with `omc_translate_xmp_exif_text()`: ExifVersion, FlashpixVersion,
 UserComment and ImageTitle. It preserves ASCII, EXIF 3 UTF-8 and legacy
