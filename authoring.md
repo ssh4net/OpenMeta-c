@@ -206,8 +206,9 @@ the C transaction contract.
 The direct fixture `omc_test_gps_translation` covers exact fractions, poles,
 typed altitude values, conflicts, limits, idempotence, removal and canonical
 TIFF serialize/readback. `omc_test_gps_parity` compares primary and altitude
-only cases with C++ 0.5.10. Navigation, destination, receiver/quality and GPS
-text families remain the later UP3 groups.
+only cases with C++ 0.5.10. `omc_test_gps_groups` covers representative
+navigation, destination, receiver/quality and GPS text mappings. Paired all-tag
+fixtures and JPEG/Classic TIFF/BigTIFF persistence remain the UP3 exit gate.
 
 The same C++ pin also exposed one UP1 XMP reader correction. Camera/lens/spectral
 text values in the EXIF and CIPA namespaces now retain boundary whitespace for
@@ -215,6 +216,69 @@ attribute, `rdf:resource` and element forms; unrelated properties keep the
 existing trim behavior. `omc_test_up1` covers this rule and the classic/BigTIFF
 zero-root versus malformed nonzero-root result through contiguous and callback
 EXIF paths.
+
+## GPS navigation, destination, quality and text groups
+
+The four additional GPS APIs are bounded transactions over the same initialized
+source/output contract:
+
+```c
+omc_translate_xmp_gps_navigation(source, out, &opts);
+omc_translate_xmp_gps_destination(source, out, &opts);
+omc_translate_xmp_gps_quality(source, out, &opts);
+omc_translate_xmp_gps_text(source, out, &opts);
+```
+
+Use the separate `OMC_GPS_NAV_TRANSLATE_*`, `OMC_GPS_DEST_TRANSLATE_*`,
+`OMC_GPS_QUALITY_TRANSLATE_*` and `OMC_GPS_TEXT_TRANSLATE_*` masks. The
+navigation group covers timestamp, speed, track and image direction. The
+destination group covers latitude, longitude, bearing and distance. Quality
+covers status, measure mode, DOP, differential and horizontal error. Text covers
+satellites, map datum, processing method and area information. Inputs accept
+bounded decimal/rational values, exact DMS coordinates, the C++ unit aliases and
+ASCII-prefixed GPS text. The implementation injects the required GPS version
+for groups that need it and keeps source/output unchanged on rejection.
+
+`omc_test_gps_groups` is a direct smoke and transaction gate. Full C++ paired
+fixtures, all 32 standard GPS IDs, and JPEG/Classic TIFF/BigTIFF persistence are
+still UP3 acceptance work.
+
+## Unified prepared metadata patch core
+
+`omc_metadata_patch_prepare()` creates one bounded plan for canonical EXIF TIFF
+and portable scalar XMP. Requests bind a key plus occurrence and retain the
+compiled value shape. `omc_metadata_patch_instance_create()` makes an independent
+worker payload. `omc_metadata_patch_apply()` validates the complete update batch
+before changing either payload, enforces fixed EXIF widths and escaped XMP
+widths, and rejects duplicate, foreign or stale handles. `omc_metadata_patch_replay()`
+calls the host synchronously in EXIF-then-XMP order.
+
+The C plan uses a caller-issued nonzero `plan_id`, bounded request/output limits,
+canonical serializers and explicit reset functions. It is the first UP2 core
+slice; alias detection, exact serializer-recorded slot binding for repeated raw
+values and the C++ allocation-free worker gate remain open. Host synchronization,
+I/O framing and rollback of callback side effects remain outside the library.
+`omc_test_metadata_patch` covers mixed-family preparation, escaped replacement,
+fixed-width EXIF replacement, batch failure and replay order.
+
+## EXIF text and version family
+
+`omc_translate_xmp_exif_text()` uses the separate
+`OMC_EXIF_TEXT_TRANSLATE_*` mask domain for `ExifVersion` (0x9000),
+`FlashpixVersion` (0xA000), `UserComment` (0x9286) and `ImageTitle` (0xA436).
+It accepts exact four-digit versions, `FlashpixVersion` 0100, scalar or
+`x-default` UserComment, and the exact exifEX ImageTitle path. ASCII comments
+use the EXIF `ASCII` marker. EXIF 3 comments use UTF-8 after the `UNICODE`
+marker; older versions use a `UNICODE` marker, UTF-16LE BOM and surrogate-pair
+encoding. ImageTitle requires effective ExifVersion 0300 or newer. Conflict,
+dirty-tombstone, text-budget and output-preservation rules are explicit in the
+status/result structures.
+
+The C++ 0.5.10 reference contains ten additional exifEX text fields. They are
+deliberately deferred to a later UP4 group so this first family can be validated
+through canonical TIFF serialization and reread without widening the existing
+translation defaults. `omc_test_exif_text` covers ASCII and UTF-16LE comments,
+conflicts, idempotence and canonical TIFF readback.
 
 ## Verification and remaining scope
 
@@ -287,10 +351,9 @@ C++ tree was used; later uncommitted EXIF 3.1 correction fields were not mixed
 into this comparison.
 
 The [upstream 0.5.10 roadmap](porting_plan.md#upstream-0510-convergence-roadmap)
-now targets `metadata_patch.h` for a future C EXIF/scalar-XMP patch primitive.
-The removed C++ EXIF-only patch API will not be ported first. This is planned
-UP2 work; the current C serializers and transfer replay are not patch workers.
-Current C translation defaults remain unchanged. GPS, the committed
+now records the initial C `metadata_patch.h` EXIF/scalar-XMP patch core. The
+removed C++ EXIF-only patch API will not be ported first. Current C translation
+defaults remain unchanged. Paired GPS persistence, the remaining committed
 capture/identity families, structured capture and the EXIF 3.1
 development/correction family have separate planned batches. The intended XMP
 name for the latter retains the C++ spelling `DevelopmentCharacterstic`; the

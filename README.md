@@ -43,11 +43,12 @@ reference currently covers 75 distinct capture tags and 32 standard GPS tag
 IDs; these are the next C-port comparison families, not C implementation claims.
 
 The current local convergence batch uses committed C++ 0.5.10 as its reference.
-It adds the first primary GPS XMP-to-EXIF slice (latitude, longitude and
-altitude), canonical TIFF readback, and the first UP1 TIFF-root and scoped XMP
-whitespace corrections. Full GPS navigation, destination, quality and text
-families remain planned; the broad 0.5.10 inventory residuals remain visible in
-the porting plan.
+It adds JP2/JPH EXIF/XMP replacement, a first unified EXIF/scalar-XMP prepared
+patch core, all four additional GPS reverse-translation groups, the first EXIF
+text/version family, canonical TIFF readback, and the UP1 TIFF-root and scoped
+XMP whitespace corrections. Full paired GPS persistence, repeated patch-slot
+binding, the remaining EXIF text fields and broader capture/identity families
+remain open; the 0.5.10 inventory residuals remain visible in the porting plan.
 
 Version 0.8.0 adds bounded BMFF scene/derived-image summaries, structured XMP,
 JUMBF and MakerNote parity fixes, standalone XMP callbacks and Canon CMT3.
