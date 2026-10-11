@@ -3,6 +3,12 @@
 The public C authoring operations use the existing store, arena, value, and
 edit types. They require no file handle or C++ runtime.
 
+The current source-reviewed target is C++ 0.8.11 (`0242459f`). Implemented C
+behavior and the historical 0.4.132/0.5.10 gates below retain their original
+scope. The [active roadmap](porting_plan.md#upstream-0811-convergence-roadmap)
+now prioritizes explicit native edit intent before further family expansion;
+this documentation refresh does not change the C API or establish 0.8.11 parity.
+
 ## Lifetime and failure contracts
 
 Initialize every output store before calling `omc_edit_commit()`,
@@ -210,7 +216,9 @@ cases with C++ 0.5.10 and one complete case for each additional GPS group. The
 current `omc_test_gps_groups` matrix covers all four additional group APIs, all
 of their native members, UTF-8 GPS text, offset-normalized timestamps, removal
 and canonical TIFF serialize/readback. JPEG/Classic TIFF/BigTIFF transfer
-lifecycle cases remain open.
+lifecycle cases remain open. C++ 0.8.0 advanced all five GPS contracts to v2;
+the historical cases do not test its clean-value promotion or absent-key
+deletion intent.
 
 The same C++ pin also exposed one UP1 XMP reader correction. Camera/lens/spectral
 text values in the EXIF and CIPA namespaces now retain boundary whitespace for
@@ -245,8 +253,9 @@ encodings, and keeps source/output unchanged on rejection.
 `omc_test_gps_groups` is the C-side paired transaction and TIFF persistence
 gate. Together with `omc_test_gps_translation`, it covers all 32 standard GPS
 IDs. The dedicated C/C++ parity target now covers one complete case for each of
-the four group APIs. JPEG/Classic TIFF/BigTIFF transfer lifecycle coverage
-remains UP3 acceptance work.
+the four group APIs against 0.5.10. UP3 now also requires the current v2 native
+ownership behavior, LE/BE classic TIFF/BigTIFF and native DNG editing through
+the UP6a transfer foundation. No destination version may be inferred or upgraded.
 
 ## Unified prepared metadata patch core
 
@@ -279,8 +288,8 @@ encoding. ImageTitle requires effective ExifVersion 0300 or newer. Conflict,
 dirty-tombstone, text-budget and output-preservation rules are explicit in the
 status/result structures.
 
-The C++ 0.5.10 reference contains ten additional exifEX text fields. They are
-deliberately deferred to a later UP4 group so this first family can be validated
+The reference EXIF-text API has thirteen fields; nine remain beyond these four.
+They are deferred to a later UP4 group so this first family can be validated
 through canonical TIFF serialization and reread without widening the existing
 translation defaults. `omc_test_exif_text` covers ASCII and UTF-16LE comments,
 conflicts, idempotence and canonical TIFF readback.
@@ -336,8 +345,8 @@ The separate reading/decoding checkpoint covers structured XMP and bounded
 BMFF summaries. Broader source-processing classification and native mapping
 groups beyond the pinned reference remain separate acceptance work.
 
-The current C++ reference is 0.5.10 at `8594030c`. Since the 0.10.0 C gate,
-the reference added transactional APEX, focal-plane/subject, exact capture,
+The previous focused C++ reference was 0.5.10 at `8594030c`. Since the 0.10.0
+C gate, the reference added transactional APEX, focal-plane/subject, exact capture,
 environment, encoding, composite, structured-capture and EXIF-text/UserComment
 writeback, plus shared validation for 64 reverse targets, five legal Interop
 fields, three structural pointers and all 32 standard GPS tag IDs. These are
@@ -355,11 +364,53 @@ new direct GPS, paired GPS, UP1 and existing XMP targets pass. The committed
 C++ tree was used; later uncommitted EXIF 3.1 correction fields were not mixed
 into this comparison.
 
-The [upstream 0.5.10 roadmap](porting_plan.md#upstream-0510-convergence-roadmap)
-now records the initial C `metadata_patch.h` EXIF/scalar-XMP patch core. The
+The historical [upstream 0.5.10 roadmap](porting_plan.md#upstream-0510-convergence-roadmap)
+records the initial C `metadata_patch.h` EXIF/scalar-XMP patch core. The
 removed C++ EXIF-only patch API will not be ported first. Current C translation
 defaults remain unchanged. Paired GPS persistence, the remaining committed
 capture/identity families, structured capture and the EXIF 3.1
 development/correction family have separate planned batches. The intended XMP
 name for the latter retains the C++ spelling `DevelopmentCharacterstic`; the
 host policy for `ExifVersion` 0300 versus 0310 must be explicit.
+
+## 0.8.11 native lifecycle target
+
+Translation now needs to preserve an edit's meaning when source and destination
+metadata differ. The implementation gate covers each owning group and policy:
+
+- Omitted or ineligible sources preserve destination values. PreserveExisting
+  keeps an active native owner, including an exact match, without promotion.
+- Accepted exact clean native values gain Dirty while retaining value bytes,
+  encoding, rational components, wire hints/counts, origin and byte order.
+- Complete eligible deletion retains native Dirty|Deleted intent even when
+  native keys are absent. Reuse existing dirty intent and promote clean
+  tombstones under the family's documented policy. Development/learning absent
+  deletion requires ReplaceExisting; do not apply one generic policy to all APIs.
+- Preflight counts promotions, additions and duplicate removal. Repeated calls
+  do not grow intent; late failures preserve source and output. Separate C
+  translation calls require host staging before aggregate publication.
+
+The C GPS implementations currently return unchanged for exact native values
+and remove only existing native members. The C overlay already supports some
+destination deletion, but it is LE-only, selects Deleted without a Dirty check,
+and has no equivalent prepared per-IFD intent/merge contract. UP6a must carry
+the current selected-edit semantics through supported edit, stream and package
+consumers, reject unrepresentable operations before callbacks, and retain
+unselected destination metadata, MakerNotes and media ranges.
+
+C++ 0.8.11 has seven IFD0 removal tags, 84 ExifIFD merge/removal tags and GPS
+value tags 1-31. Keep whole-directory clearing distinct from selected removal.
+GPS active merge requires a supplied version equal to the destination version;
+removal-only updates preserve it while other GPS values remain. Source filtering
+does not request destination redaction. Existing/template DNG keeps its target
+version unless an eligible dirty replacement applies; only a minimal fresh
+scaffold synthesizes a missing version.
+
+Port the remaining nine EXIF-text fields and the current version/charset rules
+with retained-NUL wire counts, type-129 text and BOM preservation. Then add the
+six development fields and LearningOptOutIn with explicit host policy 300/310,
+exact structured paths and checked numeric endian conversion. The five-field
+profile route (ImageDescription, Artist, scalar Copyright, ColorSpace,
+RelatedSoundFile) is an additional v1 transaction; its full native lifecycle is
+still a C++ follow-up. LightSource also remains contract v1. Detached validation
+does not establish a complete destination EXIF profile, ICC or audio authority.

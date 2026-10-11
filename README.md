@@ -24,7 +24,7 @@ The C library may later serve as the C++ implementation core. Temporary
 implementation overlap is expected while behavior is ported and verified.
 
 The [porting plan](porting_plan.md) records the source-reviewed history from
-C++ `0.4.127`, the scope clarification of 2026-09-08, the current C++ `0.5.10`
+C++ `0.4.127`, the scope clarification of 2026-09-08, the current C++ `0.8.11`
 reference review, the parity matrix and acceptance gates. Earlier percentage
 estimates based on a narrower core boundary do not measure this scope. The
 [authoring contract](authoring.md) documents typed construction, detached
@@ -33,26 +33,27 @@ the explicit location API (0.9.0) and combined 20-group IPTC API (0.10.0).
 Versions 0.2.0 and 0.8.0 change `omc_val` and `omc_xmp_limits`, respectively;
 rebuild consumers and initialize options with their public initializers.
 
-The [upstream 0.5.10 roadmap](porting_plan.md#upstream-0510-convergence-roadmap)
-reviews committed C++ 0.5.10 at `8594030c`. It replaces the obsolete EXIF-only
-patch proposal with unified EXIF/scalar-XMP patching and tracks the committed
-GPS, capture, structured-capture, EXIF-text and standard-validation families.
-C remains at 0.10.0; existing acceptance results use frozen C++ 0.4.132. The
-roadmap update does not establish 0.5.10 parity or change the C ABI. The C++
-reference currently covers 75 distinct capture tags and 32 standard GPS tag
-IDs; these are the next C-port comparison families, not C implementation claims.
+The [upstream 0.8.11 roadmap](porting_plan.md#upstream-0811-convergence-roadmap)
+reviews C++ `0242459f`, 25 commits after the previous `0.5.10` pin. It adds
+current native update/deletion semantics, selective TIFF/BigTIFF/DNG editing,
+EXIF 3.1 development/learning and profile routes, RAW/CR3 reader expansion,
+JUMBF work limits and BMFF relation corrections to the C backlog. This
+2026-10-11 source review establishes no new runtime parity. C implementation
+remains at package version 0.10.0 and local code revision `0.10.1.009`.
 
-The current local convergence batch uses committed C++ 0.5.10 as its reference.
-It adds JP2/JPH EXIF/XMP replacement, a first unified EXIF/scalar-XMP prepared
-patch core, all four additional GPS reverse-translation groups, the first EXIF
-text/version family, canonical TIFF readback, and the UP1 TIFF-root and scoped
-XMP whitespace corrections. The C-side paired GPS matrix now covers all 32
-standard IDs through the four group APIs and canonical TIFF round-trip. The
-cross-language group parity target is also covered for one complete case per
-group. Transfer lifecycle
-persistence, repeated patch-slot binding, the remaining EXIF text fields and
-broader capture/identity families remain open. The 0.5.10 inventory residuals
-remain visible in the porting plan.
+The completed C work includes JP2/JPH replacement, the initial unified
+EXIF/scalar-XMP patch core, all five GPS APIs, four EXIF text/version fields,
+canonical TIFF readback and focused TIFF-root/XMP corrections. The C GPS
+matrix covers all 32 standard IDs; representative cross-language cases use
+C++ 0.5.10. Current C++ GPS contract v2 additionally requires accepted clean
+native values to gain write intent and absent-key deletion to survive transfer.
+Those changes and carrier lifecycle acceptance remain open.
+
+Next: freeze and qualify 0.8.11, close resource/container corrections, then
+complete the native edit foundation and GPS v2. Reader batches can advance
+independently. Broader capture/identity, patch binding, snapshots and non-fuzzy
+semantic stages remain tracked work. Preserve the older read/decode and IPTC
+evidence under its recorded reference pins.
 
 Version 0.8.0 adds bounded BMFF scene/derived-image summaries, structured XMP,
 JUMBF and MakerNote parity fixes, standalone XMP callbacks and Canon CMT3.
@@ -402,7 +403,7 @@ JUMBF decoded output now follows the reference: parent labels use `jumb_label`,
 old label key or scalar type must update. No crypto backend was added.
 
 RD5/RD6 subsequently reached the 0.8.0 checkpoint. Current work follows the
-[upstream 0.5.10 roadmap](porting_plan.md#upstream-0510-convergence-roadmap), retaining
+[upstream 0.8.11 roadmap](porting_plan.md#upstream-0811-convergence-roadmap), retaining
 the reading/decoding inventory as a regression gate.
 
 Remaining portable-core work includes:

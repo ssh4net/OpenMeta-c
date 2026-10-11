@@ -1,15 +1,65 @@
 # Reading And Decoding Parity
 
-Updated: 2026-09-20. Historical RD reference: C++ `0.4.127`, commit
+Updated: 2026-10-11. Historical RD reference: C++ `0.4.127`, commit
 `f11de3e06e93b35146b0ff54ae4a2c790f5bab98`. Initial C code: `71357c9`,
-version `0.3.0`. The current upstream review reference is C++ `0.5.10`, commit
-`8594030c5acf0bb930a02c13c874ae25845f087f`; existing RD results retain their
+version `0.3.0`. The current upstream review reference is C++ `0.8.11`, commit
+`0242459f96a7b66b281d28f6cc565aaa86249a1b`; existing RD results retain their
 recorded pins. This plan implements the reading/input and decoding stages of
 [porting_plan.md](porting_plan.md).
 
+## 2026-10-11 reader refresh plan
+
+This section controls the next reader work. RD0-RD6 below remain historical
+implementation/acceptance records; the 208 cases per access mode and selected
+69-file corpus have not been rerun against 0.8.11. The source review identifies
+new cases, not new failures or a revised coverage percentage. C++'s broader
+camera-corpus evidence cannot be transferred to the C port by assumption.
+
+| Area | C evidence at `6ddc2ab` | New comparison target |
+| --- | --- | --- |
+| CR3 | CMT1-4 discovery and dedicated CMT3 decode exist | Bounded CNCV compressor text, complete CTBO absolute-location validation and CRAW/CMP1 summaries are absent; preserve existing opaque carriers. |
+| MRW / embedded MRI | No MRW format enum or native MRW decoder | Add TTW scanning plus bounded PRD/WBG/RIF fields and Sony LE MRI; append enum values without renumbering existing C formats. Discover metadata only within its declared range. |
+| TIFF/RAW variants | Existing TIFF/ORF/RAF/X3F and enclosing-TIFF MakerNote lanes | Check legacy ORF IIRS, Minolta base/5D endian rules, Sigma/Hasselblad offsets, older RAF bounds, SD9/SD10 X3F without a JPEG, Kodak private IFDs and Pentax/Samsung DNG private routing. Existing family support is not absence; these newer layouts remain unqualified. |
+| Canon/Nikon/Sony native tables | Earlier bounded tables and naming contexts exist | Canon CIFF settings/ShotInfo/AF and colour balance; Nikon D300/D50/D60/D4S and Capture records; Sony settings/private tables, Tag900b/9400c and A100 Minolta subtree. Port exact model/version/length gates and native units. |
+| JUMBF/C2PA | Independent box/depth/entry/CBOR limits | Add aggregate semantic work, including reference/link/comparison/sort work. The reference normalizes zero to a finite default and fails with LimitExceeded. Verification remains optional. |
+| Compressed payloads | C zlib/Brotli calls already clamp output room | Add configured exact-cap, one-byte-over, short output, measurement and tiny-input-chunk differential cases. Check C++ unlimited-zero semantics explicitly against C's current literal limit; document or deliberately migrate differences. Do not infer the old C++ overwrite defect exists in C. |
+| Interpretation | Bounded names, decoded fields and CCM facts | New native numeric values and name contexts are decoder output targets. Normalized Nikon Capture crop and source applicability join I1/Q1/Q2; naming alone does not establish semantic parity. |
+
+| Batch | Work | Acceptance gate |
+| --- | --- | --- |
+| RD7 / UP0 | Build the new immutable reference, inventory public/synthetic cases and selected originals, retain prior residuals | Separate scan/payload/decode records in memory and callback modes; exact source and dependency configuration. Assertions remain active in optimized test builds. |
+| RD8 / UP1 | Aggregate JUMBF work and compressed-limit verification | High-cardinality/long-reference limits terminate deterministically; zlib/Brotli exact-cap success and overflow failure do not touch guard bytes. Exercise enabled/disabled backends and source budgets. |
+| RD9a | CR3 CNCV, CTBO and CRAW/CMP1 | Complete table validation before emitting locations; unknown IDs/versions remain opaque. Compare known/extended boxes, malformed bounds, nonzero source bases, short output and sparse callback reads that reject media access. No codec interpretation or writable location fields. |
+| RD9b | MRW TTW and PRD/WBG/RIF, embedded Sony MRI; affected TIFF/header/base fixes | Memory/callback behavior matches the corresponding reference route, including explicit reference residuals. Declared metadata boundary, unsorted TIFF Make/Model, byte order, malformed segments and MakerNote-disabled policy are tested. No whole-file fallback. |
+| RD9c | Coherent vendor groups: Canon CIFF, Nikon/Capture, Sony/A100, remaining Kodak/Pentax/Sigma/RAF/X3F fixes | Exact values/types/counts/origin and raw-parent retention; model/version/length guards, unknown layouts, duplicate aliases and disabled-vendor options. Keep family-specific scale rules explicit. |
+| RD10 | Accept the expanded read/decode inventory | Reconcile every selected case against 0.8.11 in each access mode. Run release/sanitizer and affected optional-backend gates, then declared Windows/embedded checks. Report unsupported routes, resource limits and remaining originals separately. |
+
+RD9 reader slices can proceed after the baseline/resource gate independently
+of native writing and snapshots. A changed reader must carry its direct and
+callback fixtures together. If the reference has no positional equivalent,
+record that boundary explicitly instead of silently weakening the comparison.
+
+Source evidence in C++: `container_scan.cc`, `simple_meta.cc`, `mrw_decode.cc`,
+`nikon_capture_decode.cc`, `crw_ciff_decode.cc`, the affected `exif_makernote_*`
+files and `docs/raw_read_parity_plan.md`. Useful discriminating tests include
+`Cr3Cmp1RandomAccessSkipsLargeMdatAndTruncatesOutput`,
+`Cr3CtboValidatesExtendedTargetBoxes`,
+`Cr3CompressorVersionIsBoundedReadOnlySourceMetadata`,
+`MrwDecode.DecodesGroupedPrdWbgRifFieldsAndStopsAtMetadataEnd` and
+`NikonCaptureDecode.DecodesD60CropFieldsAndRetainsUnknownRecord`.
+JUMBF aggregate limits are in `jumbf_decode.h`/`resource_policy.h`; decompression
+limits are in `container_payload.cc` and its direct tests.
+
+Private original images and detailed comparison reports remain in the internal
+project. Public fixtures must be independently constructed. ExifTool remains
+an external verification application; its numeric output can apply ValueConv,
+so camera APEX, crop, white-balance and colour-temperature scales need explicit
+normalization before comparison. No raw pixel decode, fuzzy search or SDK
+dependency is added to the C target.
+
 ## 2026-09-20 reference and focused correction baseline
 
-The current committed C++ comparison uses version 0.5.10 at commit
+The historical committed C++ comparison used version 0.5.10 at commit
 `8594030c5acf0bb930a02c13c874ae25845f087f`, checked out in the detached
 worktree `/tmp/openmeta-cpp-0.5.10-20260920` and built with Clang 20/libc++ in
 `/tmp/openmeta-cpp-baseline-20260920-libcxx`. Its five CTest targets pass, as do

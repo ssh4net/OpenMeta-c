@@ -1,5 +1,35 @@
 # Bounded BMFF writing
 
+## 2026-10-11 comparison with C++ 0.8.11
+
+The implementation described below retains its older acceptance pin. The new
+[roadmap](porting_plan.md#upstream-0811-convergence-roadmap) requires these
+focused checks before current writer parity can be claimed:
+
+- C already preserves retained reference order and repeated occurrences, but
+  `omc_bmff_build_iref()` skips every endpoint that remaps to zero. C++ 0.8.1
+  rejects a removed input of a retained `dimg` source. Add that rejection and
+  retain the existing whole-relation removal when its source is removed.
+  Verify repeated grid/overlay inputs and repeated edits in direct and package
+  routes; do not deduplicate an ordered image relation.
+- Requalify method-2 references to method-0/1 items with validated local
+  `dref`, the newer adjacent free-box/meta-growth cases, association order and
+  managed endpoint remapping. C's append layout can satisfy preservation with
+  different output bytes; compare semantics and source ranges, not C++ layout.
+- Qualify CR3 against its newer CTBO/CRAW location facts. The C++ writer rejects
+  any relocation of retained top-level CR3 boxes. C's appended metadata usually
+  retains old offsets, but that alone does not prove every route or referenced
+  box identity. Check old absolute targets and media ranges, rejecting unsafe
+  edits before publishing output. Reading CTBO/CMP1 does not authorize rewrite
+  of opaque Canon records or private checksums.
+
+The first item is a confirmed source-level behavior gap. The remaining items
+need differential fixtures; this review did not run new writer tests. Existing
+compact `iloc`, multiple-`ipma`, local-reference and append-layout work remains
+implemented.
+
+## Existing bounded C behavior
+
 HEIF, AVIF, and CR3 EXIF/XMP/ICC writes and transfer-package materialization
 share one private writer. Inserting EXIF, XMP, JUMBF, or C2PA replaces existing
 items in that family. A family with exactly one removed and one inserted item
