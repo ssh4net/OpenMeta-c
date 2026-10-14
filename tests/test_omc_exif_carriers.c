@@ -11,6 +11,112 @@ put(omc_u8 *p, omc_u64 value, unsigned width)
         p[i] = (omc_u8)(value >> (8U * i));
 }
 static void
+put_order(omc_u8 *p, omc_u64 value, unsigned width, int little)
+{
+    unsigned i;
+    for (i = 0U; i < width; ++i)
+        p[little ? i : width - 1U - i] = (omc_u8)(value >> (8U * i));
+}
+
+static void
+test_tiff_noop(int big, int little)
+{
+    omc_u8 file[64];
+    omc_size root, cs, ns;
+    omc_store empty;
+    omc_arena out;
+    omc_exif_write_res res;
+    unsigned pass;
+    root = big ? 16U : 8U;
+    cs = big ? 8U : 2U;
+    ns = big ? 8U : 4U;
+    memset(file, 0, sizeof(file));
+    file[0] = file[1] = (omc_u8)(little ? 'I' : 'M');
+    put_order(file + 2U, big ? 43U : 42U, 2U, little);
+    if (big) put_order(file + 4U, 8U, 2U, little);
+    put_order(file + (big ? 8U : 4U), root, big ? 8U : 4U, little);
+    memcpy(file + 40U, "PIXELS!!", 8U);
+    omc_store_init(&empty);
+    omc_arena_init(&out);
+    for (pass = 0U; pass < 2U; ++pass) {
+        assert(omc_exif_write_embedded(file, sizeof(file), &empty, &out,
+                  pass ? OMC_SCAN_FMT_UNKNOWN : OMC_SCAN_FMT_TIFF, &res) == OMC_STATUS_OK);
+        assert(res.status == OMC_EXIF_WRITE_OK);
+        assert(out.size == sizeof(file) && memcmp(out.data, file, sizeof(file)) == 0);
+    }
+    assert(omc_exif_write_embedded(file, root + cs + ns - 1U, &empty, &out,
+               OMC_SCAN_FMT_TIFF, &res) == OMC_STATUS_OK);
+    assert(res.status == OMC_EXIF_WRITE_MALFORMED && out.size == 0U);
+    put_order(file + root, big ? ~(omc_u64)0 : 65535U, (unsigned)cs, little);
+    assert(omc_exif_write_embedded(file, sizeof(file), &empty, &out,
+               OMC_SCAN_FMT_TIFF, &res) == OMC_STATUS_OK);
+    assert(res.status == OMC_EXIF_WRITE_MALFORMED && out.size == 0U);
+    if (big) {
+        put_order(file + root, (~(omc_u64)0 / 20U) + 1U, 8U, little);
+        assert(omc_exif_write_embedded(file, sizeof(file), &empty, &out,
+                   OMC_SCAN_FMT_TIFF, &res) == OMC_STATUS_OK);
+        assert(res.status == OMC_EXIF_WRITE_MALFORMED && out.size == 0U);
+    }
+    assert(res.format == OMC_SCAN_FMT_TIFF);
+    omc_arena_fini(&out);
+    omc_store_fini(&empty);
+}
+
+static void
+test_tiff_count_bounds(int big)
+{
+    omc_u8 file[128];
+    omc_size root, cs, es, ns, child;
+    omc_store source;
+    omc_arena out;
+    omc_arena canonical;
+    omc_exif_write_res res;
+    unsigned dir, pass;
+    root = big ? 16U : 8U;
+    cs = big ? 8U : 2U;
+    es = big ? 20U : 12U;
+    ns = big ? 8U : 4U;
+    child = 64U;
+    omc_store_init(&source);
+    omc_arena_init(&out);
+    omc_arena_init(&canonical);
+    for (dir = 0U; dir < 3U; ++dir) {
+        for (pass = 0U; pass < (big ? 3U : 2U); ++pass) {
+            omc_size at, size;
+            omc_u64 count;
+            memset(file, 0, sizeof(file));
+            file[0] = file[1] = 'I';
+            put(file + 2U, big ? 43U : 42U, 2U);
+            if (big) put(file + 4U, 8U, 2U);
+            put(file + (big ? 8U : 4U), root, big ? 8U : 4U);
+            if (dir != 0U) {
+                put(file + root, 1U, (unsigned)cs);
+                put(file + root + cs, dir == 1U ? 0x8769U : 0x8825U, 2U);
+                put(file + root + cs + 2U, 4U, 2U);
+                put(file + root + cs + 4U, 1U, big ? 8U : 4U);
+                put(file + root + cs + (big ? 12U : 8U), child, 4U);
+            }
+            at = dir == 0U ? root : child;
+            count = pass == 0U ? (big ? ~(omc_u64)0 : 65535U)
+                     : pass == 1U ? 1U : (~(omc_u64)0 / 20U) + 1U;
+            put(file + at, count, (unsigned)cs);
+            size = pass == 1U ? at + cs + es + ns - 1U : sizeof(file);
+            /* Direct overlay exposes the count guard before any output append;
+             * an empty canonical store selects no replacement directories. */
+            assert(omc_exif_overlay_tiff(file, size, &source, &canonical,
+                                         &out, &res) == OMC_STATUS_OK);
+            assert(res.status == OMC_EXIF_WRITE_MALFORMED && out.size == 0U);
+        }
+    }
+    file[0] = file[1] = 'M';
+    assert(omc_exif_overlay_tiff(file, sizeof(file), &source, &canonical,
+                                 &out, &res) == OMC_STATUS_OK);
+    assert(res.status == OMC_EXIF_WRITE_UNSUPPORTED && out.size == 0U);
+    omc_arena_fini(&canonical);
+    omc_arena_fini(&out);
+    omc_store_fini(&source);
+}
+static void
 raw_entry(omc_u8 *p, int big, omc_u16 tag, omc_u16 type, omc_u32 count, omc_u64 value)
 {
     put(p, tag, 2U);
@@ -192,6 +298,12 @@ main(void)
 {
     test_tiff(0);
     test_tiff(1);
+    test_tiff_noop(0, 0);
+    test_tiff_noop(0, 1);
+    test_tiff_noop(1, 0);
+    test_tiff_noop(1, 1);
+    test_tiff_count_bounds(0);
+    test_tiff_count_bounds(1);
     test_jpeg();
     test_png_crc();
     return 0;

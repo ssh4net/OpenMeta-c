@@ -1,11 +1,20 @@
 # Reading And Decoding Parity
 
-Updated: 2026-10-11. Historical RD reference: C++ `0.4.127`, commit
+Updated: 2026-10-14. Historical RD reference: C++ `0.4.127`, commit
 `f11de3e06e93b35146b0ff54ae4a2c790f5bab98`. Initial C code: `71357c9`,
-version `0.3.0`. The current upstream review reference is C++ `0.8.11`, commit
-`0242459f96a7b66b281d28f6cc565aaa86249a1b`; existing RD results retain their
+version `0.3.0`. The current execution reference is C++ `0.8.14`, commit
+`fc2052b9eac0c7819c09a067e0c698fe38a2a155`; existing RD results retain their
 recorded pins. This plan implements the reading/input and decoding stages of
 [porting_plan.md](porting_plan.md).
+
+## 2026-10-14 resource baseline
+
+The current execution pin is C++ 0.8.14 `fc2052b`, superseding the source-review
+target below. [The execution receipt](up0_up1_0814.md) records fresh direct and
+differential baselines and the implemented JUMBF/compression resource slice.
+RD7's synthetic baseline and RD8's focused resource gate are established;
+new RAW/CR3 reader coverage and refreshed original-image acceptance remain
+RD9/RD10 work. Historical read counts are not promoted to 0.8.14 acceptance.
 
 ## 2026-10-11 reader refresh plan
 

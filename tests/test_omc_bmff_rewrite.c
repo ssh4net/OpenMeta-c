@@ -1,4 +1,5 @@
 #include "edit/omc_bmff_rewrite.h"
+#include "omc/omc_transfer_package.h"
 #include "omc_test_assert.h"
 #include <stdlib.h>
 #include <string.h>
@@ -61,24 +62,38 @@ end(buffer *b, omc_size p)
     put(b->data + p, b->size - p, 4U);
 }
 static void
-relation(buffer *b, const char *type, unsigned from, unsigned to)
+relation_targets(buffer *b, const char *type, unsigned from,
+                 const unsigned *targets, unsigned count, unsigned id_width)
 {
     omc_size p = begin(b, type);
-    num(b, from, 2U);
-    num(b, 1U, 2U);
-    num(b, to, 2U);
+    unsigned i;
+    num(b, from, id_width);
+    num(b, count, 2U);
+    for (i = 0U; i < count; ++i)
+        num(b, targets[i], id_width);
     end(b, p);
 }
 static void
-make_fixture(fixture *f, int duplicate_exif, unsigned tables)
+relation(buffer *b, const char *type, unsigned from, unsigned to,
+         unsigned id_width)
+{
+    relation_targets(b, type, from, &to, 1U, id_width);
+}
+static void
+make_fixture_version(fixture *f, unsigned duplicate_family, unsigned tables,
+                     unsigned iref_version)
 {
     static const unsigned ids[] = {1U, 2U, 3U, 4U, 10U, 11U, 20U};
+    static const unsigned repeated_xmp_targets[] = {2U, 11U, 2U};
+    static const unsigned removed_source_targets[] = {3U, 3U};
     static const char *const types[] = {"Exif", "mime", "jumb", "c2pa",
                                         "hvc1", "hvc1", "hvc1"};
     buffer *b = &f->bytes;
     omc_size p, q, r, iprp, ipco, primary_offset = 0U;
+    unsigned id_width;
     unsigned i;
     memset(f, 0, sizeof(*f));
+    id_width = iref_version ? 4U : 2U;
     p = begin(b, "ftyp");
     raw(b, "mif1", 4U);
     num(b, 0U, 4U);
@@ -98,9 +113,15 @@ make_fixture(fixture *f, int duplicate_exif, unsigned tables)
         num(b, 0x02000000U, 4U);
         num(b, ids[i], 2U);
         num(b, 0U, 2U);
-        raw(b, duplicate_exif && i == 2U ? "Exif" : types[i], 4U);
+        if (i == 2U && duplicate_family == OMC_BMFF_FAMILY_EXIF)
+            raw(b, "Exif", 4U);
+        else if (i == 2U && duplicate_family == OMC_BMFF_FAMILY_XMP)
+            raw(b, "mime", 4U);
+        else
+            raw(b, types[i], 4U);
         num(b, 0U, 1U);
-        if (i == 1U) {
+        if (i == 1U ||
+            (i == 2U && duplicate_family == OMC_BMFF_FAMILY_XMP)) {
             raw(b, "application/rdf+xml", 20U);
             num(b, 0U, 1U);
         }
@@ -141,12 +162,14 @@ make_fixture(fixture *f, int duplicate_exif, unsigned tables)
     raw(b, "EXIFXMP!JUMBC2PAAUX!", 20U);
     end(b, p);
     p = begin(b, "iref");
-    num(b, 0U, 4U);
-    relation(b, "cdsc", 1U, 10U);
-    relation(b, "test", 1U, 11U);
-    relation(b, "test", 11U, 1U);
-    relation(b, "auxl", 11U, 10U);
-    relation(b, "iloc", 20U, 11U);
+    num(b, (omc_u32)iref_version << 24U, 4U);
+    relation(b, "cdsc", 1U, 10U, id_width);
+    relation(b, "test", 1U, 11U, id_width);
+    relation(b, "test", 11U, 1U, id_width);
+    relation(b, "auxl", 11U, 10U, id_width);
+    relation(b, "iloc", 20U, 11U, id_width);
+    relation_targets(b, "dimg", 10U, repeated_xmp_targets, 3U, id_width);
+    relation_targets(b, "dimg", 1U, removed_source_targets, 2U, id_width);
     end(b, p);
     p = begin(b, "grpl");
     q = begin(b, "altr");
@@ -214,6 +237,12 @@ make_fixture(fixture *f, int duplicate_exif, unsigned tables)
     end(b, p);
     put(b->data + primary_offset, f->media, 2U);
 }
+static void
+make_fixture(fixture *f, int duplicate_exif, unsigned tables)
+{
+    make_fixture_version(f, duplicate_exif ? OMC_BMFF_FAMILY_EXIF : 0U,
+                         tables, 0U);
+}
 static omc_size
 box(const omc_u8 *data, omc_size begin_at, omc_size end_at, const char *type)
 {
@@ -259,6 +288,37 @@ edge(const omc_arena *a, const char *type, unsigned from, unsigned to)
         }
     }
     return 0;
+}
+static int
+relation_targets_equal(const omc_arena *a, const char *type, unsigned from,
+                       const unsigned *expected, unsigned expected_count)
+{
+    omc_size p = child(a, "iref"), limit, q, n, target_count;
+    unsigned width, matches, i;
+    if (!p)
+        return expected_count == 0U;
+    limit = p + (omc_size)get(a->data + p, 4U);
+    width = a->data[p + 8U] ? 4U : 2U;
+    matches = 0U;
+    for (p += 12U; p < limit; p += n) {
+        n = (omc_size)get(a->data + p, 4U);
+        if (n < 8U + width + 2U ||
+            memcmp(a->data + p + 4U, type, 4U) != 0 ||
+            get(a->data + p + 8U, width) != from)
+            continue;
+        ++matches;
+        q = p + 8U + width;
+        target_count = (omc_size)get(a->data + q, 2U);
+        q += 2U;
+        if (target_count != expected_count)
+            return 0;
+        for (i = 0U; i < expected_count; ++i) {
+            if (get(a->data + q, width) != expected[i])
+                return 0;
+            q += width;
+        }
+    }
+    return expected_count == 0U ? matches == 0U : matches == 1U;
 }
 static omc_u16
 association(const omc_arena *a, unsigned id, unsigned index)
@@ -339,15 +399,21 @@ check_locations(const omc_arena *a, const fixture *f)
     }
 }
 static void
-rewrite(fixture *f, int duplicate)
+rewrite(fixture *f, int duplicate, unsigned iref_version)
 {
+    static const unsigned repeated_xmp_targets[] = {22U, 11U, 22U};
+    static const unsigned second_edit_xmp_targets[] = {26U, 11U, 26U};
+    static const unsigned removed_source_targets[] = {23U, 23U};
     omc_arena out;
+    omc_arena repeated;
     omc_bmff_write_res res;
+    omc_bmff_write_res repeated_res;
     omc_bmff_write_item items[4];
     omc_const_bytes profile;
     omc_size p, q;
     unsigned i;
-    make_fixture(f, duplicate, 2U);
+    make_fixture_version(f, duplicate ? OMC_BMFF_FAMILY_EXIF : 0U, 2U,
+                         iref_version);
     omc_arena_init(&out);
     for (i = 0U; i < 4U; ++i) {
         items[i].family = i + 1U;
@@ -359,6 +425,7 @@ rewrite(fixture *f, int duplicate)
     assert(omc_bmff_rewrite(f->bytes.data, f->bytes.size, items, 4U, 0U, 1, profile, 1,
                             &out, &res) == OMC_STATUS_OK);
     assert(res.status == OMC_TRANSFER_OK && res.removed[1] == (duplicate ? 2U : 1U));
+    assert(out.size > f->bytes.size);
     assert(memcmp(out.data + f->meta + 4U, "free", 4U) == 0);
     assert(memcmp(out.data + f->media, "PIXELS!!", 8U) == 0);
     assert(edge(&out, "auxl", 11U, 10U) && edge(&out, "iloc", 20U, 11U));
@@ -366,6 +433,14 @@ rewrite(fixture *f, int duplicate)
     assert(edge(&out, "test", 11U, 21U) == !duplicate);
     for (i = 21U; i <= 24U; ++i)
         assert(edge(&out, "cdsc", i, 10U));
+    assert(relation_targets_equal(&out, "dimg", 10U, repeated_xmp_targets,
+                                  3U));
+    if (duplicate)
+        assert(relation_targets_equal(&out, "dimg", 21U,
+                                      removed_source_targets, 0U));
+    else
+        assert(relation_targets_equal(&out, "dimg", 21U,
+                                      removed_source_targets, 2U));
     p = child(&out, "grpl");
     assert(p);
     q = p + 8U;
@@ -378,6 +453,15 @@ rewrite(fixture *f, int duplicate)
     assert(association(&out, 21U, 2U) == (duplicate ? 0U : 2U));
     if (!duplicate)
         check_locations(&out, f);
+
+    omc_arena_init(&repeated);
+    assert(omc_bmff_rewrite(out.data, out.size, items, 4U, 0U, 0, profile, 1,
+                            &repeated, &repeated_res) == OMC_STATUS_OK);
+    assert(repeated_res.status == OMC_TRANSFER_OK);
+    assert(relation_targets_equal(&repeated, "dimg", 10U,
+                                  second_edit_xmp_targets, 3U));
+    assert(memcmp(repeated.data + f->media, "PIXELS!!", 8U) == 0);
+    omc_arena_fini(&repeated);
     omc_arena_fini(&out);
 }
 static void
@@ -413,14 +497,182 @@ reject_cases(fixture *f)
     }
     omc_arena_fini(&out);
 }
+static void
+dimg_cases(fixture *f)
+{
+    static const unsigned repeated_xmp_targets[] = {2U, 11U, 2U};
+    omc_arena out;
+    omc_byte_ref ref;
+    omc_bmff_write_res res;
+    omc_const_bytes profile;
+    unsigned iref_version;
+
+    profile.data = NULL;
+    profile.size = 0U;
+    for (iref_version = 0U; iref_version <= 1U; ++iref_version) {
+        make_fixture_version(f, 0U, 2U, iref_version);
+        omc_arena_init(&out);
+        assert(omc_arena_append(&out, "keep", 4U, &ref) == OMC_STATUS_OK);
+        assert(omc_bmff_rewrite(f->bytes.data, f->bytes.size, NULL, 0U,
+                                1U << OMC_BMFF_FAMILY_XMP, 0, profile, 0,
+                                &out, &res) == OMC_STATUS_OK);
+        assert(res.status == OMC_TRANSFER_UNSUPPORTED);
+        assert(out.size == 4U && memcmp(out.data, "keep", 4U) == 0);
+        omc_arena_fini(&out);
+
+        make_fixture_version(f, 0U, 2U, iref_version);
+        omc_arena_init(&out);
+        assert(omc_bmff_rewrite(f->bytes.data, f->bytes.size, NULL, 0U,
+                                1U << OMC_BMFF_FAMILY_EXIF, 0, profile, 0,
+                                &out, &res) == OMC_STATUS_OK);
+        assert(res.status == OMC_TRANSFER_OK);
+        assert(relation_targets_equal(&out, "dimg", 1U,
+                                      repeated_xmp_targets, 0U));
+        assert(relation_targets_equal(&out, "dimg", 10U,
+                                      repeated_xmp_targets, 3U));
+        assert(memcmp(out.data + f->media, "PIXELS!!", 8U) == 0);
+        omc_arena_fini(&out);
+    }
+}
+static void
+init_xmp_package(omc_transfer_package_batch *batch,
+                 omc_transfer_package_chunk *chunk,
+                 const omc_u8 *payload, omc_size payload_size,
+                 omc_size target_size)
+{
+    static const omc_u8 route[] = "bmff:item-xmp";
+    memset(chunk, 0, sizeof(*chunk));
+    chunk->kind = OMC_TRANSFER_PACKAGE_CHUNK_TRANSFER_BLOCK;
+    chunk->route.data = route;
+    chunk->route.size = sizeof(route) - 1U;
+    chunk->bytes.data = payload;
+    chunk->bytes.size = payload_size;
+    omc_transfer_package_batch_init(batch);
+    batch->target_format = OMC_SCAN_FMT_HEIF;
+    batch->input_size = target_size;
+    batch->output_size = payload_size;
+    batch->chunk_count = 1U;
+    batch->chunks = chunk;
+}
+static void
+package_cases(fixture *f)
+{
+    static const omc_u8 payload[] = {'N', 'E', 'W', '!'};
+    omc_arena direct;
+    omc_arena materialized;
+    omc_arena serialized;
+    omc_arena temp_storage;
+    omc_arena serialized_output;
+    omc_arena original;
+    omc_bmff_write_item direct_item;
+    omc_bmff_write_res direct_res;
+    omc_const_bytes profile;
+    omc_transfer_package_batch batch;
+    omc_transfer_package_chunk chunk;
+    omc_transfer_package_io_res package_res;
+    omc_size original_size;
+    omc_byte_ref ref;
+
+    make_fixture_version(f, 0U, 2U, 1U);
+    original_size = f->bytes.size;
+    omc_arena_init(&original);
+    assert(omc_arena_append(&original, f->bytes.data, original_size, &ref) ==
+           OMC_STATUS_OK);
+    direct_item.family = OMC_BMFF_FAMILY_XMP;
+    direct_item.payload.data = payload;
+    direct_item.payload.size = sizeof(payload);
+    profile.data = NULL;
+    profile.size = 0U;
+    omc_arena_init(&direct);
+    assert(omc_bmff_rewrite(f->bytes.data, original_size, &direct_item, 1U,
+                            0U, 0, profile, 1, &direct, &direct_res) ==
+           OMC_STATUS_OK);
+    assert(direct_res.status == OMC_TRANSFER_OK);
+
+    init_xmp_package(&batch, &chunk, payload, sizeof(payload), original_size);
+    omc_arena_init(&materialized);
+    assert(omc_transfer_package_bmff_materialize(
+               f->bytes.data, original_size, &batch, &materialized,
+               &package_res) == OMC_STATUS_OK);
+    assert(package_res.status == OMC_TRANSFER_OK);
+    assert(package_res.chunk_count == 1U);
+    assert(materialized.size == direct.size);
+    assert(memcmp(materialized.data, direct.data, direct.size) == 0);
+    assert(memcmp(f->bytes.data, original.data, original_size) == 0);
+
+    omc_arena_init(&serialized);
+    assert(omc_transfer_package_batch_serialize(&batch, &serialized,
+                                               &package_res) == OMC_STATUS_OK);
+    assert(package_res.status == OMC_TRANSFER_OK);
+    omc_arena_init(&temp_storage);
+    omc_arena_init(&serialized_output);
+    assert(omc_transfer_package_bmff_bytes_materialize(
+               f->bytes.data, original_size, serialized.data, serialized.size,
+               &temp_storage, &serialized_output, &package_res) ==
+           OMC_STATUS_OK);
+    assert(package_res.status == OMC_TRANSFER_OK);
+    assert(serialized_output.size == direct.size);
+    assert(memcmp(serialized_output.data, direct.data, direct.size) == 0);
+
+    omc_arena_fini(&serialized_output);
+    omc_arena_fini(&temp_storage);
+    omc_arena_fini(&serialized);
+    omc_arena_fini(&materialized);
+    omc_arena_fini(&direct);
+    omc_arena_fini(&original);
+
+    make_fixture_version(f, OMC_BMFF_FAMILY_XMP, 2U, 1U);
+    original_size = f->bytes.size;
+    omc_arena_init(&original);
+    assert(omc_arena_append(&original, f->bytes.data, original_size, &ref) ==
+           OMC_STATUS_OK);
+    init_xmp_package(&batch, &chunk, payload, sizeof(payload), original_size);
+
+    omc_arena_init(&materialized);
+    assert(omc_arena_append(&materialized, "keep", 4U, &ref) == OMC_STATUS_OK);
+    assert(omc_transfer_package_bmff_materialize(
+               f->bytes.data, original_size, &batch, &materialized,
+               &package_res) == OMC_STATUS_OK);
+    assert(package_res.status == OMC_TRANSFER_UNSUPPORTED);
+    assert(package_res.bytes == 0U && package_res.chunk_count == 0U);
+    assert(materialized.size == 0U);
+    assert(memcmp(f->bytes.data, original.data, original_size) == 0);
+
+    omc_arena_init(&serialized);
+    assert(omc_transfer_package_batch_serialize(&batch, &serialized,
+                                               &package_res) == OMC_STATUS_OK);
+    assert(package_res.status == OMC_TRANSFER_OK);
+    omc_arena_init(&temp_storage);
+    omc_arena_init(&serialized_output);
+    assert(omc_arena_append(&serialized_output, "keep", 4U, &ref) ==
+           OMC_STATUS_OK);
+    assert(omc_transfer_package_bmff_bytes_materialize(
+               f->bytes.data, original_size, serialized.data, serialized.size,
+               &temp_storage, &serialized_output, &package_res) ==
+           OMC_STATUS_OK);
+    assert(package_res.status == OMC_TRANSFER_UNSUPPORTED);
+    assert(package_res.bytes == 0U && package_res.chunk_count == 0U);
+    assert(serialized_output.size == 0U);
+    assert(memcmp(f->bytes.data, original.data, original_size) == 0);
+
+    omc_arena_fini(&serialized_output);
+    omc_arena_fini(&temp_storage);
+    omc_arena_fini(&serialized);
+    omc_arena_fini(&materialized);
+    omc_arena_fini(&original);
+}
 int
 main(void)
 {
     fixture *f = (fixture *)malloc(sizeof(*f));
     assert(f);
-    rewrite(f, 0);
-    rewrite(f, 1);
+    rewrite(f, 0, 0U);
+    rewrite(f, 1, 0U);
+    rewrite(f, 0, 1U);
+    rewrite(f, 1, 1U);
     reject_cases(f);
+    dimg_cases(f);
+    package_cases(f);
     free(f);
     return 0;
 }

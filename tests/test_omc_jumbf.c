@@ -1,6 +1,7 @@
 #include "omc/omc_jumbf.h"
 
 #include "omc_test_assert.h"
+#include <stdio.h>
 #include <string.h>
 
 static const omc_u8 k_sample_jumbf_box[] = {
@@ -189,6 +190,48 @@ make_claim_jumb_box(omc_u8* out, const char* label, const omc_u8* claim_cbor,
     return make_jumb_box_with_label(out, label, cbor_box, cbor_box_size);
 }
 
+static omc_size
+make_long_reference_jumbf(omc_u8* out)
+{
+    omc_u8 cbor[4096];
+    omc_u8 cbor_box[4104];
+    omc_u8 reference[201];
+    omc_size cbor_size;
+    omc_size cbor_box_size;
+    omc_size reference_size;
+    omc_u32 i;
+
+    cbor_size = 0U;
+    append_cbor_map(cbor, &cbor_size, 1U);
+    append_cbor_text(cbor, &cbor_size, "manifests");
+    append_cbor_map(cbor, &cbor_size, 1U);
+    append_cbor_text(cbor, &cbor_size, "active_manifest");
+    append_cbor_map(cbor, &cbor_size, 1U);
+    append_cbor_text(cbor, &cbor_size, "claims");
+    append_cbor_array(cbor, &cbor_size, 1U);
+    append_cbor_map(cbor, &cbor_size, 1U);
+    append_cbor_text(cbor, &cbor_size, "signatures");
+    append_cbor_array(cbor, &cbor_size, 1U);
+    append_cbor_map(cbor, &cbor_size, 1U);
+    append_cbor_text(cbor, &cbor_size, "claim_ref");
+    append_cbor_array(cbor, &cbor_size, 8U);
+
+    reference_size = 0U;
+    append_bytes(reference, &reference_size,
+                 "https://example.invalid/claim/", 30U);
+    while (reference_size < sizeof(reference) - 1U) {
+        append_u8(reference, &reference_size, (omc_u8)'x');
+    }
+    append_u8(reference, &reference_size, 0U);
+
+    for (i = 0U; i < 8U; ++i) {
+        append_cbor_text(cbor, &cbor_size, (const char*)reference);
+    }
+    cbor_box_size = 0U;
+    append_box(cbor_box, &cbor_box_size, "cbor", cbor, cbor_size);
+    return make_jumb_box_with_label(out, "c2pa", cbor_box, cbor_box_size);
+}
+
 static const char *g_last_jumbf_field;
 
 static const omc_entry*
@@ -278,6 +321,17 @@ assert_bytes_entry_equals(const omc_store* store, const omc_entry* entry,
     view = omc_arena_view(&store->arena, entry->value.u.ref);
     OMC_TEST_CHECK_SIZE_EQ(view.size, expected_size);
     OMC_TEST_CHECK_MEM_EQ(view.data, view.size, expected, expected_size);
+}
+
+static void
+assert_jumbf_result_equal(omc_jumbf_res lhs, omc_jumbf_res rhs)
+{
+    assert(lhs.status == rhs.status);
+    assert(lhs.boxes_decoded == rhs.boxes_decoded);
+    assert(lhs.cbor_items == rhs.cbor_items);
+    assert(lhs.entries_decoded == rhs.entries_decoded);
+    assert(lhs.verify_status == rhs.verify_status);
+    assert(lhs.verify_backend_selected == rhs.verify_backend_selected);
 }
 
 static void
@@ -2312,6 +2366,108 @@ test_jumbf_limit_entries(void)
 
     res = omc_jumbf_meas(k_sample_jumbf_box, sizeof(k_sample_jumbf_box), &opts);
     assert(res.status == OMC_JUMBF_LIMIT);
+}
+
+static void
+test_jumbf_limit_semantic_work(void)
+{
+    omc_jumbf_opts opts;
+    omc_jumbf_res res;
+
+    omc_jumbf_opts_init(&opts);
+    opts.limits.max_semantic_work = 1U;
+
+    res = omc_jumbf_meas(k_sample_jumbf_box, sizeof(k_sample_jumbf_box), &opts);
+    assert(res.status == OMC_JUMBF_LIMIT);
+    assert(res.boxes_decoded == 0U);
+}
+
+static void
+test_jumbf_semantic_work_defaults_and_boundaries(void)
+{
+    omc_jumbf_opts opts;
+    omc_jumbf_res default_res;
+    omc_jumbf_res zero_res;
+    omc_jumbf_res max_res;
+    omc_jumbf_res res;
+    omc_u64 boundary;
+    omc_u64 budget;
+
+    default_res = omc_jumbf_meas(k_sample_jumbf_box,
+                                 sizeof(k_sample_jumbf_box),
+                                 (const omc_jumbf_opts*)0);
+    omc_jumbf_opts_init(&opts);
+    opts.limits.max_semantic_work = 0U;
+    zero_res = omc_jumbf_meas(k_sample_jumbf_box,
+                              sizeof(k_sample_jumbf_box), &opts);
+    assert_jumbf_result_equal(default_res, zero_res);
+
+    omc_jumbf_opts_init(&opts);
+    opts.limits.max_semantic_work = ~(omc_u64)0;
+    max_res = omc_jumbf_meas(k_sample_jumbf_box,
+                             sizeof(k_sample_jumbf_box), &opts);
+    assert(max_res.status == OMC_JUMBF_OK);
+    assert_jumbf_result_equal(default_res, max_res);
+
+    boundary = 0U;
+    omc_jumbf_opts_init(&opts);
+    for (budget = 1U; budget < 65536U; ++budget) {
+        opts.limits.max_semantic_work = budget;
+        res = omc_jumbf_meas(k_sample_jumbf_box,
+                             sizeof(k_sample_jumbf_box), &opts);
+        if (res.status == OMC_JUMBF_OK) {
+            boundary = budget;
+            break;
+        }
+        assert(res.status == OMC_JUMBF_LIMIT);
+    }
+    assert(boundary > 1U);
+
+    opts.limits.max_semantic_work = boundary - 1U;
+    res = omc_jumbf_meas(k_sample_jumbf_box,
+                         sizeof(k_sample_jumbf_box), &opts);
+    assert(res.status == OMC_JUMBF_LIMIT);
+    opts.limits.max_semantic_work = boundary;
+    res = omc_jumbf_meas(k_sample_jumbf_box,
+                         sizeof(k_sample_jumbf_box), &opts);
+    assert(res.status == OMC_JUMBF_OK);
+    opts.limits.max_semantic_work = boundary + 1U;
+    res = omc_jumbf_meas(k_sample_jumbf_box,
+                         sizeof(k_sample_jumbf_box), &opts);
+    assert(res.status == OMC_JUMBF_OK);
+}
+
+static void
+test_jumbf_semantic_work_bounds_long_references(void)
+{
+    omc_u8 jumbf[4096];
+    omc_size jumbf_size;
+    omc_jumbf_opts opts;
+    omc_jumbf_res small_res;
+    omc_jumbf_res res;
+    omc_store store;
+
+    jumbf_size = make_long_reference_jumbf(jumbf);
+    omc_jumbf_opts_init(&opts);
+    opts.limits.max_semantic_work = 1024U;
+    small_res = omc_jumbf_meas(k_sample_jumbf_box,
+                               sizeof(k_sample_jumbf_box), &opts);
+    assert(small_res.status == OMC_JUMBF_OK);
+    res = omc_jumbf_meas(jumbf, jumbf_size, &opts);
+    assert(res.status == OMC_JUMBF_LIMIT);
+    assert(res.boxes_decoded != 0U);
+
+    omc_store_init(&store);
+    res = omc_jumbf_dec(jumbf, jumbf_size, &store, 0U,
+                        OMC_ENTRY_FLAG_NONE, &opts);
+    assert(res.status == OMC_JUMBF_LIMIT);
+    assert((omc_size)res.entries_decoded == store.entry_count);
+    omc_store_fini(&store);
+
+    omc_jumbf_opts_init(&opts);
+    opts.limits.max_semantic_work = ~(omc_u64)0;
+    res = omc_jumbf_meas(jumbf, jumbf_size, &opts);
+    assert(res.status == OMC_JUMBF_OK);
 }
 
 static void
@@ -5978,6 +6134,9 @@ main(void)
     test_jumbf_resolves_detached_payload_from_explicit_label();
     test_jumbf_does_not_fallback_when_explicit_payload_ref_is_unresolved();
     test_jumbf_limit_entries();
+    test_jumbf_limit_semantic_work();
+    test_jumbf_semantic_work_defaults_and_boundaries();
+    test_jumbf_semantic_work_bounds_long_references();
     test_jumbf_cbor_half_and_simple_scalars();
     test_jumbf_cbor_indefinite_and_paths();
     test_jumbf_verify_scaffold_not_requested_by_default();

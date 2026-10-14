@@ -18,6 +18,8 @@ typedef enum omc_pay_status {
 
 typedef struct omc_pay_limits {
     omc_u32 max_parts;
+    /* Maximum logical bytes; 0 means unlimited, including decompression.
+     * Exact-cap streams succeed; bytes beyond the cap never reach output. */
     omc_u64 max_output_bytes;
 } omc_pay_limits;
 

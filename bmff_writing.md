@@ -1,5 +1,19 @@
 # Bounded BMFF writing
 
+## 2026-10-14 correction
+
+The retained-`dimg` gap below is fixed against C++ 0.8.14 `fc2052b`. A retained
+source cannot lose a nonzero input during remapping; removing the source drops
+its relation. Mixed ordered repeated targets survive two edits with `iref`
+versions 0 and 1. Direct and serialized package success matches the low-level
+writer; failure leaves the target unchanged. The low-level writer preserves
+pre-existing output on failure; package materializers reset output and publish
+no candidate on failure, as their existing API contract requires.
+
+The same fixture requalifies bounded method-2/local-`dref`, old-meta/free,
+metadata growth and media preservation. This does not qualify every C++
+adjacent-free or CR3 relocation case. See [the receipt](up0_up1_0814.md).
+
 ## 2026-10-11 comparison with C++ 0.8.11
 
 The implementation described below retains its older acceptance pin. The new

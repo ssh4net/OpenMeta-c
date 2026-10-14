@@ -43,6 +43,8 @@ typedef struct omc_jumbf_limits {
     omc_u32 max_cbor_key_bytes;
     omc_u32 max_cbor_text_bytes;
     omc_u32 max_cbor_bytes_bytes;
+    /* Aggregate semantic work units; 0 is normalized to a finite default. */
+    omc_u64 max_semantic_work;
 } omc_jumbf_limits;
 
 typedef struct omc_jumbf_opts {

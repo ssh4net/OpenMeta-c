@@ -223,16 +223,14 @@ omc_pay_inflate_zlib_range(omc_input* file_bytes, omc_u64 file_size,
             in_off += feed_size;
         }
 
-        if (total_out >= max_output_bytes) {
-            res->status = OMC_PAY_LIMIT;
-            (void)inflateEnd(&strm);
-            res->needed = total_out;
-            return 0;
-        }
-        remain_limit = max_output_bytes - total_out;
+        /* At the cap, consume stream framing using a private one-byte probe.
+         * An exact-size stream can finish without producing another byte. */
+        remain_limit = total_out < max_output_bytes
+                           ? max_output_bytes - total_out : 0U;
 
         use_scratch = 0;
-        if (out_payload != (omc_u8*)0 && res->written < (omc_u64)out_cap) {
+        if (remain_limit != 0U && out_payload != (omc_u8*)0
+            && res->written < (omc_u64)out_cap) {
             out_room = (omc_u64)out_cap - res->written;
             out_room = omc_pay_min_u64(out_room, remain_limit);
             out_room = omc_pay_min_u64(out_room, (omc_u64)max_chunk);
@@ -240,7 +238,8 @@ omc_pay_inflate_zlib_range(omc_input* file_bytes, omc_u64 file_size,
             strm.avail_out = (uInt)out_room;
         } else {
             use_scratch = 1;
-            out_room = omc_pay_min_u64((omc_u64)sizeof(scratch), remain_limit);
+            out_room = remain_limit == 0U ? 1U
+                         : omc_pay_min_u64((omc_u64)sizeof(scratch), remain_limit);
             out_room = omc_pay_min_u64(out_room, (omc_u64)max_chunk);
             strm.next_out = scratch;
             strm.avail_out = (uInt)out_room;
@@ -250,6 +249,12 @@ omc_pay_inflate_zlib_range(omc_input* file_bytes, omc_u64 file_size,
         zr = inflate(&strm, Z_NO_FLUSH);
         produced = (omc_u64)(out_avail - strm.avail_out);
 
+        if (produced > max_output_bytes - total_out) {
+            res->status = OMC_PAY_LIMIT;
+            res->needed = total_out == ~(omc_u64)0 ? total_out : total_out + 1U;
+            (void)inflateEnd(&strm);
+            return 0;
+        }
         if (produced != 0U) {
             total_out += produced;
             if (use_scratch) {
@@ -275,8 +280,6 @@ omc_pay_inflate_zlib_range(omc_input* file_bytes, omc_u64 file_size,
         }
         if (zr == Z_MEM_ERROR) {
             res->status = OMC_PAY_NOMEM;
-        } else if (zr == Z_BUF_ERROR && total_out >= max_output_bytes) {
-            res->status = OMC_PAY_LIMIT;
         } else {
             res->status = OMC_PAY_MALFORMED;
         }
@@ -348,22 +351,17 @@ omc_pay_brotli_range(omc_input* file_bytes, omc_u64 file_size,
             avail_in = feed_size;
             in_off += feed_size;
         }
-        if (total_out >= max_output_bytes) {
-            res->status = OMC_PAY_LIMIT;
-            BrotliDecoderDestroyInstance(state);
-            res->needed = total_out;
-            return 0;
-        }
-
         use_scratch = 0;
-        if (out_payload != (omc_u8*)0 && res->written < (omc_u64)out_cap) {
+        if (total_out < max_output_bytes && out_payload != (omc_u8*)0
+            && res->written < (omc_u64)out_cap) {
             avail_out = (size_t)omc_pay_min_u64((omc_u64)out_cap - res->written,
                                                 max_output_bytes - total_out);
             next_out = (uint8_t*)(out_payload + (omc_size)res->written);
         } else {
             use_scratch = 1;
-            avail_out = (size_t)omc_pay_min_u64((omc_u64)sizeof(scratch),
-                                                max_output_bytes - total_out);
+            avail_out = total_out == max_output_bytes ? 1U
+                         : (size_t)omc_pay_min_u64((omc_u64)sizeof(scratch),
+                                                   max_output_bytes - total_out);
             next_out = (uint8_t*)scratch;
         }
 
@@ -373,6 +371,12 @@ omc_pay_brotli_range(omc_input* file_bytes, omc_u64 file_size,
                                            (size_t*)0);
         produced = (omc_u64)(out_before - avail_out);
 
+        if (produced > max_output_bytes - total_out) {
+            res->status = OMC_PAY_LIMIT;
+            res->needed = total_out == ~(omc_u64)0 ? total_out : total_out + 1U;
+            BrotliDecoderDestroyInstance(state);
+            return 0;
+        }
         if (produced != 0U) {
             total_out += produced;
             if (use_scratch) {
@@ -436,12 +440,13 @@ omc_pay_ext_input(omc_input* file_bytes, omc_u64 file_size,
 
     omc_pay_res_init(&res);
 
-    if (opts == (const omc_pay_opts*)0) {
+    if (opts == (const omc_pay_opts*)0)
         omc_pay_opts_init(&local_opts);
-        use_opts = &local_opts;
-    } else {
-        use_opts = opts;
-    }
+    else
+        local_opts = *opts;
+    if (local_opts.limits.max_output_bytes == 0U)
+        local_opts.limits.max_output_bytes = ~(omc_u64)0;
+    use_opts = &local_opts;
 
     if (file_bytes == (omc_input*)0 || blocks == (const omc_blk_ref*)0
         || seed_index >= block_count) {

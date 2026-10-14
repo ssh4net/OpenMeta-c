@@ -24,22 +24,24 @@ The C library may later serve as the C++ implementation core. Temporary
 implementation overlap is expected while behavior is ported and verified.
 
 The [porting plan](porting_plan.md) records the source-reviewed history from
-C++ `0.4.127`, the scope clarification of 2026-09-08, the current C++ `0.8.11`
+C++ `0.4.127`, the scope clarification of 2026-09-08, the current C++ `0.8.14`
 reference review, the parity matrix and acceptance gates. Earlier percentage
 estimates based on a narrower core boundary do not measure this scope. The
 [authoring contract](authoring.md) documents typed construction, detached
 validation, canonical EXIF, the original five reverse-translation groups and
 the explicit location API (0.9.0) and combined 20-group IPTC API (0.10.0).
-Versions 0.2.0 and 0.8.0 change `omc_val` and `omc_xmp_limits`, respectively;
+Versions 0.2.0, 0.8.0 and 0.11.0 change `omc_val`, `omc_xmp_limits` and
+`omc_jumbf_limits`, respectively;
 rebuild consumers and initialize options with their public initializers.
+The 0.11.0 layout change also affects structures embedding JUMBF options,
+including `omc_read_opts` and `omc_validate_opts`.
 
-The [upstream 0.8.11 roadmap](porting_plan.md#upstream-0811-convergence-roadmap)
-reviews C++ `0242459f`, 25 commits after the previous `0.5.10` pin. It adds
-current native update/deletion semantics, selective TIFF/BigTIFF/DNG editing,
-EXIF 3.1 development/learning and profile routes, RAW/CR3 reader expansion,
-JUMBF work limits and BMFF relation corrections to the C backlog. This
-2026-10-11 source review establishes no new runtime parity. C implementation
-remains at package version 0.10.0 and local code revision `0.10.1.009`.
+The [current roadmap](porting_plan.md#upstream-0814-execution-baseline) pins C++
+0.8.14 at `fc2052b`. C package 0.11.0 adds aggregate JUMBF semantic-work limits,
+rejects retained `dimg` relations losing an input, and corrects exact-cap
+streaming decompression. Payload output limit zero now means unlimited; the
+default remains 64 MiB. The [execution receipt](up0_up1_0814.md) records fresh
+baselines, focused parity and the remaining broad inventory differences.
 
 The completed C work includes JP2/JPH replacement, the initial unified
 EXIF/scalar-XMP patch core, all five GPS APIs, four EXIF text/version fields,
@@ -49,8 +51,7 @@ C++ 0.5.10. Current C++ GPS contract v2 additionally requires accepted clean
 native values to gain write intent and absent-key deletion to survive transfer.
 Those changes and carrier lifecycle acceptance remain open.
 
-Next: freeze and qualify 0.8.11, close resource/container corrections, then
-complete the native edit foundation and GPS v2. Reader batches can advance
+Next: complete the native edit foundation and GPS v2. Reader batches can advance
 independently. Broader capture/identity, patch binding, snapshots and non-fuzzy
 semantic stages remain tracked work. Preserve the older read/decode and IPTC
 evidence under its recorded reference pins.
@@ -403,7 +404,7 @@ JUMBF decoded output now follows the reference: parent labels use `jumb_label`,
 old label key or scalar type must update. No crypto backend was added.
 
 RD5/RD6 subsequently reached the 0.8.0 checkpoint. Current work follows the
-[upstream 0.8.11 roadmap](porting_plan.md#upstream-0811-convergence-roadmap), retaining
+[current roadmap](porting_plan.md#upstream-0814-execution-baseline), retaining
 the reading/decoding inventory as a regression gate.
 
 Remaining portable-core work includes:

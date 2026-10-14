@@ -1,6 +1,6 @@
 # OpenMeta-c Porting Plan
 
-Updated: 2026-10-11.
+Updated: 2026-10-14.
 
 ## Goal And Reference Baseline
 
@@ -47,9 +47,38 @@ The conversational estimate of about 75% used the narrower boundary and is
 not a completion estimate for this clarified scope. Define feature cases for
 interpretation and non-fuzzy query before publishing revised percentages.
 
+## Upstream 0.8.14 Execution Baseline
+
+The active comparison is now C++ `0.8.14`, commit
+`fc2052b9eac0c7819c09a067e0c698fe38a2a155`. The 0.8.11 source review below is
+retained as history. Five further commits add these portable-core requirements:
+
+| Change | Porting decision |
+| --- | --- |
+| Optional empty TIFF edits and directory-count guards | Verify existing C no-op behavior and reject malformed count tables before arithmetic/allocation. C has no matching `require_updates` control; reconcile that explicit policy with UP6a rather than silently copying a C++ default. |
+| Profile translation v2 | Move the five existing profile fields into current lifecycle work. The ExifIFD removal allowlist is now 85; ColorSpace is separately host-owned and cannot be selected for deletion. |
+| Destination-profile validation contract v1 | Add reusable opt-in validation to typed creation/editing, detached validation and serialization in UP4. Validate the assembled destination using explicit host image/version facts, after reconciliation. This is logical metadata validation, not proof of pixel/storage correctness. |
+| Nikon E8700 model lifetime correction | Check model-dependent decisions before arena growth in affected reader work. |
+| Structured XMP editing contract v1 | Add bounded ordered Add/Replace/Remove for the nine supported roots to UP5 and generic authoring. Preserve exact namespace/path, language members, whole-record replacement, tombstones, aliasing and aggregate input/expanded-operation budgets. Arbitrary RDF remains outside this API. |
+
+UP0 and the focused UP1 resource/container slice are implemented and verified
+against this pin; see [the execution receipt](up0_up1_0814.md). Broad inventory
+residuals remain explicit and do not become accepted parity. C package 0.11.0
+extends `omc_jumbf_limits` with a finite aggregate-work budget; rebuild consumers
+and initialize options. Payload output limit zero now means unlimited, matching
+C++; the default remains 64 MiB.
+
+Next implementation: **UP6a native edit intent and selected LE/BE TIFF/BigTIFF
+merging, then UP3 GPS v2**. RD9 reader batches can proceed independently after
+their resource gate. Continue the family order below, using profile v2 and
+shared destination validation, then structured XMP/locations, remaining UP6,
+UP2 patch binding and UP7 semantics. New upstream commits enter a delta queue;
+they do not change this batch's immutable acceptance reference.
+
 ## Upstream 0.8.11 Convergence Roadmap
 
-This is the active plan. It supersedes the next-batch order in the historical
+Historical source review; the 0.8.14 execution section above controls current
+acceptance and priorities. This review superseded the next-batch order in the historical
 0.5.10 section below, while retaining completed C work and its exact evidence.
 The 2026-10-11 review compared committed C++ `8594030c..0242459f` (25 commits),
 current public headers, implementations, migration guides and tests. Both
@@ -817,11 +846,10 @@ dependencies included in a distribution.
 
 ## Parity Matrix
 
-The matrix combines the C 0.10.0 package plus local convergence implementation
-with the 0.8.11 source review and revised UP0-UP7/RD7-RD10 plan. Earlier measured
-rows retain their recorded reference pins; they have not been reaccepted
-against 0.8.11. Presence alone
-does not establish complete reference parity:
+The matrix combines C 0.11.0 with the 0.8.14 execution baseline and revised
+UP0-UP7/RD7-RD10 plan. Earlier measured rows retain their recorded reference
+pins; only the focused resource/container slice has new acceptance in this
+batch. Presence alone does not establish complete reference parity:
 
 - **Present**: implementation and direct tests exist for a bounded C contract.
   Broader reference parity needs the listed acceptance cases.
@@ -837,14 +865,14 @@ does not establish complete reference parity:
 | ID | Capability | Current C evidence | Status and decision |
 | --- | --- | --- | --- |
 | R1 | Store, keys, values, origins, edits | `omc_store.h`, `omc_val.h`, `omc_edit.h`; add/set/tombstone and reserve operations | Present and tested: typed makers, array byte order, candidate publication on commit/compact, and failure preservation. |
-| R2 | Contiguous scan, payload assembly, decode | `omc_scan.h`, `omc_pay.h`, `omc_read.h`; direct EXIF/XMP/ICC/IPTC/IRB/JUMBF/EXR tests | Present under historical pins; focused TIFF-root and XMP whitespace corrections implemented. RD7/RD8 refresh coverage and resource behavior against 0.8.11. No universal camera/read-parity claim. |
-| R3 | MakerNote/native RAW and modern-container enrichment | `src/read/omc_exif.c`, `omc_bmff.c`, naming and read tests | Partial against 0.8.11. MRW/MRI and CR3 CNCV/CTBO/CMP1 routes are missing; newer CIFF, Nikon Capture, Sony/A100 and vendor-offset layouts need RD9 family fixtures. Earlier CMT3/vendor support remains implemented. |
+| R2 | Contiguous scan, payload assembly, decode | `omc_scan.h`, `omc_pay.h`, `omc_read.h`; direct EXIF/XMP/ICC/IPTC/IRB/JUMBF/EXR tests | Present under historical pins; focused TIFF-root and XMP whitespace corrections implemented. RD7/RD8 establish a fresh synthetic baseline and focused resource behavior against 0.8.14; reader expansion remains open. No universal camera/read-parity claim. |
+| R3 | MakerNote/native RAW and modern-container enrichment | `src/read/omc_exif.c`, `omc_bmff.c`, naming and read tests | Partial against 0.8.14. MRW/MRI and CR3 CNCV/CTBO/CMP1 routes are missing; newer CIFF, Nikon Capture, Sony/A100 and vendor-offset layouts need RD9 family fixtures. Earlier CMT3/vendor support remains implemented. |
 | R4 | BMFF derived fields | Item semantics, properties, `ipma` associations and `grpl` summaries in `omc_bmff.c` | Existing scene/component/grid/overlay/identity/tile summaries and 68 historical cases per access mode remain. Add current CR3-derived facts in RD9a and requalify tiled inputs. Read summaries do not establish safe writer edits. |
 | R5 | Positional source, read budgets, source ranges/windows | `omc_source.h`, `omc_read_source.h`, direct and focused C++ source tests | Present shared bounded source machinery; RD9 adds current reader families without full-file copying. Test metadata boundaries, nonzero bases and forbidden media reads separately from contiguous behavior. Historical resource limits remain; see `read_decode_parity.md`. |
 | R6 | Runtime capabilities, preview, CCM/DNG helpers | `omc_capabilities.h`, `omc_preview.h`, `omc_ccm_query.h` and direct tests | Present bounded helpers. Capabilities must report actual C support and enabled compression features. |
-| R7 | Detached entry/store validation | `omc_store_validate.h`; bounded diagnostics, wire/value checks, singleton and image-context tests | Partial. Retain the 0.5.10 schema backlog and add current development/learning shapes, retained-NUL wire counts, type 129, sentinels and endian rules with UP4 families. Detached validation is not a complete destination EXIF profile. |
+| R7 | Detached entry/store validation | `omc_store_validate.h`; bounded diagnostics, wire/value checks, singleton and image-context tests | Partial. Retain the 0.5.10 schema backlog and add current development/learning shapes, retained-NUL wire counts, type 129, sentinels and endian rules with UP4 families. Port the shared opt-in 0.8.13 destination-profile validator with explicit host facts; detached validation remains separate. |
 | R8 | Decoded snapshots, source provenance and persistence | C callers retain stores/bytes; transfer packages retain output source ranges | Missing named decoded-state snapshot API; planned UP6 after direct native-intent support in UP6a. Snapshot v1 interoperability needs dirty/deleted intent, raw-carrier links and current format/name contexts; matching a version alone is insufficient. |
-| R9 | Aggregate decode work and decompression bounds | C has collection limits, source budgets and bounded decoder output room | Partial. RD8/UP1 adds JUMBF aggregate semantic work and verifies configured compression caps, zero semantics and failure behavior. Enabled/disabled backends and embedded stack/storage limits remain explicit. |
+| R9 | Aggregate decode work and decompression bounds | C has collection/source limits, aggregate JUMBF work accounting and strict decoder output caps | Focused RD8/UP1 slice implemented against 0.8.14. Exact-cap, overflow, short-output, zero/unlimited payload and finite-zero JUMBF rules have direct tests; compression has a differential target. Algorithms need not consume identical work units. Embedded stack/storage acceptance remains open. |
 
 ### Interpretation And Non-Fuzzy Query
 
@@ -865,15 +893,15 @@ semantics. C++ ownership and presentation APIs need not be reproduced.
 | --- | --- | --- | --- |
 | W1 | Typed authoring | C++ `create_metadata_store()` preflights, copies, validates and publishes atomically. C has typed value makers, explicit array byte order, and candidate-based edit publication. | Implemented bounded typed helpers and output-preserving transactions; see `authoring.md`. Owning logical builders and FlatHost wrappers remain above C; reusable metadata construction and validation semantics remain C targets. |
 | W2 | Canonical TIFF/EXIF serialization | C++ `serialize_exif_tiff()` is target-neutral and honors supported wire hints. C's public serializer builds typed TIFF; internal transfer payloads apply target framing above it. | Present with historical exact-byte comparisons. UP4/UP6a must reconcile type-129 text, retained terminal NULs and structured/learning numeric endian conversion across canonical output and LE/BE destinations. |
-| W3 | EXIF/IPTC to portable XMP | C has projection, conflict policies, custom namespaces and managed canonicalization | Partial against 0.8.11. Retain accepted IPTC and primary GPS cases. Port exact fractions, aliases, sentinels, development/learning/profile and remaining capture/text projection with the corresponding validators and translators. |
-| W4 | Explicit XMP to native metadata | C has original groups, flat locations, combined IPTC, all five GPS APIs and four EXIF text/version fields | Partial against 0.8.11. The 32-tag GPS C matrix and representative v1 comparisons remain; UP3 now needs v2 promotion/absent deletion and carrier lifecycle. UP4 has nine further EXIF-text fields plus capture/development/learning/profile work. UP5 owns structured locations; old masks stay stable. |
+| W3 | EXIF/IPTC to portable XMP | C has projection, conflict policies, custom namespaces and managed canonicalization | Partial against 0.8.14. Retain accepted IPTC and primary GPS cases. Port exact fractions, aliases, sentinels, development/learning/profile and remaining capture/text projection with the corresponding validators and translators. |
+| W4 | Explicit XMP to native metadata | C has original groups, flat locations, combined IPTC, all five GPS APIs and four EXIF text/version fields | Partial against 0.8.14. The 32-tag GPS C matrix and representative v1 comparisons remain; UP3 now needs v2 promotion/absent deletion and carrier lifecycle. UP4 has nine further EXIF-text fields plus capture/development/learning/profile work. UP5 owns structured locations; old masks stay stable. |
 | W5 | Native IPTC-IIM emission | Internal `omc_transfer_build_iptc_iim()`; JPEG IRB and TIFF tag `33723` carriers | Present bounded mechanism with 0.10.0 charset, repeated growth, tombstone and stale-IRB persistence tests. Broader transfer remains UP6. A separate public IPTC writer is not a prerequisite. |
 | W6 | Target image facts and transfer safety | C has target image spec, CompatibleFile/RenderedImage and diagnostics; C++ has wider source-processing classification and a RAW-data descriptor | Partial. Port descriptor-based RAW curve/linearity applicability, exact-IFD MakerNote trust and existing/template DNGVersion policy. Source filtering must preserve unspecified destination fields during merge; it is not redaction. Unknown context remains conditional. |
 | W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h`, direct overlay and persistence tests | Present pipeline, incomplete current native edit contract. UP6a comes before UP3/UP4 expansion: bounded IFD0/Exif/GPS intent, selected merge, version checks, LE/BE destinations, clear conflicts and unsupported-consumer rejection. Preserve unselected native fields, opaque notes and media. |
 | W8 | XMP carrier merge and lifecycle | C has destination embedded/sidecar stores, precedence, writeback and persistence options | Present controls, Partial lifecycle parity. Test modes/defaults, strip/overwrite/failure behavior and source/destination conflicts. |
 | W9 | Payload/package artifacts | C has `OMTPLD01` v1, `OMTPKG01` v2, semantic views, replay, executed-output materialization and artifact inspection | Present bounded wire families. Carry or explicitly reject new native edit intent according to each consumer's schema. Qualify interoperation separately from C++ prepared-object layout and decoded snapshot v1. |
 | W10 | BMFF package item insertion | C has Exif/XMP/JUMBF/C2PA routes, ICC, synthesized `idat`, inserted 32-bit IDs and bounded method-2 references | Shared bounded materializer now replaces managed families and remaps unambiguous IDs. Append layout preserves existing media addresses; physical byte layout differs from C++. |
-| W11 | Newer bounded BMFF writer rules | C has compact `iloc`, local `dref`, managed replacement/remapping and multiple-`ipma` consolidation | Partial against 0.8.11. Preserve repeated ordered `dimg` targets and reject retained relations losing an input; qualify method-2/local references, free-box growth and CR3 no-relocation behavior. See `bmff_writing.md`; byte layout can differ. |
+| W11 | Newer bounded BMFF writer rules | C has compact `iloc`, local `dref`, managed replacement/remapping and multiple-`ipma` consolidation | Focused 0.8.14 correction implemented: retained `dimg` input loss rejects, mixed ordered repeats survive, direct/serialized packages are tested. Existing method-2/local/free/meta-growth fixture passes. Broader adjacent-free and CR3 no-relocation qualification remain open; byte layout can differ. |
 | W12 | Transactional canonical EXIF/scalar-XMP patching | C++ 0.5 replaces the removed EXIF-only API with `metadata_patch.h`; C has `omc_metadata_patch.h` plan/worker/replay plus typed arrays and bounded borrowed views | Partial. The C primitive provides mixed-family atomic update validation, host-issued generations, emitted namespace-URI/simple-property binding, variable logical XMP text with fixed escaped widths, alias rejection, typed scalar/array EXIF updates, and allocation-free apply/replay checks. Full serializer-record evidence for repeated and native-projected properties remains open. |
 | W13 | MakerNote trust and C2PA | C has conservative rendered filtering and bounded JUMBF/C2PA routes; C++ has richer MakerNote layout audits and optional verification | Partial safety facts. Keep opaque preservation distinct from verified relocation. Bounded OpenSSL verification logic is eligible as an optional C backend. Rendered C2PA invalidation/drop stays explicit; full asset binding, signing and trust remain outside the first writer milestone. |
 
@@ -1230,9 +1258,9 @@ C++ paths refer to the public OpenMeta repository at the revision above.
 | Differential gate | [parity tests](tests/test_omc_parity.cc), [test configuration](tests/CMakeLists.txt) | `docs/development.md`, `docs/api_stability.md`, public format tests |
 | Unified patch/reuse | Existing canonical serializers and typed values; initial C plan/worker in `src/omc/omc_metadata_patch.h` | `src/include/openmeta/metadata_patch.h`, `src/openmeta/metadata_patch.cc`, `tests/metadata_patch_xmp_test.cc`, `tests/metadata_patch_allocation_test.cc`, `docs/migration_0_5.md`, `docs/canonical_patching.md` |
 
-Current priority: UP0 refresh to 0.8.11, UP1 resource/container corrections,
-then UP6a native edit intent and UP3 GPS v2. RD7-RD10 reader work proceeds
-independently after its baseline/resource gate. Continue UP4 family lifecycle,
+Current priority: UP6a native edit intent and UP3 GPS v2 after the 0.8.14
+UP0/focused-UP1 baseline. RD9 reader work can proceed independently; RD10 owns
+expanded inventory/original acceptance. Continue UP4 family lifecycle,
 UP5/remaining UP6, UP2 patch binding and UP7 semantics under the active order
 above. Preserve completed B0-B4, earlier UP/RD slices and their pinned results.
 Future C++ reuse must not narrow the C library's standalone metadata scope.

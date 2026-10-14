@@ -268,6 +268,49 @@ omc_exif_write_copy_original(const omc_u8* file_bytes, omc_size file_size,
     return OMC_STATUS_OK;
 }
 
+/* No-op TIFF edits still require a complete primary directory. Bound the count
+ * by available bytes before multiplication; no field values are interpreted. */
+static int
+omc_exif_write_valid_tiff_root(const omc_u8* bytes, omc_size size)
+{
+    omc_u64 root, count, entries;
+    omc_size count_size, entry_size, next_size;
+    omc_u16 magic;
+    int little, big;
+
+    if (size < 8U) return 0;
+    little = bytes[0] == 'I' && bytes[1] == 'I';
+    if (!little && !(bytes[0] == 'M' && bytes[1] == 'M')) return 0;
+    magic = little ? omc_exif_write_read_u16le(bytes + 2U)
+                   : omc_exif_write_read_u16be(bytes + 2U);
+    big = magic == 43U;
+    if (big) {
+        if (size < 16U ||
+            (little ? omc_exif_write_read_u16le(bytes + 4U)
+                    : omc_exif_write_read_u16be(bytes + 4U)) != 8U ||
+            (little ? omc_exif_write_read_u16le(bytes + 6U)
+                    : omc_exif_write_read_u16be(bytes + 6U)) != 0U) return 0;
+        root = little ? omc_exif_write_read_u64le(bytes + 8U)
+                      : omc_exif_write_read_u64be(bytes + 8U);
+    } else {
+        if (magic != 42U || (omc_u64)size > (omc_u64)0xFFFFFFFFU) return 0;
+        root = little ? omc_exif_write_read_u32le(bytes + 4U)
+                      : omc_exif_write_read_u32be(bytes + 4U);
+    }
+    count_size = big ? 8U : 2U;
+    entry_size = big ? 20U : 12U;
+    next_size = big ? 8U : 4U;
+    if (root == 0U || root > (omc_u64)size ||
+        count_size > (omc_u64)size - root) return 0;
+    count = big ? (little ? omc_exif_write_read_u64le(bytes + (omc_size)root)
+                          : omc_exif_write_read_u64be(bytes + (omc_size)root))
+                : (little ? omc_exif_write_read_u16le(bytes + (omc_size)root)
+                          : omc_exif_write_read_u16be(bytes + (omc_size)root));
+    entries = root + count_size;
+    if (next_size > (omc_u64)size - entries) return 0;
+    return count <= ((omc_u64)size - entries - next_size) / entry_size;
+}
+
 static omc_status
 omc_exif_write_append_jpeg_exif_segment(omc_arena* out, const omc_u8* payload,
                                         omc_size payload_size)
@@ -1381,14 +1424,18 @@ omc_exif_write_embedded_impl(const omc_u8* file_bytes, omc_size file_size,
     omc_exif_write_res_init(out_res);
     omc_arena_reset(out);
 
-    if (!omc_exif_write_store_has_supported_tags(source_store)) {
-        return omc_exif_write_copy_original(file_bytes, file_size, out, out_res);
-    }
-
     if (format == OMC_SCAN_FMT_UNKNOWN) {
         format = omc_exif_write_detect_format(file_bytes, file_size);
     }
     out_res->format = format;
+    if (!omc_exif_write_store_has_supported_tags(source_store)) {
+        if ((format == OMC_SCAN_FMT_TIFF || format == OMC_SCAN_FMT_DNG) &&
+            !omc_exif_write_valid_tiff_root(file_bytes, file_size)) {
+            out_res->status = OMC_EXIF_WRITE_MALFORMED;
+            return OMC_STATUS_OK;
+        }
+        return omc_exif_write_copy_original(file_bytes, file_size, out, out_res);
+    }
     if (format != OMC_SCAN_FMT_JPEG && format != OMC_SCAN_FMT_PNG
         && format != OMC_SCAN_FMT_TIFF && format != OMC_SCAN_FMT_DNG
         && format != OMC_SCAN_FMT_WEBP

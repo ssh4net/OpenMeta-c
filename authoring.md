@@ -3,11 +3,11 @@
 The public C authoring operations use the existing store, arena, value, and
 edit types. They require no file handle or C++ runtime.
 
-The current source-reviewed target is C++ 0.8.11 (`0242459f`). Implemented C
+The current execution target is C++ 0.8.14 (`fc2052b`). Implemented C
 behavior and the historical 0.4.132/0.5.10 gates below retain their original
-scope. The [active roadmap](porting_plan.md#upstream-0811-convergence-roadmap)
+scope. The [active roadmap](porting_plan.md#upstream-0814-execution-baseline)
 now prioritizes explicit native edit intent before further family expansion;
-this documentation refresh does not change the C API or establish 0.8.11 parity.
+the resource baseline does not establish current authoring parity.
 
 ## Lifetime and failure contracts
 
@@ -414,3 +414,11 @@ profile route (ImageDescription, Artist, scalar Copyright, ColorSpace,
 RelatedSoundFile) is an additional v1 transaction; its full native lifecycle is
 still a C++ follow-up. LightSource also remains contract v1. Detached validation
 does not establish a complete destination EXIF profile, ICC or audio authority.
+
+At the current 0.8.14 pin, profile translation is v2 and its native lifecycle is
+implemented in C++. RelatedSoundFile raises the removal allowlist to 85.
+ColorSpace is host-owned: explicit destination image facts may replace it,
+source filtering/deletion cannot. Add the shared opt-in destination-profile
+validator with UP4 and bounded structured XMP editing with UP5. The paragraphs
+above retain the 0.8.11 inventory; these additions supersede its profile-v1
+follow-up status.

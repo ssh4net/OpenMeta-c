@@ -778,6 +778,7 @@ omc_bmff_build_iref(omc_bmff_graph *g, const omc_bmff_write_item *items, omc_u32
     omc_size kept_offset;
     omc_bmff_box child;
     omc_u32 from;
+    omc_u32 input_to;
     omc_u32 to;
     omc_u32 targets;
     omc_u32 kept;
@@ -841,8 +842,14 @@ omc_bmff_build_iref(omc_bmff_graph *g, const omc_bmff_write_item *items, omc_u32
             ok = omc_bmff_number(g, &child_out, 0U, 2U);
         kept = 0U;
         for (i = 0U; ok && i < targets; ++i) {
-            to = omc_bmff_remap(g, (omc_u32)omc_bmff_get(g->bytes + p, input_width));
+            input_to = (omc_u32)omc_bmff_get(g->bytes + p, input_width);
+            to = omc_bmff_remap(g, input_to);
             p += input_width;
+            if (child.type == OMC_FOURCC('d', 'i', 'm', 'g') && from != 0U &&
+                input_to != 0U && to == 0U) {
+                ok = omc_bmff_fail(g, OMC_TRANSFER_UNSUPPORTED);
+                break;
+            }
             if (!from || !to)
                 continue;
             if (child.type == OMC_FOURCC('c', 'd', 's', 'c') && to == g->primary) {
