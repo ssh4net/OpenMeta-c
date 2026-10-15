@@ -51,6 +51,7 @@ set(OMC_SOURCES
   edit/omc_bmff_rewrite.c
   edit/omc_jp2_rewrite.c
   edit/omc_metadata_patch.c
+  edit/omc_native_edit.c
   edit/omc_exif_write.c
   edit/omc_exif_overlay.c
   edit/omc_exif_tiff_serialize.c

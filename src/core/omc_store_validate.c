@@ -381,6 +381,7 @@ omc_check_entry(omc_validation *v, omc_entry_id id)
     const omc_u8 *p;
     omc_byte_ref r;
     omc_u32 expected;
+    omc_size text_size;
     e = &v->store->entries[id];
     v->res.entries_checked++;
     if (!omc_validate_key_shape(v, &e->key)) {
@@ -397,6 +398,7 @@ omc_check_entry(omc_validation *v, omc_entry_id id)
     if ((e->flags & OMC_ENTRY_FLAG_DELETED) != 0U)
         return 0;
     x = &e->value;
+    text_size = x->kind == OMC_VAL_TEXT ? x->u.ref.size : 0U;
     if (!omc_value_shape_valid(x, &v->store->arena)) {
         omc_issue(v, OMC_METADATA_INVALID_VALUE, id, OMC_INVALID_ENTRY_ID, 0);
         return 0;
@@ -418,7 +420,10 @@ omc_check_entry(omc_validation *v, omc_entry_id id)
     if (x->kind == OMC_VAL_TEXT &&
         (x->text_encoding == OMC_TEXT_ASCII || x->text_encoding == OMC_TEXT_UTF8)) {
         p = x->u.ref.size ? v->store->arena.data + x->u.ref.offset : NULL;
-        if (!omc_utf8_valid(p, x->u.ref.size, x->text_encoding == OMC_TEXT_ASCII)) {
+        /* A decoded EXIF string can retain its single wire terminator. */
+        if (e->key.kind == OMC_KEY_EXIF_TAG && text_size != 0U &&
+            p[text_size - 1U] == 0U) text_size--;
+        if (!omc_utf8_valid(p, text_size, x->text_encoding == OMC_TEXT_ASCII)) {
             omc_issue(v, OMC_METADATA_INVALID_TEXT, id, OMC_INVALID_ENTRY_ID, 0);
         }
     }
@@ -448,18 +453,21 @@ omc_check_entry(omc_validation *v, omc_entry_id id)
     if (e->key.kind != OMC_KEY_EXIF_TAG)
         return 0;
     type = omc_value_tiff_type(x);
+    if (x->kind == OMC_VAL_TEXT && x->text_encoding == OMC_TEXT_UTF8 &&
+        e->origin.wire_type.family == OMC_WIRE_TIFF &&
+        e->origin.wire_type.code == 129U) type = 129U;
     count = x->count;
     if (x->kind == OMC_VAL_TEXT) {
-        if (count == 0xFFFFFFFFU) {
+        if (text_size >= 0xFFFFFFFFU) {
             omc_issue(v, OMC_METADATA_LIMIT, id, OMC_INVALID_ENTRY_ID, 0);
             return 0;
         }
-        count++;
+        count = (omc_u32)text_size + 1U;
     }
     if (v->opts.validate_wire_hints) {
         if (e->origin.wire_type.family == OMC_WIRE_TIFF) {
             hinted = e->origin.wire_type.code;
-            if (hinted == 0U || hinted > 12U ||
+            if (hinted == 0U || (hinted > 12U && hinted != 129U) ||
                 (hinted != type && !(x->kind == OMC_VAL_BYTES &&
                                      (hinted == 1U || hinted == 6U || hinted == 7U)))) {
                 omc_issue(v, OMC_METADATA_INVALID_WIRE_TYPE, id, OMC_INVALID_ENTRY_ID,
@@ -487,7 +495,13 @@ omc_check_entry(omc_validation *v, omc_entry_id id)
         }
         return 0;
     }
-    if (type == 0U || type > 15U || (schema->types & (1U << type)) == 0U) {
+    /* Type 129 is the UTF-8 wire form for these native text fields; it
+     * cannot be represented in the compact baseline TIFF type mask. */
+    if (type == 129U && schema->ifd == 1 &&
+        (schema->tag == 0x010FU || schema->tag == 0x0110U ||
+         schema->tag == 0x0131U)) {
+        /* The text encoding and wire count were checked above. */
+    } else if (type == 0U || type > 15U || (schema->types & (1U << type)) == 0U) {
         omc_issue(v, OMC_METADATA_WRONG_TYPE, id, OMC_INVALID_ENTRY_ID, 0);
     }
     if (count < schema->min_count ||
@@ -495,7 +509,7 @@ omc_check_entry(omc_validation *v, omc_entry_id id)
         omc_issue(v, OMC_METADATA_WRONG_COUNT, id, OMC_INVALID_ENTRY_ID, 0);
     }
     if (type == 2U && x->kind == OMC_VAL_TEXT &&
-        !omc_utf8_valid(v->store->arena.data + x->u.ref.offset, x->u.ref.size, 1)) {
+        !omc_utf8_valid(v->store->arena.data + x->u.ref.offset, text_size, 1)) {
         omc_issue(v, OMC_METADATA_INVALID_TEXT, id, OMC_INVALID_ENTRY_ID, 0);
     }
     expected = 0U;

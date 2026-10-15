@@ -766,7 +766,7 @@ omc_exif_write_build_direct_bmff_payload(const omc_arena* tiff_payload,
 
 static omc_status
 omc_exif_write_canonical(const omc_store* store, omc_scan_fmt format,
-                          omc_arena* out, omc_exif_write_res* result)
+                          omc_arena* out, omc_exif_write_res* result, int inject_dng)
 {
     omc_exif_tiff_opts opts;
     omc_exif_tiff_res serialized;
@@ -778,7 +778,7 @@ omc_exif_write_canonical(const omc_store* store, omc_scan_fmt format,
      * contain noncanonical legacy wire hints and vendor-derived entries. */
     opts.validate = 0;
     opts.include_subifds = format == OMC_SCAN_FMT_DNG;
-    opts.inject_minimal_dng_version = format == OMC_SCAN_FMT_DNG;
+    opts.inject_minimal_dng_version = inject_dng;
     bytes.data = NULL;
     bytes.size = 0U;
     serialized = omc_serialize_exif_tiff(store, bytes, &opts);
@@ -887,7 +887,8 @@ omc_exif_write_build_transfer_payload(const omc_store* source_store,
         return OMC_STATUS_OK;
     }
     omc_arena_init(&tiff);
-    status = omc_exif_write_canonical(source_store, format, &tiff, out_res);
+    status = omc_exif_write_canonical(source_store, format, &tiff, out_res,
+                                              format == OMC_SCAN_FMT_DNG);
     if (status == OMC_STATUS_OK && out_res->status == OMC_EXIF_WRITE_OK && tiff.size != 0U) {
         if (format == OMC_SCAN_FMT_PNG || format == OMC_SCAN_FMT_WEBP)
             status = omc_exif_write_append(out, tiff.data, tiff.size);
@@ -1464,7 +1465,8 @@ omc_exif_write_embedded_impl(const omc_u8* file_bytes, omc_size file_size,
     omc_arena_init(&container_payload);
     status = OMC_STATUS_OK;
     if (format == OMC_SCAN_FMT_TIFF || format == OMC_SCAN_FMT_DNG) {
-        status = omc_exif_write_canonical(source_store, format, &tiff_payload, out_res);
+        status = omc_exif_write_canonical(source_store, format, &tiff_payload, out_res,
+                                                  format == OMC_SCAN_FMT_DNG);
         if (status == OMC_STATUS_OK && out_res->status == OMC_EXIF_WRITE_OK)
             status = omc_exif_overlay_tiff(file_bytes, file_size, source_store,
                                           &tiff_payload, out, out_res);
@@ -1472,7 +1474,8 @@ omc_exif_write_embedded_impl(const omc_u8* file_bytes, omc_size file_size,
     }
     status = omc_exif_write_merge(source_store, current_store_ptr, &merged);
     if (status != OMC_STATUS_OK) goto cleanup;
-    status = omc_exif_write_canonical(&merged, format, &tiff_payload, out_res);
+    status = omc_exif_write_canonical(&merged, format, &tiff_payload, out_res,
+                                              format == OMC_SCAN_FMT_DNG);
     if (status != OMC_STATUS_OK || out_res->status != OMC_EXIF_WRITE_OK) goto cleanup;
     if (tiff_payload.size == 0U) {
         status = omc_exif_write_copy_original(file_bytes, file_size, out, out_res);
@@ -1552,13 +1555,103 @@ cleanup:
     return status;
 }
 
+/* Existing TIFFs retain their offsets and destination-only values. Selection
+ * is separate from canonical serialization: tombstones never become values. */
+omc_status
+omc_exif_write_embedded_edit(const omc_u8* file_bytes, omc_size file_size,
+                             const omc_store* source_store,
+                             const omc_native_edit_intent* intent,
+                             omc_arena* out, omc_scan_fmt format,
+                             omc_exif_write_res* out_res)
+{
+    omc_store selected;
+    omc_arena canonical;
+    omc_arena candidate;
+    omc_arena previous;
+    omc_status status;
+    omc_size i;
+    omc_const_bytes ifd;
+    omc_entry* entry;
+    int gps_updates;
+    omc_u16 tag;
+    if (file_bytes == NULL || source_store == NULL || out == NULL ||
+        out_res == NULL || omc_native_edit_intent_validate(intent) != OMC_STATUS_OK)
+        return OMC_STATUS_INVALID_ARGUMENT;
+    if (format == OMC_SCAN_FMT_UNKNOWN)
+        format = omc_exif_write_detect_format(file_bytes, file_size);
+    omc_exif_write_res_init(out_res);
+    out_res->format = format;
+    if (format != OMC_SCAN_FMT_TIFF && format != OMC_SCAN_FMT_DNG) {
+        if (omc_native_edit_intent_present(intent)) return OMC_STATUS_OK;
+        return omc_exif_write_embedded_impl(file_bytes, file_size, source_store,
+                                             out, format, out_res, 1);
+    }
+    if (!omc_store_shape_valid(source_store)) return OMC_STATUS_INVALID_ARGUMENT;
+    if (source_store->entry_count > 200000U) return OMC_STATUS_OVERFLOW;
+    omc_store_init(&selected);
+    omc_arena_init(&canonical);
+    omc_arena_init(&candidate);
+    status = omc_edit_commit(source_store, NULL, 0U, &selected);
+    if (status != OMC_STATUS_OK) goto done;
+    gps_updates = 0;
+    for (i = 0U; i < selected.entry_count; ++i) {
+        entry = &selected.entries[i];
+        if (entry->key.kind != OMC_KEY_EXIF_TAG) continue;
+        ifd = omc_arena_view(&selected.arena, entry->key.u.exif_tag.ifd);
+        tag = entry->key.u.exif_tag.tag;
+        if (ifd.size == 6U && memcmp(ifd.data, "gpsifd", 6U) == 0 &&
+            tag >= 1U && tag <= 31U &&
+            (entry->flags & (OMC_ENTRY_FLAG_DIRTY | OMC_ENTRY_FLAG_DELETED)) ==
+                OMC_ENTRY_FLAG_DIRTY) gps_updates = 1;
+    }
+    for (i = 0U; i < selected.entry_count; ++i) {
+        entry = &selected.entries[i];
+        if (entry->key.kind != OMC_KEY_EXIF_TAG) continue;
+        ifd = omc_arena_view(&selected.arena, entry->key.u.exif_tag.ifd);
+        tag = entry->key.u.exif_tag.tag;
+        if ((intent->merge_gps || intent->gps_removal_count != 0U) && ifd.size == 6U &&
+            memcmp(ifd.data, "gpsifd", 6U) == 0) {
+            if ((tag == 0U && !gps_updates) || tag > 31U ||
+                (tag != 0U && !(entry->flags & OMC_ENTRY_FLAG_DIRTY)))
+                entry->flags |= OMC_ENTRY_FLAG_DELETED;
+        }
+        if (ifd.size == 4U && memcmp(ifd.data, "ifd0", 4U) == 0 &&
+            tag == 0xC612U && !(entry->flags & OMC_ENTRY_FLAG_DIRTY))
+            entry->flags |= OMC_ENTRY_FLAG_DELETED;
+    }
+    status = omc_exif_write_canonical(&selected, format, &canonical, out_res, 0);
+    if (status == OMC_STATUS_OK && out_res->status == OMC_EXIF_WRITE_OK)
+        status = omc_exif_overlay_tiff_edit(file_bytes, file_size, &selected,
+                                            &canonical, intent, &candidate,
+                                            out_res);
+    if (status == OMC_STATUS_OK && out_res->status == OMC_EXIF_WRITE_OK) {
+        previous = *out;
+        *out = candidate;
+        candidate = previous;
+    } else out_res->written = 0U;
+done:
+    omc_arena_fini(&candidate);
+    omc_arena_fini(&canonical);
+    omc_store_fini(&selected);
+    return status;
+}
+
 omc_status
 omc_exif_write_embedded(const omc_u8* file_bytes, omc_size file_size,
                         const omc_store* source_store, omc_arena* out,
                         omc_scan_fmt format, omc_exif_write_res* out_res)
 {
-    return omc_exif_write_embedded_impl(file_bytes, file_size, source_store,
-                                        out, format, out_res, 1);
+    omc_native_edit_intent intent;
+    omc_status status;
+    if (format == OMC_SCAN_FMT_UNKNOWN && file_bytes != NULL)
+        format = omc_exif_write_detect_format(file_bytes, file_size);
+    if (format != OMC_SCAN_FMT_TIFF && format != OMC_SCAN_FMT_DNG)
+        return omc_exif_write_embedded_impl(file_bytes, file_size, source_store,
+                                             out, format, out_res, 1);
+    status = omc_native_edit_intent_collect(source_store, &intent);
+    if (status != OMC_STATUS_OK) return status;
+    return omc_exif_write_embedded_edit(file_bytes, file_size, source_store,
+                                        &intent, out, format, out_res);
 }
 
 omc_status

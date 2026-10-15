@@ -8,7 +8,8 @@ OMC_EXTERN_C_BEGIN
 typedef enum omc_edit_op_kind {
     OMC_EDIT_OP_ADD_ENTRY = 0,
     OMC_EDIT_OP_SET_VALUE = 1,
-    OMC_EDIT_OP_TOMBSTONE = 2
+    OMC_EDIT_OP_TOMBSTONE = 2,
+    OMC_EDIT_OP_MARK_DIRTY = 3
 } omc_edit_op_kind;
 
 typedef struct omc_edit_op {
@@ -48,9 +49,13 @@ omc_edit_set_value(omc_edit* edit, omc_entry_id target, const omc_val* value);
 OMC_API omc_status
 omc_edit_tombstone(omc_edit* edit, omc_entry_id target);
 
+/* Marks an existing entry dirty without changing its value, key or origin. */
+OMC_API omc_status
+omc_edit_mark_dirty(omc_edit* edit, omc_entry_id target);
+
 /* out must be initialized and distinct from base. On failure out and base,
  * including their borrowed views, remain unchanged. On success old out views
- * expire. Out-of-range set/tombstone targets retain the legacy no-op behavior. */
+ * expire. Out-of-range set/tombstone/mark-dirty targets are no-ops. */
 OMC_API omc_status
 omc_edit_commit(const omc_store* base, const omc_edit* edits,
                 omc_size edit_count, omc_store* out);

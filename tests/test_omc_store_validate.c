@@ -108,5 +108,40 @@ main(void)
         assert(issues[0].entry == 2U && issues[0].related_entry == 1U);
     }
     omc_store_fini(&s);
+    omc_store_init(&s);
+    {
+        static const omc_u8 utf8[] = {0xC3U, 0xA9U, 0U};
+        assert(omc_arena_append(&s.arena, utf8, sizeof(utf8), &r) == OMC_STATUS_OK);
+        omc_val_make_text(&v, r, OMC_TEXT_UTF8);
+        e = add(&s, "exififd", 0xA430U, v);
+        e->origin.wire_type.family = OMC_WIRE_TIFF;
+        e->origin.wire_type.code = 129U;
+        e->origin.wire_count = 3U;
+        res = omc_validate_entry(&s, 0U, issues, 8U, NULL);
+        assert(res.status == OMC_STATUS_OK);
+        /* A schema-known native UTF-8 field also accepts the wire form. */
+        e = add(&s, "ifd0", 0x010FU, v);
+        e->origin.wire_type.family = OMC_WIRE_TIFF;
+        e->origin.wire_type.code = 129U;
+        e->origin.wire_count = 3U;
+        res = omc_validate_entry(&s, 1U, issues, 8U, NULL);
+        assert(res.status == OMC_STATUS_OK);
+        e->key.u.exif_tag.tag = 0x0132U;
+        res = omc_validate_entry(&s, 1U, issues, 8U, NULL);
+        assert(res.error_count == 2U && issues[0].code == OMC_METADATA_WRONG_TYPE);
+        s.entries[1].flags = OMC_ENTRY_FLAG_DELETED;
+        e = &s.entries[0];
+        e->origin.wire_count = 4U;
+        res = omc_validate_entry(&s, 0U, issues, 8U, NULL);
+        assert(res.error_count == 1U && issues[0].code == OMC_METADATA_INVALID_WIRE_COUNT);
+        e->origin.wire_count = 3U;
+        e->value.text_encoding = OMC_TEXT_ASCII;
+        res = omc_validate_entry(&s, 0U, issues, 8U, NULL);
+        assert(res.error_count != 0U);
+        omc_val_make_bytes(&e->value, r);
+        res = omc_validate_entry(&s, 0U, issues, 8U, NULL);
+        assert(res.error_count == 1U && issues[0].code == OMC_METADATA_INVALID_WIRE_TYPE);
+    }
+    omc_store_fini(&s);
     return 0;
 }

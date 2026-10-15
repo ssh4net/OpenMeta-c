@@ -1,6 +1,6 @@
 # OpenMeta-c Porting Plan
 
-Updated: 2026-10-14.
+Updated: 2026-10-15.
 
 ## Goal And Reference Baseline
 
@@ -68,12 +68,29 @@ extends `omc_jumbf_limits` with a finite aggregate-work budget; rebuild consumer
 and initialize options. Payload output limit zero now means unlimited, matching
 C++; the default remains 64 MiB.
 
-Next implementation: **UP6a native edit intent and selected LE/BE TIFF/BigTIFF
-merging, then UP3 GPS v2**. RD9 reader batches can proceed independently after
-their resource gate. Continue the family order below, using profile v2 and
-shared destination validation, then structured XMP/locations, remaining UP6,
-UP2 patch binding and UP7 semantics. New upstream commits enter a delta queue;
-they do not change this batch's immutable acceptance reference.
+The **UP6a direct native-edit foundation and UP3 GPS v2 batch is accepted** in
+C package 0.12.0 against this pin. See [the batch receipt](up6a_gps_v2_0814.md)
+for validation and limits. Its owned intent supports seven IFD0, 85 ExifIFD
+and 31 GPS removal selectors, explicit clear/merge conflicts, both TIFF byte
+orders and layouts, target-version checks, and executed-output package replay.
+All five GPS APIs now promote accepted clean values and retain absent deletion
+intent. All 32 standard GPS IDs pass the 13-carrier readback matrix; 24 selected
+TIFF edit cases compare against C++. These are scoped cases, not stage-wide
+coverage percentages.
+
+| Workstream | Current boundary | Next gate |
+| --- | --- | --- |
+| UP6a | Direct selected TIFF/BigTIFF and existing/template DNG edits, output rollback, executed-output package persistence | Broader replacement/page/SubIFD semantics and prepared snapshots remain UP6; generic payloads reject destination-only intent |
+| UP3 GPS | All five v2 lifecycles, bounded planning, representation retention and carrier persistence | Keep these cases in each later transfer regression run |
+| UP4 | Existing earlier-contract families retained | Dates/basic capture/sensitivity/Flash/lens lifecycle first, with shared destination validation; continue family order below using profile v2 |
+| RD9/RD10 | Independent reader/decode expansion | Updated memory/callback inventories and selected corpus; eight existing broad parity failures remain open |
+| UP5 / remaining UP6 | Structured XMP/locations, source applicability and snapshot/consumer contracts | Preserve intent across every supported consumer; reject unsupported routes before output/callbacks |
+| UP2 / UP7 | Existing patch foundation and partial semantics | Remaining patch binding, normalized interpretation and exact non-fuzzy queries |
+
+New upstream commits enter a delta queue; they do not change this batch's
+immutable acceptance reference. RD9 reader batches can proceed independently
+after their resource gate. The historical 0.8.11 gap statements below describe
+the earlier checkout; the accepted 0.8.14 receipts supersede them.
 
 ## Upstream 0.8.11 Convergence Roadmap
 

@@ -6,6 +6,7 @@
 #include "omc/omc_scan.h"
 #include "omc/omc_status.h"
 #include "omc/omc_store.h"
+#include "omc/omc_native_edit.h"
 
 OMC_EXTERN_C_BEGIN
 
@@ -32,6 +33,20 @@ omc_status
 omc_exif_overlay_tiff(const omc_u8* file, omc_size size, const omc_store* source,
                       const omc_arena* canonical, omc_arena* out,
                       omc_exif_write_res* res);
+
+omc_status
+omc_exif_overlay_tiff_edit(const omc_u8* file, omc_size size,
+                           const omc_store* source,
+                           const omc_arena* canonical,
+                           const omc_native_edit_intent* intent,
+                           omc_arena* out, omc_exif_write_res* res);
+
+omc_status
+omc_exif_write_embedded_edit(const omc_u8* file_bytes, omc_size file_size,
+                            const omc_store* source_store,
+                            const omc_native_edit_intent* intent,
+                            omc_arena* out, omc_scan_fmt format,
+                            omc_exif_write_res* out_res);
 
 void
 omc_exif_write_res_init(omc_exif_write_res* res);

@@ -62,6 +62,36 @@ add_native_array(omc_store *store, omc_u16 tag, const omc_urational *values,
 }
 
 static void
+add_native_be_coordinate(omc_store *store, omc_u16 tag)
+{
+    static const omc_u8 raw[24] = {
+        0U, 0U, 0x1BU, 0x58U, 0U, 0U, 0U, 0xC8U,
+        0U, 0U, 0x20U, 0x08U, 0U, 0U, 0U, 0xC8U,
+        0U, 0U, 0x17U, 0x70U, 0U, 0U, 0U, 0xC8U
+    };
+    omc_entry entry;
+    omc_byte_ref ifd;
+    omc_byte_ref values;
+    memset(&entry, 0, sizeof(entry));
+    assert(omc_arena_append(&store->arena, "gpsifd", 6U, &ifd) ==
+           OMC_STATUS_OK);
+    omc_key_make_exif_tag(&entry.key, ifd, tag);
+    assert(omc_arena_append(&store->arena, raw, sizeof(raw), &values) ==
+           OMC_STATUS_OK);
+    omc_val_make_array(&entry.value, OMC_ELEM_URATIONAL, 3U, values,
+                       OMC_BYTE_ORDER_BIG);
+    entry.origin.block = 17U;
+    entry.origin.order_in_block = 23U;
+    entry.origin.wire_type.family = OMC_WIRE_TIFF;
+    entry.origin.wire_type.code = 5U;
+    entry.origin.wire_count = 3U;
+    entry.origin.wire_type_name = append_text(store, "RATIONAL");
+    entry.origin.name_context_kind = OMC_ENTRY_NAME_CTX_CANON_MAIN_0038;
+    entry.origin.name_context_variant = 4U;
+    assert(omc_store_add_entry(store, &entry, NULL) == OMC_STATUS_OK);
+}
+
+static void
 add_native_u8(omc_store *store, omc_u16 tag, omc_u8 value)
 {
     omc_entry entry;
@@ -281,6 +311,230 @@ test_exact_coordinates_and_failures(void)
 }
 
 static void
+test_primary_promotes_exact_clean_native(void)
+{
+    omc_store source;
+    omc_store output;
+    omc_store again;
+    omc_gps_translation_opts opts;
+    omc_gps_translation_res result;
+    omc_urational latitude[3];
+    omc_urational longitude[3];
+    omc_urational actual[3];
+    omc_urational altitude;
+    omc_byte_ref ref;
+    omc_const_bytes bytes;
+    omc_entry *native;
+    omc_size i;
+    static const omc_u16 tags[6] = {1U, 2U, 3U, 4U, 5U, 6U};
+
+    omc_store_init(&source);
+    omc_store_init(&output);
+    omc_store_init(&again);
+    add_xmp(&source, "GPSLatitude", "35,48.125N", 0);
+    add_xmp(&source, "GPSLongitude", "139,34,55.25W", 0);
+    add_xmp(&source, "GPSAltitude", "12345/100", 0);
+    add_xmp(&source, "GPSAltitudeRef", "1", 0);
+
+    add_native_text(&source, 1U, "N");
+    latitude[0].numer = 70U; latitude[0].denom = 2U;
+    latitude[1].numer = 96U; latitude[1].denom = 2U;
+    latitude[2].numer = 30U; latitude[2].denom = 4U;
+    add_native_array(&source, 2U, latitude, 3U);
+    add_native_text(&source, 3U, "W");
+    longitude[0].numer = 139U; longitude[0].denom = 1U;
+    longitude[1].numer = 34U; longitude[1].denom = 1U;
+    longitude[2].numer = 221U; longitude[2].denom = 4U;
+    add_native_array(&source, 4U, longitude, 3U);
+    add_native_u8(&source, 5U, 1U);
+    {
+        omc_entry entry;
+        memset(&entry, 0, sizeof(entry));
+        omc_key_make_exif_tag(&entry.key, append_text(&source, "gpsifd"), 6U);
+        altitude.numer = 2469U;
+        altitude.denom = 20U;
+        omc_val_make_urational(&entry.value, altitude);
+        assert(omc_store_add_entry(&source, &entry, NULL) == OMC_STATUS_OK);
+    }
+    native = &source.entries[source.entry_count - 5U];
+    native->origin.block = 17U;
+    native->origin.order_in_block = 23U;
+    native->origin.wire_type.family = OMC_WIRE_TIFF;
+    native->origin.wire_type.code = 5U;
+    native->origin.wire_count = 3U;
+    native->origin.wire_type_name = append_text(&source, "RATIONAL");
+    native->origin.name_context_kind = OMC_ENTRY_NAME_CTX_CANON_MAIN_0038;
+    native->origin.name_context_variant = 4U;
+    native->flags = OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+
+    omc_gps_translation_opts_init(&opts);
+    opts.all_sources = 1;
+    opts.max_added_entries = 1U;
+    opts.max_operations = 7U;
+    result = omc_translate_xmp_gps(&source, &output, &opts);
+    assert(result.status == OMC_GPS_TRANSLATION_OK);
+    assert(result.groups_translated == 3U && result.groups_unchanged == 0U);
+    assert(result.entries_updated == 6U && result.entries_added == 1U);
+    for (i = 0U; i < 6U; ++i) {
+        const omc_entry *entry = find_gps(&output, tags[i]);
+        assert(entry != NULL &&
+               (entry->flags & OMC_ENTRY_FLAG_DIRTY) != 0U);
+    }
+    native = (omc_entry *)find_gps(&output, 2U);
+    assert(native != NULL && native->origin.block == 17U);
+    assert(native->origin.order_in_block == 23U);
+    assert(native->origin.wire_type.family == OMC_WIRE_TIFF);
+    assert(native->origin.wire_type.code == 5U);
+    assert(native->origin.wire_count == 3U);
+    assert(native->origin.name_context_kind ==
+           OMC_ENTRY_NAME_CTX_CANON_MAIN_0038);
+    assert(native->origin.name_context_variant == 4U);
+    bytes = omc_arena_view(&output.arena, native->origin.wire_type_name);
+    assert(bytes.size == 8U && memcmp(bytes.data, "RATIONAL", 8U) == 0);
+    assert(native->value.kind == OMC_VAL_ARRAY &&
+           native->value.count == 3U &&
+           native->value.byte_order == OMC_BYTE_ORDER_NATIVE);
+    bytes = omc_arena_view(&output.arena, native->value.u.ref);
+    memcpy(actual, bytes.data, sizeof(actual));
+    assert(actual[0].numer == latitude[0].numer &&
+           actual[0].denom == latitude[0].denom);
+    assert(actual[1].numer == latitude[1].numer &&
+           actual[1].denom == latitude[1].denom);
+    assert(actual[2].numer == latitude[2].numer &&
+           actual[2].denom == latitude[2].denom);
+    assert((native->flags & OMC_ENTRY_FLAG_CONTEXTUAL_NAME) != 0U);
+
+    result = omc_translate_xmp_gps(&output, &again, &opts);
+    assert(result.status == OMC_GPS_TRANSLATION_OK &&
+           result.groups_unchanged == 3U && result.entries_updated == 0U &&
+           result.entries_added == 0U && result.groups_translated == 0U);
+    omc_store_fini(&again);
+    omc_store_fini(&output);
+    omc_store_fini(&source);
+}
+
+static void
+expect_be_coordinate_preserved(const omc_store *source,
+                               const omc_store *output,
+                               omc_entry_flags source_flags,
+                               omc_entry_flags output_flags)
+{
+    const omc_entry *before;
+    const omc_entry *after;
+    omc_const_bytes before_bytes;
+    omc_const_bytes after_bytes;
+    before = find_gps(source, 2U);
+    after = find_gps(output, 2U);
+    assert(before != NULL && after != NULL);
+    assert(before->flags == source_flags);
+    assert(after->flags == output_flags);
+    assert(before->value.byte_order == OMC_BYTE_ORDER_BIG);
+    assert(after->value.kind == OMC_VAL_ARRAY &&
+           after->value.elem_type == OMC_ELEM_URATIONAL &&
+           after->value.count == 3U &&
+           after->value.byte_order == OMC_BYTE_ORDER_BIG);
+    assert(before->origin.block == after->origin.block &&
+           before->origin.order_in_block == after->origin.order_in_block &&
+           before->origin.wire_type.family ==
+               after->origin.wire_type.family &&
+           before->origin.wire_type.code == after->origin.wire_type.code &&
+           before->origin.wire_count == after->origin.wire_count &&
+           before->origin.name_context_kind ==
+               after->origin.name_context_kind &&
+           before->origin.name_context_variant ==
+               after->origin.name_context_variant);
+    before_bytes = omc_arena_view(&source->arena, before->value.u.ref);
+    after_bytes = omc_arena_view(&output->arena, after->value.u.ref);
+    assert(before_bytes.size == sizeof(omc_u8) * 24U &&
+           after_bytes.size == before_bytes.size &&
+           memcmp(before_bytes.data, after_bytes.data, before_bytes.size) == 0);
+    before_bytes = omc_arena_view(&source->arena,
+                                  before->origin.wire_type_name);
+    after_bytes = omc_arena_view(&output->arena,
+                                 after->origin.wire_type_name);
+    assert(before_bytes.size == 8U && after_bytes.size == before_bytes.size &&
+           memcmp(before_bytes.data, after_bytes.data, before_bytes.size) == 0);
+}
+
+static void
+populate_be_coordinate_source(omc_store *source)
+{
+    add_xmp(source, "GPSLatitude", "35,41,30N", 1);
+    add_native_text(source, 1U, "N");
+    add_native_be_coordinate(source, 2U);
+}
+
+static void
+test_primary_be_coordinate_lifecycle(void)
+{
+    omc_store source;
+    omc_store output;
+    omc_store again;
+    omc_store preserve_source;
+    omc_store preserve_output;
+    omc_store replace_source;
+    omc_store replace_output;
+    omc_gps_translation_opts opts;
+    omc_gps_translation_res result;
+    const omc_entry *native;
+
+    omc_store_init(&source);
+    omc_store_init(&output);
+    omc_store_init(&again);
+    omc_store_init(&preserve_source);
+    omc_store_init(&preserve_output);
+    omc_store_init(&replace_source);
+    omc_store_init(&replace_output);
+    populate_be_coordinate_source(&source);
+
+    omc_gps_translation_opts_init(&opts);
+    opts.conflict = OMC_TRANSLATION_FAIL;
+    result = omc_translate_xmp_gps(&source, &output, &opts);
+    assert(result.status == OMC_GPS_TRANSLATION_OK);
+    assert(result.source_properties == 1U && result.groups_translated == 1U &&
+           result.groups_unchanged == 0U && result.groups_preserved == 0U &&
+           result.entries_updated == 2U && result.entries_added == 1U &&
+           result.entries_removed == 0U);
+    native = find_gps(&output, 1U);
+    assert(native != NULL && (native->flags & OMC_ENTRY_FLAG_DIRTY) != 0U);
+    expect_be_coordinate_preserved(&source, &output, 0U,
+                                   OMC_ENTRY_FLAG_DIRTY);
+    result = omc_translate_xmp_gps(&output, &again, &opts);
+    assert(result.status == OMC_GPS_TRANSLATION_OK);
+    assert(result.source_properties == 1U && result.groups_unchanged == 1U &&
+           result.groups_translated == 0U && result.entries_updated == 0U &&
+           result.entries_added == 0U && result.entries_removed == 0U);
+    expect_be_coordinate_preserved(&output, &again, OMC_ENTRY_FLAG_DIRTY,
+                                   OMC_ENTRY_FLAG_DIRTY);
+
+    populate_be_coordinate_source(&preserve_source);
+    opts.conflict = OMC_TRANSLATION_PRESERVE;
+    result = omc_translate_xmp_gps(&preserve_source, &preserve_output, &opts);
+    assert(result.status == OMC_GPS_TRANSLATION_OK);
+    assert(result.groups_preserved == 1U && result.groups_translated == 0U &&
+           result.entries_updated == 0U && result.entries_added == 0U);
+    expect_be_coordinate_preserved(&preserve_source, &preserve_output, 0U,
+                                   0U);
+
+    populate_be_coordinate_source(&replace_source);
+    opts.conflict = OMC_TRANSLATION_REPLACE;
+    result = omc_translate_xmp_gps(&replace_source, &replace_output, &opts);
+    assert(result.status == OMC_GPS_TRANSLATION_OK);
+    assert(result.groups_translated == 1U && result.entries_updated == 2U &&
+           result.entries_added == 1U && result.entries_removed == 0U);
+    expect_be_coordinate_preserved(&replace_source, &replace_output, 0U,
+                                   OMC_ENTRY_FLAG_DIRTY);
+
+    omc_store_fini(&replace_output);
+    omc_store_fini(&replace_source);
+    omc_store_fini(&preserve_output);
+    omc_store_fini(&preserve_source);
+    omc_store_fini(&again);
+    omc_store_fini(&output);
+    omc_store_fini(&source);
+}
+
+static void
 test_conflicts_limits_and_version(void)
 {
     omc_store source;
@@ -387,6 +641,8 @@ main(void)
 {
     test_primary_and_idempotence();
     test_exact_coordinates_and_failures();
+    test_primary_promotes_exact_clean_native();
+    test_primary_be_coordinate_lifecycle();
     test_conflicts_limits_and_version();
     test_removal_and_source_mode();
     return 0;

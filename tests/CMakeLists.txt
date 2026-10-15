@@ -22,6 +22,12 @@ add_executable(omc_test_exif_carriers test_omc_exif_carriers.c)
 target_link_libraries(omc_test_exif_carriers PRIVATE omc)
 add_test(NAME omc_test_exif_carriers COMMAND omc_test_exif_carriers)
 
+add_executable(omc_test_native_edit test_omc_native_edit.c)
+target_link_libraries(omc_test_native_edit PRIVATE omc)
+set_target_properties(omc_test_native_edit PROPERTIES
+  C_STANDARD 90 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+add_test(NAME omc_test_native_edit COMMAND omc_test_native_edit)
+
 add_executable(omc_test_store_validate test_omc_store_validate.c)
 add_executable(omc_test_translation test_omc_translation.c)
 target_link_libraries(omc_test_translation PRIVATE omc)
@@ -323,6 +329,15 @@ if(OMC_BUILD_PARITY_TESTS)
     target_link_options(omc_test_resource_parity PRIVATE -stdlib=libc++)
   endif()
   add_test(NAME omc_test_resource_parity COMMAND omc_test_resource_parity)
+  add_executable(omc_test_native_edit_parity test_omc_native_edit_parity.cc)
+  set_target_properties(omc_test_native_edit_parity PROPERTIES
+    CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+  target_link_libraries(omc_test_native_edit_parity PRIVATE omc OpenMeta::openmeta)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(omc_test_native_edit_parity PRIVATE -stdlib=libc++)
+    target_link_options(omc_test_native_edit_parity PRIVATE -stdlib=libc++)
+  endif()
+  add_test(NAME omc_test_native_edit_parity COMMAND omc_test_native_edit_parity)
   # Discover optional location (0.4.128) and combined IPTC (0.4.130) contracts.
   include(CheckCXXSourceCompiles)
   function(omc_check_translation_contracts)

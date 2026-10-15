@@ -395,6 +395,39 @@ omc_edit_tombstone(omc_edit* edit, omc_entry_id target)
     return OMC_STATUS_OK;
 }
 
+omc_status
+omc_edit_mark_dirty(omc_edit* edit, omc_entry_id target)
+{
+    omc_size needed;
+    omc_size capacity;
+    omc_edit_op* op;
+    omc_status status;
+
+    if (edit == NULL) {
+        return OMC_STATUS_INVALID_ARGUMENT;
+    }
+
+    needed = edit->op_count + 1U;
+    if (needed < edit->op_count) {
+        return OMC_STATUS_OVERFLOW;
+    }
+
+    if (needed > edit->op_capacity) {
+        capacity = omc_edit_next_capacity(edit->op_capacity, needed);
+        status = omc_edit_reserve_ops(edit, capacity);
+        if (status != OMC_STATUS_OK) {
+            return status;
+        }
+    }
+
+    op = &edit->ops[edit->op_count];
+    memset(op, 0, sizeof(*op));
+    op->kind = OMC_EDIT_OP_MARK_DIRTY;
+    op->target = target;
+    edit->op_count = needed;
+    return OMC_STATUS_OK;
+}
+
 static omc_status
 omc_edit_build(const omc_store* base, const omc_edit* edits,
                 omc_size edit_count, omc_store* out)
@@ -431,7 +464,7 @@ omc_edit_build(const omc_store* base, const omc_edit* edits,
         arena_hint += edits[i].arena.size;
         for (j = 0U; j < edits[i].op_count; ++j) {
             if (edits[i].ops[j].kind < OMC_EDIT_OP_ADD_ENTRY
-                || edits[i].ops[j].kind > OMC_EDIT_OP_TOMBSTONE) {
+                || edits[i].ops[j].kind > OMC_EDIT_OP_MARK_DIRTY) {
                 return OMC_STATUS_INVALID_ARGUMENT;
             }
             if (edits[i].ops[j].kind == OMC_EDIT_OP_ADD_ENTRY) {
@@ -498,6 +531,13 @@ omc_edit_build(const omc_store* base, const omc_edit* edits,
                 }
                 out->entries[edits[i].ops[j].target].flags |=
                     (OMC_ENTRY_FLAG_DIRTY | OMC_ENTRY_FLAG_DELETED);
+                break;
+            case OMC_EDIT_OP_MARK_DIRTY:
+                if ((omc_size)edits[i].ops[j].target >= out->entry_count) {
+                    break;
+                }
+                out->entries[edits[i].ops[j].target].flags |=
+                    OMC_ENTRY_FLAG_DIRTY;
                 break;
             }
         }

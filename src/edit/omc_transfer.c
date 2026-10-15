@@ -120,6 +120,17 @@ omc_transfer_store_needs_target_safe_copy(
 static void
 omc_transfer_fini_store_if_ready(int ready, omc_store* store);
 
+/* Exif merge alone also describes fresh metadata (for example a host
+ * ColorSpace). Selected removals, GPS merge and clears need a destination. */
+static int
+omc_transfer_native_edit_needs_target(const omc_native_edit_intent* intent)
+{
+    return intent->ifd0_removal_count != 0U ||
+           intent->exif_removal_count != 0U ||
+           intent->gps_removal_count != 0U || intent->merge_gps ||
+           intent->clear_exif || intent->clear_gps;
+}
+
 static void
 omc_transfer_bundle_init(omc_transfer_bundle* bundle)
 {
@@ -131,6 +142,7 @@ omc_transfer_bundle_init(omc_transfer_bundle* bundle)
     bundle->format          = OMC_SCAN_FMT_UNKNOWN;
     bundle->dng_target_mode = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
     bundle->safety          = OMC_TRANSFER_SAFETY_COMPATIBLE_FILE;
+    bundle->include_exif    = 1;
     omc_transfer_target_image_spec_init(&bundle->target_image_spec);
     bundle->writeback_mode            = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
     bundle->destination_embedded_mode = OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING;
@@ -158,6 +170,7 @@ omc_transfer_exec_init(omc_transfer_exec* exec)
     exec->format          = OMC_SCAN_FMT_UNKNOWN;
     exec->dng_target_mode = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
     exec->safety          = OMC_TRANSFER_SAFETY_COMPATIBLE_FILE;
+    exec->include_exif    = 1;
     omc_transfer_target_image_spec_init(&exec->target_image_spec);
     exec->writeback_mode = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
     exec->existing_sidecar_xmp_mode = OMC_TRANSFER_EXISTING_XMP_MERGE_IF_PRESENT;
@@ -4864,6 +4877,18 @@ omc_transfer_payload_batch_build(const omc_store* store,
     }
     if (!omc_transfer_validate_target_image_spec(&opts->target_image_spec)) {
         return OMC_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (opts->include_exif &&
+        (opts->format == OMC_SCAN_FMT_TIFF || opts->format == OMC_SCAN_FMT_DNG)) {
+        omc_native_edit_intent native_edits;
+        status = omc_native_edit_intent_collect(store, &native_edits);
+        if (status != OMC_STATUS_OK) return status;
+        if (omc_transfer_native_edit_needs_target(&native_edits)) {
+            omc_transfer_payload_batch_init(out_batch);
+            omc_transfer_payload_io_res_init(out_res);
+            return OMC_STATUS_OK;
+        }
     }
 
     omc_transfer_payload_batch_init(out_batch);
@@ -11452,6 +11477,7 @@ static omc_status
 omc_transfer_apply_exif_overlay(const omc_u8* current_bytes,
                                 omc_size current_size, const omc_store* store,
                                 omc_scan_fmt format, omc_arena* edited_out,
+                                const omc_native_edit_intent* native_edits,
                                 omc_transfer_res* out_res)
 {
     omc_exif_write_res exif_res;
@@ -11466,7 +11492,11 @@ omc_transfer_apply_exif_overlay(const omc_u8* current_bytes,
 
     omc_arena_init(&exif_out);
     omc_exif_write_res_init(&exif_res);
-    if (format == OMC_SCAN_FMT_JXL || format == OMC_SCAN_FMT_HEIF
+    if (format == OMC_SCAN_FMT_TIFF || format == OMC_SCAN_FMT_DNG) {
+        status = omc_exif_write_embedded_edit(current_bytes, current_size, store,
+                                              native_edits, &exif_out, format,
+                                              &exif_res);
+    } else if (format == OMC_SCAN_FMT_JXL || format == OMC_SCAN_FMT_HEIF
         || format == OMC_SCAN_FMT_AVIF || format == OMC_SCAN_FMT_CR3) {
         status = omc_exif_write_embedded_source_only(current_bytes,
                                                      current_size, store,
@@ -11560,7 +11590,7 @@ omc_transfer_execute_dng_minimal_scaffold(
         status = omc_transfer_apply_exif_overlay(edited_out->data,
                                                  edited_out->size, source_store,
                                                  OMC_SCAN_FMT_DNG, edited_out,
-                                                 out_res);
+                                                 &exec->native_edits, out_res);
         if (status != OMC_STATUS_OK || out_res->status != OMC_TRANSFER_OK) {
             return status;
         }
@@ -11593,6 +11623,7 @@ omc_transfer_prepare_opts_init(omc_transfer_prepare_opts* opts)
     opts->format          = OMC_SCAN_FMT_UNKNOWN;
     opts->dng_target_mode = OMC_DNG_TARGET_MINIMAL_FRESH_SCAFFOLD;
     opts->safety          = OMC_TRANSFER_SAFETY_COMPATIBLE_FILE;
+    opts->include_exif    = 1;
     omc_transfer_target_image_spec_init(&opts->target_image_spec);
     opts->writeback_mode             = OMC_XMP_WRITEBACK_EMBEDDED_ONLY;
     opts->destination_embedded_mode  = OMC_XMP_DEST_EMBEDDED_PRESERVE_EXISTING;
@@ -11626,6 +11657,8 @@ omc_transfer_prepare(const omc_u8* file_bytes, omc_size file_size,
     omc_scan_fmt format;
     int sidecar_requested;
     int needs_embedded;
+    omc_native_edit_intent native_edits;
+    omc_status status;
 
     if (store == (const omc_store*)0 || out_bundle == (omc_transfer_bundle*)0) {
         return OMC_STATUS_INVALID_ARGUMENT;
@@ -11646,7 +11679,22 @@ omc_transfer_prepare(const omc_u8* file_bytes, omc_size file_size,
         return OMC_STATUS_INVALID_ARGUMENT;
     }
 
+    format = opts->format;
+    if (format == OMC_SCAN_FMT_UNKNOWN)
+        format = omc_transfer_detect_format(file_bytes, file_size);
+    omc_native_edit_intent_init(&native_edits);
+    if ((format == OMC_SCAN_FMT_TIFF || format == OMC_SCAN_FMT_DNG) &&
+        opts->include_exif) {
+        status = omc_native_edit_intent_collect(store, &native_edits);
+        if (status != OMC_STATUS_OK) return status;
+        if (opts->target_image_spec.has_exif_color_space)
+            native_edits.merge_exif = 1;
+        status = omc_native_edit_intent_validate(&native_edits);
+        if (status != OMC_STATUS_OK) return status;
+    }
     omc_transfer_bundle_init(out_bundle);
+    out_bundle->native_edits = native_edits;
+    out_bundle->include_exif = opts->include_exif != 0;
     out_bundle->dng_target_mode            = opts->dng_target_mode;
     out_bundle->safety                     = opts->safety;
     out_bundle->target_image_spec          = opts->target_image_spec;
@@ -11665,10 +11713,6 @@ omc_transfer_prepare(const omc_u8* file_bytes, omc_size file_size,
     out_bundle->embedded = opts->embedded;
     out_bundle->sidecar  = opts->sidecar;
 
-    format = opts->format;
-    if (format == OMC_SCAN_FMT_UNKNOWN) {
-        format = omc_transfer_detect_format(file_bytes, file_size);
-    }
     out_bundle->format             = format;
     out_bundle->embedded_supported = omc_transfer_embedded_supported(format);
     out_bundle->existing_xmp_blocks
@@ -11738,7 +11782,14 @@ omc_transfer_compile(const omc_transfer_bundle* bundle,
         return OMC_STATUS_INVALID_ARGUMENT;
     }
 
+    if (omc_native_edit_intent_validate(&bundle->native_edits) != OMC_STATUS_OK)
+        return OMC_STATUS_INVALID_ARGUMENT;
     omc_transfer_exec_init(out_exec);
+    out_exec->native_edits = bundle->native_edits;
+    out_exec->include_exif = bundle->include_exif != 0;
+    if (omc_native_edit_intent_present(&bundle->native_edits) &&
+        ((bundle->format != OMC_SCAN_FMT_TIFF && bundle->format != OMC_SCAN_FMT_DNG) ||
+         !bundle->include_exif)) return OMC_STATUS_OK;
     out_exec->status                     = bundle->status;
     out_exec->format                     = bundle->format;
     out_exec->dng_target_mode            = bundle->dng_target_mode;
@@ -11785,8 +11836,8 @@ omc_transfer_compile(const omc_transfer_bundle* bundle,
     return OMC_STATUS_OK;
 }
 
-omc_status
-omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
+static omc_status
+omc_transfer_execute_impl(const omc_u8* file_bytes, omc_size file_size,
                      const omc_store* store, omc_arena* edited_out,
                      omc_arena* sidecar_out, const omc_transfer_exec* exec,
                      omc_transfer_res* out_res)
@@ -11884,7 +11935,9 @@ omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
         effective_store    = &target_store;
     }
 
-    source_has_exif = omc_exif_write_store_has_supported_tags(effective_store);
+    source_has_exif = exec->include_exif &&
+                     (omc_exif_write_store_has_supported_tags(effective_store)
+                      || omc_native_edit_intent_present(&exec->native_edits));
     source_has_icc  = omc_transfer_store_has_icc(effective_store);
     source_has_iptc = (exec->format == OMC_SCAN_FMT_JPEG
                        || exec->format == OMC_SCAN_FMT_TIFF
@@ -11968,7 +12021,7 @@ omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
                                                      edited_out->size,
                                                      effective_store,
                                                      exec->format, edited_out,
-                                                     out_res);
+                                                     &exec->native_edits, out_res);
             if (status != OMC_STATUS_OK || out_res->status != OMC_TRANSFER_OK) {
                 omc_transfer_fini_store_if_ready(target_store_ready,
                                                  &target_store);
@@ -12099,7 +12152,7 @@ omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
                                                      edited_out->size,
                                                      effective_store,
                                                      exec->format, edited_out,
-                                                     out_res);
+                                                     &exec->native_edits, out_res);
             if (status != OMC_STATUS_OK || out_res->status != OMC_TRANSFER_OK) {
                 omc_transfer_fini_store_if_ready(target_store_ready,
                                                  &target_store);
@@ -12167,4 +12220,50 @@ omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
     omc_transfer_fini_store_if_ready(target_store_ready, &target_store);
     omc_transfer_fini_store_if_ready(merged_store_ready, &merged_store);
     return OMC_STATUS_OK;
+}
+
+
+omc_status
+omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
+                     const omc_store* store, omc_arena* edited_out,
+                     omc_arena* sidecar_out, const omc_transfer_exec* exec,
+                     omc_transfer_res* out_res)
+{
+    omc_arena edited;
+    omc_arena sidecar;
+    omc_arena previous;
+    omc_status status;
+    if (store == NULL || edited_out == NULL || sidecar_out == NULL ||
+        edited_out == sidecar_out || exec == NULL || out_res == NULL ||
+        exec->route_count > 2U ||
+        omc_native_edit_intent_validate(&exec->native_edits) != OMC_STATUS_OK)
+        return OMC_STATUS_INVALID_ARGUMENT;
+    if (omc_native_edit_intent_present(&exec->native_edits) &&
+        ((exec->format != OMC_SCAN_FMT_TIFF && exec->format != OMC_SCAN_FMT_DNG) ||
+         !exec->include_exif ||
+         (omc_transfer_native_edit_needs_target(&exec->native_edits) &&
+          (file_bytes == NULL || file_size == 0U)))) {
+        omc_transfer_res_init(out_res);
+        out_res->format = exec->format;
+        return OMC_STATUS_OK;
+    }
+    omc_arena_init(&edited);
+    omc_arena_init(&sidecar);
+    omc_transfer_res_init(out_res);
+    status = omc_transfer_execute_impl(file_bytes, file_size, store, &edited,
+                                       &sidecar, exec, out_res);
+    if (status == OMC_STATUS_OK && out_res->status == OMC_TRANSFER_OK) {
+        previous = *edited_out;
+        *edited_out = edited;
+        edited = previous;
+        previous = *sidecar_out;
+        *sidecar_out = sidecar;
+        sidecar = previous;
+    } else {
+        out_res->edited_present = 0;
+        out_res->sidecar_present = 0;
+    }
+    omc_arena_fini(&sidecar);
+    omc_arena_fini(&edited);
+    return status;
 }

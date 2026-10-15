@@ -16,6 +16,152 @@ add(omc_store *s, const char *ifd, omc_u16 tag, omc_val value)
     assert(omc_store_add_entry(s, &e, NULL) == OMC_STATUS_OK);
 }
 
+static void
+add_wire_text(omc_store *s, omc_u16 tag, const omc_u8 *bytes, omc_size size,
+              omc_u16 wire_type)
+{
+    omc_entry e;
+    omc_byte_ref r;
+    memset(&e, 0, sizeof(e));
+    assert(omc_arena_append(&s->arena, "ifd0", 4U, &r) == OMC_STATUS_OK);
+    omc_key_make_exif_tag(&e.key, r, tag);
+    assert(omc_arena_append(&s->arena, bytes, size, &r) == OMC_STATUS_OK);
+    omc_val_make_text(&e.value, r, wire_type == 129U ? OMC_TEXT_UTF8
+                                                     : OMC_TEXT_ASCII);
+    e.origin.block = OMC_INVALID_BLOCK_ID;
+    e.origin.wire_type.family = OMC_WIRE_TIFF;
+    e.origin.wire_type.code = wire_type;
+    e.origin.wire_count = (omc_u32)size;
+    assert(omc_store_add_entry(s, &e, NULL) == OMC_STATUS_OK);
+}
+
+static omc_u32
+get_le32(const omc_u8 *p)
+{
+    return (omc_u32)p[0] | ((omc_u32)p[1] << 8U) |
+           ((omc_u32)p[2] << 16U) | ((omc_u32)p[3] << 24U);
+}
+
+static void
+test_type129_text_and_retained_terminators(void)
+{
+    omc_store s;
+    omc_exif_tiff_opts opts;
+    omc_exif_tiff_res written;
+    omc_mut_bytes out;
+    omc_u8 bytes[512];
+    omc_u8 *entry;
+    omc_u32 root;
+    omc_u32 count;
+    omc_u32 i;
+    int found_utf8_terminated;
+    int found_utf8_unterminated;
+    int found_ascii_terminated;
+    static const omc_u8 utf8_terminated[] = {
+        'c', 'a', 'f', 0xC3U, 0xA9U, 0U
+    };
+    static const omc_u8 utf8_unterminated[] = {0xE2U, 0x82U, 0xACU};
+    static const omc_u8 ascii_terminated[] = {'a', 'b', 'c', 0U};
+    omc_store_init(&s);
+    add_wire_text(&s, 0xF100U, utf8_terminated,
+                  sizeof(utf8_terminated), 129U);
+    add_wire_text(&s, 0xF101U, utf8_unterminated,
+                  sizeof(utf8_unterminated), 129U);
+    add_wire_text(&s, 0xF102U, ascii_terminated,
+                  sizeof(ascii_terminated), 2U);
+    omc_exif_tiff_opts_init(&opts);
+    opts.validate = 0;
+    out.data = bytes;
+    out.size = sizeof(bytes);
+    written = omc_serialize_exif_tiff(&s, out, &opts);
+    assert(written.status == OMC_EXIF_TIFF_OK);
+    root = get_le32(bytes + 4U);
+    count = (omc_u32)bytes[root] | ((omc_u32)bytes[root + 1U] << 8U);
+    found_utf8_terminated = 0;
+    found_utf8_unterminated = 0;
+    found_ascii_terminated = 0;
+    for (i = 0U; i < count; ++i) {
+        entry = bytes + root + 2U + i * 12U;
+        if (entry[0] == 0x00U && entry[1] == 0xF1U) {
+            if (entry[2] == 129U && entry[3] == 0U &&
+                get_le32(entry + 4U) == sizeof(utf8_terminated)) {
+                omc_u32 offset;
+                offset = get_le32(entry + 8U);
+                assert(offset <= written.written &&
+                       sizeof(utf8_terminated) <= written.written - offset);
+                assert(memcmp(bytes + offset, utf8_terminated,
+                              sizeof(utf8_terminated)) == 0);
+                found_utf8_terminated = 1;
+            }
+        } else if (entry[0] == 0x01U && entry[1] == 0xF1U) {
+            assert(entry[2] == 129U && entry[3] == 0U &&
+                   get_le32(entry + 4U) == 4U);
+            assert(entry[8] == 0xE2U && entry[9] == 0x82U &&
+                   entry[10] == 0xACU && entry[11] == 0U);
+            found_utf8_unterminated = 1;
+        } else if (entry[0] == 0x02U && entry[1] == 0xF1U) {
+            assert(entry[2] == 2U && entry[3] == 0U &&
+                   get_le32(entry + 4U) == sizeof(ascii_terminated));
+            assert(memcmp(entry + 8U, ascii_terminated,
+                          sizeof(ascii_terminated)) == 0);
+            found_ascii_terminated = 1;
+        }
+    }
+    assert(found_utf8_terminated && found_utf8_unterminated &&
+           found_ascii_terminated);
+    omc_store_fini(&s);
+}
+
+static void
+assert_invalid_type129(const omc_u8 *value, omc_size size, int as_bytes)
+{
+    omc_store s;
+    omc_entry e;
+    omc_byte_ref r;
+    omc_exif_tiff_opts opts;
+    omc_exif_tiff_res result;
+    omc_mut_bytes out;
+    omc_u8 output[128];
+    omc_size i;
+    omc_store_init(&s);
+    memset(&e, 0, sizeof(e));
+    assert(omc_arena_append(&s.arena, "ifd0", 4U, &r) == OMC_STATUS_OK);
+    omc_key_make_exif_tag(&e.key, r, 0xF103U);
+    assert(omc_arena_append(&s.arena, value, size, &r) == OMC_STATUS_OK);
+    if (as_bytes)
+        omc_val_make_bytes(&e.value, r);
+    else
+        omc_val_make_text(&e.value, r, OMC_TEXT_UTF8);
+    e.origin.block = OMC_INVALID_BLOCK_ID;
+    e.origin.wire_type.family = OMC_WIRE_TIFF;
+    e.origin.wire_type.code = 129U;
+    e.origin.wire_count = (omc_u32)size;
+    assert(omc_store_add_entry(&s, &e, NULL) == OMC_STATUS_OK);
+    omc_exif_tiff_opts_init(&opts);
+    opts.validate = 0;
+    memset(output, 0xA5, sizeof(output));
+    out.data = output;
+    out.size = sizeof(output);
+    result = omc_serialize_exif_tiff(&s, out, &opts);
+    assert(result.status == OMC_EXIF_TIFF_INVALID_METADATA);
+    for (i = 0U; i < sizeof(output); ++i)
+        assert(output[i] == 0xA5U);
+    omc_store_fini(&s);
+}
+
+static void
+test_type129_rejects_invalid_text_without_validation(void)
+{
+    static const omc_u8 invalid_utf8[] = {0xC0U, 0xAFU};
+    static const omc_u8 embedded_nul[] = {'a', 0U, 'b'};
+    static const omc_u8 double_terminal[] = {'a', 0U, 0U};
+    static const omc_u8 bytes_value[] = {'a'};
+    assert_invalid_type129(invalid_utf8, sizeof(invalid_utf8), 0);
+    assert_invalid_type129(embedded_nul, sizeof(embedded_nul), 0);
+    assert_invalid_type129(double_terminal, sizeof(double_terminal), 0);
+    assert_invalid_type129(bytes_value, sizeof(bytes_value), 1);
+}
+
 int
 main(void)
 {
@@ -92,6 +238,8 @@ main(void)
     assert(written.status == OMC_EXIF_TIFF_INVALID_METADATA);
     for (i = 0U; i < sizeof(prefix); ++i)
         assert(prefix[i] == 0xA5U);
+    test_type129_text_and_retained_terminators();
+    test_type129_rejects_invalid_text_without_validation();
     omc_store_fini(&decoded);
     omc_store_fini(&s);
     return 0;

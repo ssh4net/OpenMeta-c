@@ -1,6 +1,8 @@
 #ifndef OMC_TRANSFER_H
 #define OMC_TRANSFER_H
 
+#include "omc/omc_native_edit.h"
+
 #include "omc/omc_arena.h"
 #include "omc/omc_base.h"
 #include "omc/omc_scan.h"
@@ -178,6 +180,8 @@ typedef struct omc_transfer_prepare_opts {
     omc_transfer_existing_xmp_carrier_precedence existing_xmp_carrier_precedence;
     omc_xmp_embed_opts embedded;
     omc_xmp_sidecar_req sidecar;
+    /* Native EXIF output, default 1; independent of XMP EXIF projection. */
+    int include_exif;
 } omc_transfer_prepare_opts;
 
 typedef struct omc_transfer_bundle {
@@ -202,6 +206,8 @@ typedef struct omc_transfer_bundle {
     omc_transfer_existing_xmp_carrier_precedence existing_xmp_carrier_precedence;
     omc_xmp_embed_opts embedded;
     omc_xmp_sidecar_req sidecar;
+    int include_exif;
+    omc_native_edit_intent native_edits;
 } omc_transfer_bundle;
 
 typedef struct omc_transfer_route {
@@ -227,6 +233,8 @@ typedef struct omc_transfer_exec {
     omc_transfer_existing_xmp_carrier_precedence existing_xmp_carrier_precedence;
     omc_xmp_write_opts embedded_write;
     omc_xmp_sidecar_req sidecar;
+    int include_exif;
+    omc_native_edit_intent native_edits;
 } omc_transfer_exec;
 
 typedef struct omc_transfer_res {
@@ -291,6 +299,10 @@ OMC_API omc_status
 omc_transfer_compile(const omc_transfer_bundle* bundle,
                      omc_transfer_exec* out_exec);
 
+/* Both output arenas must be initialized and distinct. Failure (including a
+ * non-OK transfer result) preserves both outputs and their borrowed views.
+ * Success replaces both outputs; file_bytes may alias the old edited_out.
+ * Compiled native edit lists are owned inline; referenced stores are borrowed. */
 OMC_API omc_status
 omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
                      const omc_store* store, omc_arena* edited_out,

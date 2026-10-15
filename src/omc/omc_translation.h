@@ -70,6 +70,9 @@ OMC_EXTERN_C_BEGIN
 #define OMC_IPTC_TRANSLATE_WORKFLOW 0x0F8000U
 #define OMC_IPTC_TRANSLATE_ALL 0x0FFFFFU
 
+/* All five GPS APIs implement native lifecycle contract version 2. */
+#define OMC_GPS_TRANSLATION_CONTRACT_VERSION 2U
+
 /* Separate mask domain for the primary GPS reverse-translation slice. */
 #define OMC_GPS_TRANSLATE_LATITUDE 0x000001U
 #define OMC_GPS_TRANSLATE_LONGITUDE 0x000002U

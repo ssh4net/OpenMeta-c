@@ -172,8 +172,11 @@ omc_serialize_exif_tiff(const omc_store *store, omc_mut_bytes output,
     omc_u8 *bytes;
     omc_u8 *p;
     omc_u8 *dst;
+    const omc_u8 *text_bytes;
+    omc_size text_size;
     int present[4];
     int dng;
+    int retained_terminator;
     memset(&res, 0, sizeof(res));
     omc_exif_tiff_opts_init(&opts);
     if (options != NULL)
@@ -241,6 +244,26 @@ omc_serialize_exif_tiff(const omc_store *store, omc_mut_bytes output,
         e = &entries[count];
         value = &source->value;
         e->type = omc_value_tiff_type(value);
+        if (opts.honor_wire_type_hints &&
+            source->origin.wire_type.family == OMC_WIRE_TIFF &&
+            source->origin.wire_type.code == 129U) {
+            if (value->kind != OMC_VAL_TEXT ||
+                value->text_encoding != OMC_TEXT_UTF8) {
+                res.status = OMC_EXIF_TIFF_INVALID_METADATA;
+                goto done;
+            }
+            text_size = value->u.ref.size;
+            text_bytes = text_size == 0U
+                             ? NULL
+                             : store->arena.data + value->u.ref.offset;
+            if (text_size != 0U && text_bytes[text_size - 1U] == 0U)
+                --text_size;
+            if (!omc_utf8_valid(text_bytes, text_size, 0)) {
+                res.status = OMC_EXIF_TIFF_INVALID_METADATA;
+                goto done;
+            }
+            e->type = 129U;
+        }
         if (opts.honor_wire_type_hints && value->kind == OMC_VAL_BYTES &&
             source->origin.wire_type.family == OMC_WIRE_TIFF &&
             (source->origin.wire_type.code == 1U ||
@@ -257,11 +280,14 @@ omc_serialize_exif_tiff(const omc_store *store, omc_mut_bytes output,
         e->tag = source->key.u.exif_tag.tag;
         e->count = value->count;
         if (value->kind == OMC_VAL_TEXT) {
-            if (value->count == 0xFFFFFFFFU) {
+            retained_terminator = value->u.ref.size != 0U &&
+                store->arena.data[value->u.ref.offset + value->u.ref.size - 1U] == 0U;
+            if (!retained_terminator && value->count == 0xFFFFFFFFU) {
                 res.status = OMC_EXIF_TIFF_LIMIT;
                 goto done;
             }
-            e->count++;
+            if (!retained_terminator)
+                e->count++;
         }
         size = value->kind >= OMC_VAL_BYTES
                    ? e->count

@@ -35,6 +35,9 @@ Versions 0.2.0, 0.8.0 and 0.11.0 change `omc_val`, `omc_xmp_limits` and
 rebuild consumers and initialize options with their public initializers.
 The 0.11.0 layout change also affects structures embedding JUMBF options,
 including `omc_read_opts` and `omc_validate_opts`.
+Version 0.12.0 extends transfer prepare options, bundles and executors with
+native EXIF output control and owned native edit intent. Rebuild their callers
+and use `omc_transfer_prepare_opts_init()`; native EXIF output defaults to on.
 
 The [current roadmap](porting_plan.md#upstream-0814-execution-baseline) pins C++
 0.8.14 at `fc2052b`. C package 0.11.0 adds aggregate JUMBF semantic-work limits,
@@ -43,18 +46,21 @@ streaming decompression. Payload output limit zero now means unlimited; the
 default remains 64 MiB. The [execution receipt](up0_up1_0814.md) records fresh
 baselines, focused parity and the remaining broad inventory differences.
 
-The completed C work includes JP2/JPH replacement, the initial unified
-EXIF/scalar-XMP patch core, all five GPS APIs, four EXIF text/version fields,
-canonical TIFF readback and focused TIFF-root/XMP corrections. The C GPS
-matrix covers all 32 standard IDs; representative cross-language cases use
-C++ 0.5.10. Current C++ GPS contract v2 additionally requires accepted clean
-native values to gain write intent and absent-key deletion to survive transfer.
-Those changes and carrier lifecycle acceptance remain open.
+Version 0.12.0 implements native selected edits and all five GPS lifecycle-v2
+APIs against the same C++ 0.8.14 pin. Clean accepted values gain Dirty without
+changing their representation; complete deletions retain absent-key intent.
+The TIFF writer supports classic TIFF and BigTIFF in both byte orders, preserves
+omitted destination values and validates active GPS versions. Transfer failures
+preserve both previous output arenas. The [batch receipt](up6a_gps_v2_0814.md)
+records GPS carrier readback, selected-edit parity and the remaining inventory
+failures. This is a bounded transfer foundation; full prepared snapshots and
+the remaining replacement/patch consumers are still planned.
 
-Next: complete the native edit foundation and GPS v2. Reader batches can advance
-independently. Broader capture/identity, patch binding, snapshots and non-fuzzy
-semantic stages remain tracked work. Preserve the older read/decode and IPTC
-evidence under its recorded reference pins.
+Next: UP4 dates/basic capture/sensitivity/Flash/lens lifecycle and shared
+destination validation. Reader batches can advance independently. Broader
+capture/identity, patch binding, snapshots and non-fuzzy semantic stages remain
+tracked work. Preserve older read/decode and IPTC evidence under its recorded
+reference pins.
 
 Version 0.8.0 adds bounded BMFF scene/derived-image summaries, structured XMP,
 JUMBF and MakerNote parity fixes, standalone XMP callbacks and Canon CMT3.

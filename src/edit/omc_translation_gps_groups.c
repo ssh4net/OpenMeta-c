@@ -33,6 +33,9 @@ typedef struct omc_gg_group {
     omc_entry_id native[2];
     omc_u32 native_seen[2];
     int matches[2];
+    int native_dirty[2];
+    int dirty_delete_intent[2];
+    omc_entry_id clean_delete_entry[2];
     int selected;
     int present;
     int apply;
@@ -986,7 +989,7 @@ gg_make_value(omc_gg_context *context, const omc_gg_group *group,
 
 static omc_status
 gg_append(omc_gg_context *context, const omc_gg_group *group, omc_size member,
-          omc_val *value)
+          omc_val *value, omc_entry_flags flags)
 {
     omc_entry entry;
     omc_byte_ref ifd;
@@ -998,7 +1001,7 @@ gg_append(omc_gg_context *context, const omc_gg_group *group, omc_size member,
     wire = omc_arena_view(&context->source->arena, entry.origin.wire_type_name);
     entry.origin.wire_type_name.offset = 0U; entry.origin.wire_type_name.size = 0U;
     if (wire.size != 0U && omc_arena_append(&context->edit.arena, wire.data, wire.size, &entry.origin.wire_type_name) != OMC_STATUS_OK) return OMC_STATUS_NO_MEMORY;
-    entry.flags = OMC_ENTRY_FLAG_DIRTY;
+    entry.flags = flags;
     return omc_edit_add_entry(&context->edit, &entry);
 }
 
@@ -1010,128 +1013,360 @@ gg_apply(omc_gg_context *context)
     omc_size k;
     omc_entry *entry;
     omc_val value;
+    omc_byte_ref empty;
+    omc_byte_ref ref;
+    omc_const_bytes wire;
+    omc_entry added_entry;
     omc_status status;
+    omc_gg_group *group;
+    int existing;
+    int exact;
+    int promote_exact;
+    int active_found;
+    int remove_version;
+
     for (i = 0U; i < context->group_count; ++i) {
-        omc_gg_group *selected = &context->groups[i];
-        if (!selected->selected || !selected->present)
+        group = &context->groups[i];
+        if (!group->selected || !group->present)
             continue;
-        if (selected->kind == OMC_GG_TIMESTAMP
-            || selected->mapping == OMC_GPS_QUALITY_TRANSLATE_DIFFERENTIAL
-            || selected->mapping == OMC_GPS_QUALITY_TRANSLATE_ERROR
-            || selected->kind == OMC_GG_ENCODED_TEXT) {
+        if (group->kind == OMC_GG_TIMESTAMP
+            || group->mapping == OMC_GPS_QUALITY_TRANSLATE_DIFFERENTIAL
+            || group->mapping == OMC_GPS_QUALITY_TRANSLATE_ERROR
+            || group->kind == OMC_GG_ENCODED_TEXT) {
             if (context->version[0] != 2U || context->version[1] > 4U
                 || context->version[2] != 0U || context->version[3] != 0U
-                || (selected->mapping == OMC_GPS_QUALITY_TRANSLATE_ERROR
+                || (group->mapping == OMC_GPS_QUALITY_TRANSLATE_ERROR
                     && context->version[1] < 3U)
-                || (selected->mapping != OMC_GPS_QUALITY_TRANSLATE_ERROR
+                || (group->mapping != OMC_GPS_QUALITY_TRANSLATE_ERROR
                     && context->version[1] < 2U)) {
                 context->result.status = OMC_GPS_TRANSLATION_UNSUPPORTED_VERSION;
                 context->result.failed_mapping = OMC_GPS_TRANSLATE_VERSION;
                 return context->result;
             }
         }
-        if (context->version_source == OMC_INVALID_ENTRY_ID)
-            context->version_source = selected->source[0];
     }
+
     for (i = 0U; i < context->group_count; ++i) {
-        omc_gg_group *group = &context->groups[i];
-        if (!group->selected) continue;
+        group = &context->groups[i];
+        if (!group->selected)
+            continue;
         group->native_count = group->kind == OMC_GG_COORDINATE
                                   || group->kind == OMC_GG_TIMESTAMP
                                   || (group->kind == OMC_GG_RATIONAL_PAIR
                                       && group->source_count > 1U) ? 2U : 1U;
         for (j = 0U; j < group->native_count; ++j) {
             group->native[j] = OMC_INVALID_ENTRY_ID;
+            group->native_seen[j] = 0U;
+            group->matches[j] = 0;
+            group->native_dirty[j] = 0;
+            group->dirty_delete_intent[j] = 0;
+            group->clean_delete_entry[j] = OMC_INVALID_ENTRY_ID;
             for (k = 0U; k < context->source->entry_count; ++k) {
                 entry = &context->source->entries[k];
-                if ((entry->flags & OMC_ENTRY_FLAG_DELETED) != 0U || !gg_native_tag(context, entry, group->tags[j])) continue;
-                if (group->native_seen[j]++ == 0U) { group->native[j] = (omc_entry_id)k; group->matches[j] = group->present && gg_native_match(context, group, &entry->value, j); }
+                if (!gg_native_tag(context, entry, group->tags[j]))
+                    continue;
+                if ((entry->flags & OMC_ENTRY_FLAG_DELETED) != 0U) {
+                    if ((entry->flags & OMC_ENTRY_FLAG_DIRTY) != 0U)
+                        group->dirty_delete_intent[j] = 1;
+                    else if (group->clean_delete_entry[j] ==
+                             OMC_INVALID_ENTRY_ID)
+                        group->clean_delete_entry[j] = (omc_entry_id)k;
+                    continue;
+                }
+                if (group->native_seen[j] >= context->opts.max_operations)
+                    return (context->result.status =
+                                OMC_GPS_TRANSLATION_OPERATION_LIMIT,
+                            context->result);
+                if (group->native_seen[j]++ == 0U) {
+                    group->native[j] = (omc_entry_id)k;
+                    group->matches[j] = group->present
+                        && gg_native_match(context, group, &entry->value, j);
+                    group->native_dirty[j] =
+                        (entry->flags & OMC_ENTRY_FLAG_DIRTY) != 0U;
+                }
             }
         }
-        if (context->opts.conflict == OMC_TRANSLATION_PRESERVE && (group->native_seen[0] != 0U || group->native_seen[1] != 0U)) { ++context->result.groups_preserved; continue; }
-        if (context->opts.conflict == OMC_TRANSLATION_FAIL && (group->native_seen[0] != 0U || group->native_seen[1] != 0U) && !(group->present && group->native_seen[0] == 1U && group->matches[0] && (group->native_count == 1U || (group->native_seen[1] == 1U && group->matches[1])))) {
+
+        existing = group->native_seen[0] != 0U ||
+                   (group->native_count == 2U && group->native_seen[1] != 0U);
+        exact = group->present
+            ? (group->native_seen[0] == 1U && group->matches[0]
+               && (group->native_count == 1U
+                   || (group->native_seen[1] == 1U && group->matches[1])))
+            : !existing;
+        if (!group->present && exact) {
+            for (j = 0U; j < group->native_count; ++j)
+                exact = exact && group->dirty_delete_intent[j];
+        }
+        promote_exact = 0;
+        if (group->present && exact) {
+            for (j = 0U; j < group->native_count; ++j)
+                promote_exact = promote_exact || !group->native_dirty[j];
+        }
+        if (context->opts.conflict == OMC_TRANSLATION_PRESERVE && existing) {
+            ++context->result.groups_preserved;
+            continue;
+        }
+        if (context->opts.conflict == OMC_TRANSLATION_FAIL && existing && !exact) {
             context->result.status = OMC_GPS_TRANSLATION_NATIVE_CONFLICT;
             context->result.failed_mapping = group->mapping;
             context->result.failed_source = group->source[0];
             return context->result;
         }
-        if (group->present && group->native_seen[0] == 1U && group->matches[0] && (group->native_count == 1U || (group->native_seen[1] == 1U && group->matches[1]))) { if (context->version_count == 0U) context->need_version = 1; ++context->result.groups_unchanged; continue; }
-        group->apply = 1;
-        if (group->present) context->need_version = 1;
-        else context->removed_group = 1;
+        if (exact && !promote_exact)
+            ++context->result.groups_unchanged;
+        else
+            group->apply = 1;
+        if (group->present) {
+            context->need_version = 1;
+            context->version_source = group->source[0];
+        } else if (group->apply) {
+            context->removed_group = 1;
+        }
+        if (!group->apply)
+            continue;
         for (j = 0U; j < group->native_count; ++j) {
-            if (!group->present) context->operations += group->native_seen[j];
-            else if (group->native_seen[j] == 0U) { ++context->added; ++context->operations; }
-            else context->operations += (omc_u64)group->native_seen[j] - 1U + (group->matches[j] ? 0U : 1U);
+            if (!group->present) {
+                context->operations += group->native_seen[j];
+                if (group->native_seen[j] == 0U
+                    && !group->dirty_delete_intent[j]) {
+                    if (group->clean_delete_entry[j] !=
+                        OMC_INVALID_ENTRY_ID)
+                        ++context->operations;
+                    else {
+                        ++context->added;
+                        ++context->operations;
+                    }
+                }
+            } else if (group->native_seen[j] == 0U) {
+                ++context->added;
+                ++context->operations;
+            } else {
+                context->operations += (omc_u64)group->native_seen[j] - 1U;
+                if (!group->matches[j])
+                    ++context->operations;
+                else if (!group->native_dirty[j])
+                    ++context->operations;
+            }
+        }
+    }
+
+    remove_version = context->removed_group && !gg_has_remaining_gps(context);
+    context->remove_version = remove_version;
+    if (remove_version)
+        context->operations += context->version_count;
+    if (context->need_version && context->version_count == 0U) {
+        ++context->added;
+        ++context->operations;
+    }
+    if (context->added > context->opts.max_added_entries
+        || context->source->entry_count >
+               (omc_size)OMC_INVALID_ENTRY_ID - (omc_size)context->added)
+        return (context->result.status = OMC_GPS_TRANSLATION_ENTRY_LIMIT,
+                context->result);
+    if (context->operations > context->opts.max_operations)
+        return (context->result.status = OMC_GPS_TRANSLATION_OPERATION_LIMIT,
+                context->result);
+    status = omc_edit_reserve_ops(&context->edit, (omc_size)context->operations);
+    if (status != OMC_STATUS_OK)
+        return (context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY,
+                context->result);
+
+    empty.offset = 0U;
+    empty.size = 0U;
+    for (i = 0U; i < context->group_count; ++i) {
+        group = &context->groups[i];
+        if (!group->apply)
+            continue;
+        for (j = 0U; j < group->native_count; ++j) {
+            active_found = 0;
+            for (k = 0U; k < context->source->entry_count; ++k) {
+                entry = &context->source->entries[k];
+                if ((entry->flags & OMC_ENTRY_FLAG_DELETED) != 0U
+                    || !gg_native_tag(context, entry, group->tags[j]))
+                    continue;
+                active_found = 1;
+                if (!group->present || (omc_entry_id)k != group->native[j]) {
+                    status = omc_edit_tombstone(&context->edit,
+                                                (omc_entry_id)k);
+                    ++context->result.entries_removed;
+                } else if (!group->matches[j]) {
+                    status = gg_make_value(context, group, j, &value);
+                    if (status == OMC_STATUS_OK)
+                        status = omc_edit_set_value(&context->edit,
+                                                    (omc_entry_id)k, &value);
+                    ++context->result.entries_updated;
+                } else if (!group->native_dirty[j]) {
+                    status = omc_edit_mark_dirty(&context->edit,
+                                                 (omc_entry_id)k);
+                    ++context->result.entries_updated;
+                } else {
+                    status = OMC_STATUS_OK;
+                }
+                if (status != OMC_STATUS_OK) {
+                    context->result.status = status == OMC_STATUS_NO_MEMORY
+                        ? OMC_GPS_TRANSLATION_NO_MEMORY
+                        : OMC_GPS_TRANSLATION_INTERNAL;
+                    return context->result;
+                }
+            }
+            if (group->present && group->native_seen[j] == 0U) {
+                status = gg_make_value(context, group, j, &value);
+                if (status == OMC_STATUS_OK)
+                    status = gg_append(context, group, j, &value,
+                                       OMC_ENTRY_FLAG_DIRTY);
+                if (status != OMC_STATUS_OK) {
+                    context->result.status = status == OMC_STATUS_NO_MEMORY
+                        ? OMC_GPS_TRANSLATION_NO_MEMORY
+                        : OMC_GPS_TRANSLATION_INTERNAL;
+                    return context->result;
+                }
+                ++context->result.entries_added;
+            } else if (!group->present && !active_found
+                       && !group->dirty_delete_intent[j]) {
+                if (group->clean_delete_entry[j] != OMC_INVALID_ENTRY_ID) {
+                    status = omc_edit_tombstone(
+                        &context->edit, group->clean_delete_entry[j]);
+                    if (status != OMC_STATUS_OK) {
+                        context->result.status = status == OMC_STATUS_NO_MEMORY
+                            ? OMC_GPS_TRANSLATION_NO_MEMORY
+                            : OMC_GPS_TRANSLATION_INTERNAL;
+                        return context->result;
+                    }
+                    ++context->result.entries_updated;
+                } else {
+                    if (group->kind == OMC_GG_ENCODED_TEXT)
+                        omc_val_make_bytes(&value, empty);
+                    else {
+                        status = gg_make_value(context, group, j, &value);
+                        if (status != OMC_STATUS_OK) {
+                            context->result.status =
+                                status == OMC_STATUS_NO_MEMORY
+                                    ? OMC_GPS_TRANSLATION_NO_MEMORY
+                                    : OMC_GPS_TRANSLATION_INTERNAL;
+                            return context->result;
+                        }
+                    }
+                    status = gg_append(
+                        context, group, j, &value,
+                        OMC_ENTRY_FLAG_DIRTY | OMC_ENTRY_FLAG_DELETED);
+                    if (status != OMC_STATUS_OK) {
+                        context->result.status = status == OMC_STATUS_NO_MEMORY
+                            ? OMC_GPS_TRANSLATION_NO_MEMORY
+                            : OMC_GPS_TRANSLATION_INTERNAL;
+                        return context->result;
+                    }
+                    ++context->result.entries_added;
+                }
+            }
         }
         ++context->result.groups_translated;
     }
-    if (context->removed_group && context->version_count != 0U
-        && !gg_has_remaining_gps(context)) {
-        context->remove_version = 1;
-        ++context->operations;
-    }
-    if (context->need_version && context->version_count == 0U) { ++context->added; ++context->operations; }
-    if (context->added > context->opts.max_added_entries) return (context->result.status = OMC_GPS_TRANSLATION_ENTRY_LIMIT, context->result);
-    if (context->operations > context->opts.max_operations) return (context->result.status = OMC_GPS_TRANSLATION_OPERATION_LIMIT, context->result);
-    status = omc_edit_reserve_ops(&context->edit, (omc_size)context->operations);
-    if (status != OMC_STATUS_OK) return (context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY, context->result);
-    for (i = 0U; i < context->group_count; ++i) {
-        omc_gg_group *group = &context->groups[i];
-        if (!group->apply) continue;
-        for (j = 0U; j < group->native_count; ++j) {
-            for (k = 0U; k < context->source->entry_count; ++k) {
-                entry = &context->source->entries[k];
-                if ((entry->flags & OMC_ENTRY_FLAG_DELETED) != 0U || !gg_native_tag(context, entry, group->tags[j])) continue;
-                if (!group->present || (omc_entry_id)k != group->native[j]) { status = omc_edit_tombstone(&context->edit, (omc_entry_id)k); ++context->result.entries_removed; }
-                else if (!group->matches[j]) { status = gg_make_value(context, group, j, &value); if (status == OMC_STATUS_OK) status = omc_edit_set_value(&context->edit, (omc_entry_id)k, &value); ++context->result.entries_updated; }
-                if (status != OMC_STATUS_OK) { context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY; return context->result; }
-            }
-            if (group->present && group->native_seen[j] == 0U) { status = gg_make_value(context, group, j, &value); if (status == OMC_STATUS_OK) status = gg_append(context, group, j, &value); ++context->result.entries_added; if (status != OMC_STATUS_OK) { context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY; return context->result; } }
-        }
-    }
+
     if (context->remove_version) {
-        status = omc_edit_tombstone(&context->edit, context->version_entry);
-        if (status != OMC_STATUS_OK) {
-            context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY;
-            return context->result;
+        for (i = 0U; i < context->source->entry_count; ++i) {
+            entry = &context->source->entries[i];
+            if ((entry->flags & OMC_ENTRY_FLAG_DELETED) == 0U
+                && gg_native_tag(context, entry, 0U)) {
+                status = omc_edit_tombstone(&context->edit,
+                                            (omc_entry_id)i);
+                if (status != OMC_STATUS_OK) {
+                    context->result.status = status == OMC_STATUS_NO_MEMORY
+                        ? OMC_GPS_TRANSLATION_NO_MEMORY
+                        : OMC_GPS_TRANSLATION_INTERNAL;
+                    return context->result;
+                }
+                ++context->result.entries_removed;
+            }
         }
-        ++context->result.entries_removed;
     }
+
     if (context->need_version && context->version_count == 0U) {
-        omc_gg_group version_group; memset(&version_group, 0, sizeof(version_group)); version_group.source[0] = context->version_source; version_group.source_count = 1U; version_group.tags[0] = 0U; version_group.kind = OMC_GG_PLAIN_TEXT;
-        {
-            omc_byte_ref ref; omc_entry added; omc_const_bytes wire;
-            if (omc_arena_append(&context->edit.arena, context->version, 4U, &ref) != OMC_STATUS_OK) return (context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY, context->result);
-            omc_val_make_array(&value, OMC_ELEM_U8, 4U, ref, OMC_BYTE_ORDER_NATIVE); memset(&added, 0, sizeof(added));
-            if (omc_arena_append(&context->edit.arena, k_gg_ifd, sizeof(k_gg_ifd)-1U, &ref) != OMC_STATUS_OK) return (context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY, context->result);
-            omc_key_make_exif_tag(&added.key, ref, 0U); added.value = value; added.origin = context->source->entries[context->version_source].origin; wire = omc_arena_view(&context->source->arena, added.origin.wire_type_name); added.origin.wire_type_name.offset = 0U; added.origin.wire_type_name.size = 0U; if (wire.size != 0U && omc_arena_append(&context->edit.arena, wire.data, wire.size, &added.origin.wire_type_name) != OMC_STATUS_OK) return (context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY, context->result); added.flags = OMC_ENTRY_FLAG_DIRTY; if (omc_edit_add_entry(&context->edit, &added) != OMC_STATUS_OK) return (context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY, context->result); ++context->result.entries_added;
-        }
+        if (context->version_source == OMC_INVALID_ENTRY_ID)
+            return (context->result.status = OMC_GPS_TRANSLATION_INTERNAL,
+                    context->result);
+        if (omc_arena_append(&context->edit.arena, context->version, 4U,
+                             &ref) != OMC_STATUS_OK)
+            return (context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY,
+                    context->result);
+        omc_val_make_array(&value, OMC_ELEM_U8, 4U, ref,
+                           OMC_BYTE_ORDER_NATIVE);
+        memset(&added_entry, 0, sizeof(added_entry));
+        if (omc_arena_append(&context->edit.arena, k_gg_ifd,
+                             sizeof(k_gg_ifd) - 1U, &ref) != OMC_STATUS_OK)
+            return (context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY,
+                    context->result);
+        omc_key_make_exif_tag(&added_entry.key, ref, 0U);
+        added_entry.value = value;
+        added_entry.origin =
+            context->source->entries[context->version_source].origin;
+        wire = omc_arena_view(&context->source->arena,
+                              added_entry.origin.wire_type_name);
+        added_entry.origin.wire_type_name.offset = 0U;
+        added_entry.origin.wire_type_name.size = 0U;
+        if (wire.size != 0U
+            && omc_arena_append(&context->edit.arena, wire.data, wire.size,
+                                &added_entry.origin.wire_type_name)
+                   != OMC_STATUS_OK)
+            return (context->result.status = OMC_GPS_TRANSLATION_NO_MEMORY,
+                    context->result);
+        added_entry.flags = OMC_ENTRY_FLAG_DIRTY;
+        status = omc_edit_add_entry(&context->edit, &added_entry);
+        if (status != OMC_STATUS_OK)
+            return (context->result.status = status == OMC_STATUS_NO_MEMORY
+                        ? OMC_GPS_TRANSLATION_NO_MEMORY
+                        : OMC_GPS_TRANSLATION_INTERNAL,
+                    context->result);
+        ++context->result.entries_added;
     }
-    if (context->edit.op_count != (omc_size)context->operations) return (context->result.status = OMC_GPS_TRANSLATION_INTERNAL, context->result);
-    if (omc_edit_commit(context->source, &context->edit, 1U, context->out) != OMC_STATUS_OK) return (context->result.status = OMC_GPS_TRANSLATION_INTERNAL, context->result);
-    context->result.status = OMC_GPS_TRANSLATION_OK; return context->result;
+
+    if (context->edit.op_count != (omc_size)context->operations
+        || context->result.entries_added != context->added)
+        return (context->result.status = OMC_GPS_TRANSLATION_INTERNAL,
+                context->result);
+    status = omc_edit_commit(context->source, &context->edit, 1U,
+                             context->out);
+    if (status != OMC_STATUS_OK)
+        return (context->result.status = status == OMC_STATUS_NO_MEMORY
+                    ? OMC_GPS_TRANSLATION_NO_MEMORY
+                    : OMC_GPS_TRANSLATION_INTERNAL,
+                context->result);
+    context->result.status = OMC_GPS_TRANSLATION_OK;
+    return context->result;
 }
 
 static omc_gps_translation_res
 gg_translate(const omc_store *source, omc_store *out,
              const omc_gps_translation_opts *options,
-             omc_gg_group *groups, omc_u32 count, omc_u32 mappings)
+             omc_gg_group *groups, omc_u32 count, omc_u32 mappings,
+             omc_u32 max_added_entries)
 {
     omc_gg_context context;
     omc_gps_translation_opts defaults;
     omc_u32 i;
     omc_size j;
+    int active_selected;
     memset(&context, 0, sizeof(context));
     context.source = source; context.out = out; context.groups = groups; context.group_count = count; context.version_entry = OMC_INVALID_ENTRY_ID;
-    omc_gps_translation_opts_init(&defaults); if (options != (const omc_gps_translation_opts *)0) defaults = *options; context.opts = defaults;
+    context.version_source = OMC_INVALID_ENTRY_ID;
+    omc_gps_translation_opts_init(&defaults);
+    if (options != (const omc_gps_translation_opts *)0)
+        defaults = *options;
+    else
+        defaults.max_added_entries = max_added_entries;
+    context.opts = defaults;
     context.result.status = OMC_GPS_TRANSLATION_INTERNAL; context.result.failed_source = OMC_INVALID_ENTRY_ID;
-    if (source == (const omc_store *)0 || out == (omc_store *)0 || source == out || !omc_store_shape_valid(source) || !omc_store_shape_valid(out) || (context.opts.mappings & ~mappings) != 0U || (context.opts.mappings & mappings) == 0U || context.opts.conflict < OMC_TRANSLATION_PRESERVE || context.opts.conflict > OMC_TRANSLATION_REPLACE || context.opts.max_added_entries == 0U || context.opts.max_operations == 0U || context.opts.max_source_properties == 0U || context.opts.max_text_bytes_per_property == 0U || context.opts.max_total_text_bytes == 0U)
+    if (source == (const omc_store *)0 || out == (omc_store *)0 || source == out || !omc_store_shape_valid(source) || !omc_store_shape_valid(out) || (context.opts.mappings & ~mappings) != 0U || (context.opts.mappings & mappings) == 0U || context.opts.conflict < OMC_TRANSLATION_PRESERVE || context.opts.conflict > OMC_TRANSLATION_REPLACE || context.opts.max_added_entries == 0U || context.opts.max_added_entries > max_added_entries || context.opts.max_operations == 0U || context.opts.max_source_properties == 0U || context.opts.max_text_bytes_per_property == 0U || context.opts.max_total_text_bytes == 0U)
         return (context.result.status = OMC_GPS_TRANSLATION_INVALID_OPTIONS, context.result);
     for (i = 0U; i < count; ++i) {
         omc_gg_group *group = &groups[i];
         omc_gg_prop props[2];
         int dirty = 0; int found = 0;
+        group->reference = 'N';
+        group->magnitude.numer = 0U;
+        group->magnitude.denom = 1U;
+        for (j = 0U; j < 3U; ++j)
+            group->components[j].denom = 1U;
         memset(props, 0, sizeof(props)); props[0].first = OMC_INVALID_ENTRY_ID; props[0].duplicate = OMC_INVALID_ENTRY_ID; props[1].first = OMC_INVALID_ENTRY_ID; props[1].duplicate = OMC_INVALID_ENTRY_ID;
         for (j = 0U; j < source->entry_count; ++j) {
             const omc_entry *entry = &source->entries[j];
@@ -1148,9 +1383,30 @@ gg_translate(const omc_store *source, omc_store *out,
         for (j = 1U; j < group->source_count; ++j) if (((source->entries[group->source[j]].flags & OMC_ENTRY_FLAG_DELETED) == 0U) != group->present) { context.result.status = OMC_GPS_TRANSLATION_INCOMPLETE_SOURCE; context.result.failed_mapping = group->mapping; context.result.failed_source = group->source[j]; return context.result; }
         if (group->present) { omc_gps_translation_status s = gg_parse_group(&context, group); if (s != OMC_GPS_TRANSLATION_OK) { context.result.status = s; context.result.failed_mapping = group->mapping; context.result.failed_source = group->source[0]; return context.result; } }
     }
+    active_selected = 0;
+    for (i = 0U; i < count; ++i)
+        active_selected = active_selected ||
+                          (groups[i].selected && groups[i].present);
     for (j = 0U; j < source->entry_count; ++j) if ((source->entries[j].flags & OMC_ENTRY_FLAG_DELETED) == 0U && gg_native_tag(&context, &source->entries[j], 0U)) { ++context.version_count; context.version_entry = (omc_entry_id)j; }
     context.version[0] = 2U; context.version[1] = 3U; context.version[2] = 0U; context.version[3] = 0U;
-    if (context.version_count != 0U) { const omc_val *value = &source->entries[context.version_entry].value; omc_const_bytes bytes = omc_arena_view(&source->arena, value->u.ref); if (context.version_count != 1U || value->kind != OMC_VAL_ARRAY || value->elem_type != OMC_ELEM_U8 || value->count != 4U || bytes.size != 4U) { context.result.status = OMC_GPS_TRANSLATION_NATIVE_CONFLICT; context.result.failed_mapping = OMC_GPS_TRANSLATE_VERSION; return context.result; } memcpy(context.version, bytes.data, 4U); }
+    if (active_selected && context.version_count != 0U) {
+        const omc_val *value = &source->entries[context.version_entry].value;
+        omc_const_bytes bytes;
+        if (context.version_count != 1U || value->kind != OMC_VAL_ARRAY
+            || value->elem_type != OMC_ELEM_U8 || value->count != 4U
+            || !omc_value_shape_valid(value, &source->arena)) {
+            context.result.status = OMC_GPS_TRANSLATION_NATIVE_CONFLICT;
+            context.result.failed_mapping = OMC_GPS_TRANSLATE_VERSION;
+            return context.result;
+        }
+        bytes = omc_arena_view(&source->arena, value->u.ref);
+        if (bytes.size != 4U) {
+            context.result.status = OMC_GPS_TRANSLATION_NATIVE_CONFLICT;
+            context.result.failed_mapping = OMC_GPS_TRANSLATE_VERSION;
+            return context.result;
+        }
+        memcpy(context.version, bytes.data, 4U);
+    }
     omc_edit_init(&context.edit); context.result = gg_apply(&context); omc_edit_fini(&context.edit); return context.result;
 }
 
@@ -1165,7 +1421,8 @@ omc_translate_xmp_gps_navigation(const omc_store *source, omc_store *out, const 
     groups[1].kind = OMC_GG_RATIONAL_PAIR; groups[1].mapping = OMC_GPS_NAV_TRANSLATE_SPEED; groups[1].paths[0] = "GPSSpeedRef"; groups[1].paths[1] = "GPSSpeed"; groups[1].source_count = 2U; groups[1].tags[0] = 12U; groups[1].tags[1] = 13U;
     groups[2].kind = OMC_GG_RATIONAL_PAIR; groups[2].mapping = OMC_GPS_NAV_TRANSLATE_TRACK; groups[2].paths[0] = "GPSTrackRef"; groups[2].paths[1] = "GPSTrack"; groups[2].source_count = 2U; groups[2].tags[0] = 14U; groups[2].tags[1] = 15U;
     groups[3].kind = OMC_GG_RATIONAL_PAIR; groups[3].mapping = OMC_GPS_NAV_TRANSLATE_DIRECTION; groups[3].paths[0] = "GPSImgDirectionRef"; groups[3].paths[1] = "GPSImgDirection"; groups[3].source_count = 2U; groups[3].tags[0] = 16U; groups[3].tags[1] = 17U;
-    return gg_translate(source, out, opts, groups, 4U, OMC_GPS_NAV_TRANSLATE_ALL);
+    return gg_translate(source, out, opts, groups, 4U,
+                        OMC_GPS_NAV_TRANSLATE_ALL, 9U);
 }
 
 omc_gps_translation_res
@@ -1179,7 +1436,8 @@ omc_translate_xmp_gps_destination(const omc_store *source, omc_store *out, const
     groups[1].kind = OMC_GG_COORDINATE; groups[1].mapping = OMC_GPS_DEST_TRANSLATE_LONGITUDE; groups[1].paths[0] = "GPSDestLongitude"; groups[1].source_count = 1U; groups[1].tags[0] = 21U; groups[1].tags[1] = 22U;
     groups[2].kind = OMC_GG_RATIONAL_PAIR; groups[2].mapping = OMC_GPS_DEST_TRANSLATE_BEARING; groups[2].paths[0] = "GPSDestBearingRef"; groups[2].paths[1] = "GPSDestBearing"; groups[2].source_count = 2U; groups[2].tags[0] = 23U; groups[2].tags[1] = 24U;
     groups[3].kind = OMC_GG_RATIONAL_PAIR; groups[3].mapping = OMC_GPS_DEST_TRANSLATE_DISTANCE; groups[3].paths[0] = "GPSDestDistanceRef"; groups[3].paths[1] = "GPSDestDistance"; groups[3].source_count = 2U; groups[3].tags[0] = 25U; groups[3].tags[1] = 26U;
-    return gg_translate(source, out, opts, groups, 4U, OMC_GPS_DEST_TRANSLATE_ALL);
+    return gg_translate(source, out, opts, groups, 4U,
+                        OMC_GPS_DEST_TRANSLATE_ALL, 9U);
 }
 
 omc_gps_translation_res
@@ -1194,7 +1452,8 @@ omc_translate_xmp_gps_quality(const omc_store *source, omc_store *out, const omc
     groups[2].kind = OMC_GG_RATIONAL_PAIR; groups[2].mapping = OMC_GPS_QUALITY_TRANSLATE_DOP; groups[2].paths[0] = "GPSDOP"; groups[2].source_count = 1U; groups[2].tags[0] = 11U;
     groups[3].kind = OMC_GG_SINGLE_U16; groups[3].mapping = OMC_GPS_QUALITY_TRANSLATE_DIFFERENTIAL; groups[3].paths[0] = "GPSDifferential"; groups[3].source_count = 1U; groups[3].tags[0] = 30U;
     groups[4].kind = OMC_GG_RATIONAL_PAIR; groups[4].mapping = OMC_GPS_QUALITY_TRANSLATE_ERROR; groups[4].paths[0] = "GPSHPositioningError"; groups[4].source_count = 1U; groups[4].tags[0] = 31U;
-    return gg_translate(source, out, opts, groups, 5U, OMC_GPS_QUALITY_TRANSLATE_ALL);
+    return gg_translate(source, out, opts, groups, 5U,
+                        OMC_GPS_QUALITY_TRANSLATE_ALL, 6U);
 }
 
 omc_gps_translation_res
@@ -1208,5 +1467,6 @@ omc_translate_xmp_gps_text(const omc_store *source, omc_store *out, const omc_gp
     groups[1].kind = OMC_GG_PLAIN_TEXT; groups[1].mapping = OMC_GPS_TEXT_TRANSLATE_MAP_DATUM; groups[1].paths[0] = "GPSMapDatum"; groups[1].source_count = 1U; groups[1].tags[0] = 18U;
     groups[2].kind = OMC_GG_ENCODED_TEXT; groups[2].mapping = OMC_GPS_TEXT_TRANSLATE_PROCESSING_METHOD; groups[2].paths[0] = "GPSProcessingMethod"; groups[2].source_count = 1U; groups[2].tags[0] = 27U;
     groups[3].kind = OMC_GG_ENCODED_TEXT; groups[3].mapping = OMC_GPS_TEXT_TRANSLATE_AREA_INFORMATION; groups[3].paths[0] = "GPSAreaInformation"; groups[3].source_count = 1U; groups[3].tags[0] = 28U;
-    return gg_translate(source, out, opts, groups, 4U, OMC_GPS_TEXT_TRANSLATE_ALL);
+    return gg_translate(source, out, opts, groups, 4U,
+                        OMC_GPS_TEXT_TRANSLATE_ALL, 5U);
 }

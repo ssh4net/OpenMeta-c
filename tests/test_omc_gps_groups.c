@@ -15,6 +15,14 @@ append(omc_store *store, const char *text)
     return ref;
 }
 
+static omc_byte_ref
+append_bytes(omc_store *store, const omc_u8 *bytes, omc_size size)
+{
+    omc_byte_ref ref;
+    assert(omc_arena_append(&store->arena, bytes, size, &ref) == OMC_STATUS_OK);
+    return ref;
+}
+
 static void
 add_xmp(omc_store *store, const char *path, const char *text)
 {
@@ -26,6 +34,178 @@ add_xmp(omc_store *store, const char *path, const char *text)
     entry.origin.wire_type_name = append(store, "gps-source");
     entry.flags = OMC_ENTRY_FLAG_DIRTY;
     assert(omc_store_add_entry(store, &entry, NULL) == OMC_STATUS_OK);
+}
+
+static void
+add_xmp_flags(omc_store *store, const char *path, const char *text,
+              omc_entry_flags flags)
+{
+    omc_entry entry;
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_xmp_property(&entry.key, append(store, k_ns),
+                              append(store, path));
+    omc_val_make_text(&entry.value, append(store, text), OMC_TEXT_UTF8);
+    entry.origin.block = OMC_INVALID_BLOCK_ID;
+    entry.origin.wire_type_name = append(store, "gps-source");
+    entry.flags = flags;
+    assert(omc_store_add_entry(store, &entry, NULL) == OMC_STATUS_OK);
+}
+
+static omc_entry_id
+add_native_text(omc_store *store, omc_u16 tag, const char *text,
+                omc_entry_flags flags, omc_u32 wire_count)
+{
+    omc_entry entry;
+    omc_entry_id id;
+    omc_byte_ref ifd;
+    memset(&entry, 0, sizeof(entry));
+    ifd = append(store, "gpsifd");
+    omc_key_make_exif_tag(&entry.key, ifd, tag);
+    omc_val_make_text(&entry.value, append(store, text), OMC_TEXT_ASCII);
+    entry.origin.block = 7U;
+    entry.origin.order_in_block = (omc_u32)(100U + tag);
+    entry.origin.wire_type.family = OMC_WIRE_TIFF;
+    entry.origin.wire_type.code = 2U;
+    entry.origin.wire_count = wire_count;
+    entry.origin.wire_type_name = append(store, "gps-native-text");
+    entry.flags = flags;
+    assert(omc_store_add_entry(store, &entry, &id) == OMC_STATUS_OK);
+    return id;
+}
+
+static omc_entry_id
+add_native_rational(omc_store *store, omc_u16 tag, omc_u32 numer,
+                    omc_u32 denom, omc_entry_flags flags)
+{
+    omc_entry entry;
+    omc_entry_id id;
+    omc_byte_ref ifd;
+    omc_urational rational;
+    memset(&entry, 0, sizeof(entry));
+    ifd = append(store, "gpsifd");
+    omc_key_make_exif_tag(&entry.key, ifd, tag);
+    rational.numer = numer;
+    rational.denom = denom;
+    omc_val_make_urational(&entry.value, rational);
+    entry.origin.block = 7U;
+    entry.origin.order_in_block = (omc_u32)(100U + tag);
+    entry.origin.wire_type.family = OMC_WIRE_TIFF;
+    entry.origin.wire_type.code = 5U;
+    entry.origin.wire_count = 1U;
+    entry.origin.wire_type_name = append(store, "gps-native-rational");
+    entry.flags = flags;
+    assert(omc_store_add_entry(store, &entry, &id) == OMC_STATUS_OK);
+    return id;
+}
+
+static omc_entry_id
+add_native_coordinate(omc_store *store, omc_u16 tag, omc_entry_flags flags)
+{
+    static const omc_u8 big_endian[] = {
+        0U, 0U, 0U, 70U, 0U, 0U, 0U, 2U,
+        0U, 0U, 0U, 96U, 0U, 0U, 0U, 2U,
+        0U, 0U, 0U, 150U, 0U, 0U, 0U, 20U
+    };
+    omc_entry entry;
+    omc_entry_id id;
+    omc_byte_ref ifd;
+    memset(&entry, 0, sizeof(entry));
+    ifd = append(store, "gpsifd");
+    omc_key_make_exif_tag(&entry.key, ifd, tag);
+    omc_val_make_array(&entry.value, OMC_ELEM_URATIONAL, 3U,
+                       append_bytes(store, big_endian, sizeof(big_endian)),
+                       OMC_BYTE_ORDER_BIG);
+    entry.origin.block = 7U;
+    entry.origin.order_in_block = (omc_u32)(100U + tag);
+    entry.origin.wire_type.family = OMC_WIRE_TIFF;
+    entry.origin.wire_type.code = 5U;
+    entry.origin.wire_count = 3U;
+    entry.origin.wire_type_name = append(store, "gps-native-rational-array");
+    entry.flags = flags;
+    assert(omc_store_add_entry(store, &entry, &id) == OMC_STATUS_OK);
+    return id;
+}
+
+static omc_entry_id
+add_native_version(omc_store *store)
+{
+    static const omc_u8 version[4] = { 2U, 3U, 0U, 0U };
+    omc_entry entry;
+    omc_entry_id id;
+    omc_byte_ref ifd;
+    memset(&entry, 0, sizeof(entry));
+    ifd = append(store, "gpsifd");
+    omc_key_make_exif_tag(&entry.key, ifd, 0U);
+    omc_val_make_array(&entry.value, OMC_ELEM_U8, 4U,
+                       append_bytes(store, version, sizeof(version)),
+                       OMC_BYTE_ORDER_NATIVE);
+    entry.origin.block = 7U;
+    entry.origin.order_in_block = 1U;
+    entry.origin.wire_type.family = OMC_WIRE_TIFF;
+    entry.origin.wire_type.code = 1U;
+    entry.origin.wire_count = 4U;
+    entry.origin.wire_type_name = append(store, "gps-version");
+    assert(omc_store_add_entry(store, &entry, &id) == OMC_STATUS_OK);
+    return id;
+}
+
+static const omc_entry *
+find_tag_any(const omc_store *store, omc_u16 tag)
+{
+    omc_size i;
+    for (i = 0U; i < store->entry_count; ++i) {
+        const omc_entry *entry = &store->entries[i];
+        omc_const_bytes ifd;
+        if (entry->key.kind != OMC_KEY_EXIF_TAG
+            || entry->key.u.exif_tag.tag != tag)
+            continue;
+        ifd = omc_arena_view(&store->arena, entry->key.u.exif_tag.ifd);
+        if (ifd.size == 6U && memcmp(ifd.data, "gpsifd", 6U) == 0)
+            return entry;
+    }
+    return NULL;
+}
+
+static void
+assert_same_value_and_origin(const omc_store *source,
+                             const omc_entry *before,
+                             const omc_store *output,
+                             const omc_entry *after)
+{
+    omc_const_bytes a;
+    omc_const_bytes b;
+    omc_const_bytes wire_a;
+    omc_const_bytes wire_b;
+    assert(before->value.kind == after->value.kind);
+    assert(before->value.elem_type == after->value.elem_type);
+    assert(before->value.text_encoding == after->value.text_encoding);
+    assert(before->value.count == after->value.count);
+    assert(before->value.byte_order == after->value.byte_order);
+    if (before->value.kind == OMC_VAL_TEXT
+        || before->value.kind == OMC_VAL_BYTES
+        || before->value.kind == OMC_VAL_ARRAY) {
+        a = omc_arena_view(&source->arena, before->value.u.ref);
+        b = omc_arena_view(&output->arena, after->value.u.ref);
+        assert(a.size == b.size);
+        assert(a.size == 0U || memcmp(a.data, b.data, a.size) == 0);
+    } else if (before->value.kind == OMC_VAL_SCALAR
+               && before->value.elem_type == OMC_ELEM_URATIONAL) {
+        assert(before->value.u.ur.numer == after->value.u.ur.numer);
+        assert(before->value.u.ur.denom == after->value.u.ur.denom);
+    } else {
+        assert(before->value.u.u64 == after->value.u.u64);
+    }
+    assert(before->origin.block == after->origin.block);
+    assert(before->origin.order_in_block == after->origin.order_in_block);
+    assert(before->origin.wire_type.family == after->origin.wire_type.family);
+    assert(before->origin.wire_type.code == after->origin.wire_type.code);
+    assert(before->origin.wire_count == after->origin.wire_count);
+    assert(before->origin.name_context_kind == after->origin.name_context_kind);
+    assert(before->origin.name_context_variant == after->origin.name_context_variant);
+    wire_a = omc_arena_view(&source->arena, before->origin.wire_type_name);
+    wire_b = omc_arena_view(&output->arena, after->origin.wire_type_name);
+    assert(wire_a.size == wire_b.size);
+    assert(wire_a.size == 0U || memcmp(wire_a.data, wire_b.data, wire_a.size) == 0);
 }
 
 static const omc_entry *
@@ -555,6 +735,405 @@ test_navigation_removal_cleans_version(void)
     omc_store_fini(&source);
 }
 
+typedef enum gps_lifecycle_kind {
+    GPS_LIFECYCLE_NAVIGATION,
+    GPS_LIFECYCLE_DESTINATION,
+    GPS_LIFECYCLE_QUALITY,
+    GPS_LIFECYCLE_TEXT
+} gps_lifecycle_kind;
+
+static omc_u32
+lifecycle_exact_mapping(gps_lifecycle_kind kind)
+{
+    switch (kind) {
+    case GPS_LIFECYCLE_NAVIGATION:
+        return OMC_GPS_NAV_TRANSLATE_SPEED;
+    case GPS_LIFECYCLE_DESTINATION:
+        return OMC_GPS_DEST_TRANSLATE_LATITUDE;
+    case GPS_LIFECYCLE_QUALITY:
+        return OMC_GPS_QUALITY_TRANSLATE_DOP;
+    case GPS_LIFECYCLE_TEXT:
+        return OMC_GPS_TEXT_TRANSLATE_MAP_DATUM;
+    }
+    return 0U;
+}
+
+static omc_u32
+lifecycle_delete_mapping(gps_lifecycle_kind kind)
+{
+    switch (kind) {
+    case GPS_LIFECYCLE_NAVIGATION:
+        return OMC_GPS_NAV_TRANSLATE_TIMESTAMP;
+    case GPS_LIFECYCLE_DESTINATION:
+        return OMC_GPS_DEST_TRANSLATE_LATITUDE;
+    case GPS_LIFECYCLE_QUALITY:
+        return OMC_GPS_QUALITY_TRANSLATE_STATUS
+               | OMC_GPS_QUALITY_TRANSLATE_DOP;
+    case GPS_LIFECYCLE_TEXT:
+        return OMC_GPS_TEXT_TRANSLATE_SATELLITES
+               | OMC_GPS_TEXT_TRANSLATE_MAP_DATUM;
+    }
+    return 0U;
+}
+
+static omc_u32
+lifecycle_group_count(gps_lifecycle_kind kind)
+{
+    return kind == GPS_LIFECYCLE_QUALITY || kind == GPS_LIFECYCLE_TEXT
+               ? 2U : 1U;
+}
+
+static omc_gps_translation_res
+lifecycle_translate(gps_lifecycle_kind kind, const omc_store *source,
+                    omc_store *output, const omc_gps_translation_opts *opts)
+{
+    switch (kind) {
+    case GPS_LIFECYCLE_NAVIGATION:
+        return omc_translate_xmp_gps_navigation(source, output, opts);
+    case GPS_LIFECYCLE_DESTINATION:
+        return omc_translate_xmp_gps_destination(source, output, opts);
+    case GPS_LIFECYCLE_QUALITY:
+        return omc_translate_xmp_gps_quality(source, output, opts);
+    case GPS_LIFECYCLE_TEXT:
+        return omc_translate_xmp_gps_text(source, output, opts);
+    }
+    {
+        omc_gps_translation_res result;
+        memset(&result, 0, sizeof(result));
+        result.status = OMC_GPS_TRANSLATION_INTERNAL;
+        return result;
+    }
+}
+
+static void
+populate_exact_group(omc_store *source, gps_lifecycle_kind kind)
+{
+    add_native_version(source);
+    if (kind == GPS_LIFECYCLE_NAVIGATION) {
+        add_xmp(source, "GPSSpeedRef", "K");
+        add_xmp(source, "GPSSpeed", "12.5");
+        add_native_text(source, 12U, "K", OMC_ENTRY_FLAG_NONE, 1U);
+        add_native_rational(source, 13U, 250U, 20U,
+                            OMC_ENTRY_FLAG_NONE);
+    } else if (kind == GPS_LIFECYCLE_DESTINATION) {
+        add_xmp(source, "GPSDestLatitude", "35,48.125N");
+        add_native_text(source, 19U, "N", OMC_ENTRY_FLAG_NONE, 1U);
+        add_native_coordinate(source, 20U, OMC_ENTRY_FLAG_NONE);
+    } else if (kind == GPS_LIFECYCLE_QUALITY) {
+        add_xmp(source, "GPSDOP", "1.25");
+        add_native_rational(source, 11U, 10U, 8U,
+                            OMC_ENTRY_FLAG_NONE);
+    } else {
+        add_xmp(source, "GPSMapDatum", "WGS-84");
+        add_native_text(source, 18U, "WGS-84", OMC_ENTRY_FLAG_NONE, 6U);
+    }
+}
+
+static void
+populate_deleted_sources(omc_store *source, gps_lifecycle_kind kind,
+                         omc_entry_flags native_flags, int with_tombstone)
+{
+    const omc_entry_flags deleted =
+        OMC_ENTRY_FLAG_DIRTY | OMC_ENTRY_FLAG_DELETED;
+    add_native_version(source);
+    if (kind == GPS_LIFECYCLE_NAVIGATION) {
+        add_xmp_flags(source, "GPSTimeStamp", "", deleted);
+        if (with_tombstone)
+            add_native_coordinate(source, 7U, native_flags);
+    } else if (kind == GPS_LIFECYCLE_DESTINATION) {
+        add_xmp_flags(source, "GPSDestLatitude", "", deleted);
+        if (with_tombstone)
+            add_native_text(source, 19U, "N", native_flags, 1U);
+    } else if (kind == GPS_LIFECYCLE_QUALITY) {
+        add_xmp_flags(source, "GPSStatus", "", deleted);
+        add_xmp_flags(source, "GPSDOP", "", deleted);
+        if (with_tombstone)
+            add_native_text(source, 9U, "A", native_flags, 1U);
+    } else {
+        add_xmp_flags(source, "GPSSatellites", "", deleted);
+        add_xmp_flags(source, "GPSMapDatum", "", deleted);
+        if (with_tombstone)
+            add_native_text(source, 8U, "8", native_flags, 1U);
+    }
+}
+
+static void
+assert_clean_native_group(const omc_store *source, const omc_store *output,
+                          gps_lifecycle_kind kind,
+                          omc_entry_flags source_flags)
+{
+    static const omc_u16 nav_tags[] = { 12U, 13U };
+    static const omc_u16 destination_tags[] = { 19U, 20U };
+    static const omc_u16 quality_tags[] = { 11U };
+    static const omc_u16 text_tags[] = { 18U };
+    const omc_u16 *tags;
+    omc_size count;
+    omc_size i;
+    if (kind == GPS_LIFECYCLE_NAVIGATION) {
+        tags = nav_tags;
+        count = sizeof(nav_tags) / sizeof(nav_tags[0]);
+    } else if (kind == GPS_LIFECYCLE_DESTINATION) {
+        tags = destination_tags;
+        count = sizeof(destination_tags) / sizeof(destination_tags[0]);
+    } else if (kind == GPS_LIFECYCLE_QUALITY) {
+        tags = quality_tags;
+        count = sizeof(quality_tags) / sizeof(quality_tags[0]);
+    } else {
+        tags = text_tags;
+        count = sizeof(text_tags) / sizeof(text_tags[0]);
+    }
+    for (i = 0U; i < count; ++i) {
+        const omc_entry *before = find_tag(source, tags[i]);
+        const omc_entry *after = find_tag(output, tags[i]);
+        assert(before != NULL && after != NULL);
+        assert(before->flags == source_flags);
+        assert(after->flags == (source_flags | OMC_ENTRY_FLAG_DIRTY));
+        assert_same_value_and_origin(source, before, output, after);
+    }
+}
+
+static void
+test_group_exact_promotion(gps_lifecycle_kind kind)
+{
+    omc_store source;
+    omc_store output;
+    omc_store repeated;
+    omc_store preserve_source;
+    omc_store preserve_output;
+    omc_gps_translation_opts opts;
+    omc_gps_translation_res result;
+    omc_store_init(&source);
+    omc_store_init(&output);
+    omc_store_init(&repeated);
+    omc_store_init(&preserve_source);
+    omc_store_init(&preserve_output);
+    populate_exact_group(&source, kind);
+    omc_gps_translation_opts_init(&opts);
+    opts.mappings = lifecycle_exact_mapping(kind);
+    opts.conflict = OMC_TRANSLATION_REPLACE;
+    result = lifecycle_translate(kind, &source, &output, &opts);
+    assert(result.status == OMC_GPS_TRANSLATION_OK);
+    assert(result.groups_translated == 1U);
+    assert(result.groups_unchanged == 0U);
+    assert(result.entries_updated ==
+           (kind == GPS_LIFECYCLE_NAVIGATION
+                || kind == GPS_LIFECYCLE_DESTINATION ? 2U : 1U));
+    assert(result.entries_added == 0U && result.entries_removed == 0U);
+    assert_clean_native_group(&source, &output, kind, OMC_ENTRY_FLAG_NONE);
+
+    result = lifecycle_translate(kind, &output, &repeated, &opts);
+    assert(result.status == OMC_GPS_TRANSLATION_OK);
+    assert(result.groups_unchanged == 1U);
+    assert(result.entries_added == 0U && result.entries_updated == 0U
+           && result.entries_removed == 0U);
+    assert_clean_native_group(&output, &repeated, kind, OMC_ENTRY_FLAG_DIRTY);
+
+    populate_exact_group(&preserve_source, kind);
+    opts.conflict = OMC_TRANSLATION_PRESERVE;
+    result = lifecycle_translate(kind, &preserve_source, &preserve_output,
+                                 &opts);
+    assert(result.status == OMC_GPS_TRANSLATION_OK);
+    assert(result.groups_preserved == 1U);
+    assert(result.entries_added == 0U && result.entries_updated == 0U
+           && result.entries_removed == 0U);
+    {
+        const omc_store *expected_source = &preserve_source;
+        const omc_store *actual_output = &preserve_output;
+        if (kind == GPS_LIFECYCLE_NAVIGATION) {
+            assert(find_tag(actual_output, 12U)->flags == OMC_ENTRY_FLAG_NONE);
+            assert(find_tag(actual_output, 13U)->flags == OMC_ENTRY_FLAG_NONE);
+        } else if (kind == GPS_LIFECYCLE_DESTINATION) {
+            assert(find_tag(actual_output, 19U)->flags == OMC_ENTRY_FLAG_NONE);
+            assert(find_tag(actual_output, 20U)->flags == OMC_ENTRY_FLAG_NONE);
+        } else if (kind == GPS_LIFECYCLE_QUALITY) {
+            assert(find_tag(actual_output, 11U)->flags == OMC_ENTRY_FLAG_NONE);
+        } else {
+            assert(find_tag(actual_output, 18U)->flags == OMC_ENTRY_FLAG_NONE);
+        }
+        (void)expected_source;
+    }
+    omc_store_fini(&preserve_output);
+    omc_store_fini(&preserve_source);
+    omc_store_fini(&repeated);
+    omc_store_fini(&output);
+    omc_store_fini(&source);
+}
+
+static void
+assert_deleted_intent(const omc_store *store, omc_u16 tag,
+                      omc_val_kind kind, omc_elem_type element,
+                      omc_u32 count)
+{
+    const omc_entry *entry = find_tag_any(store, tag);
+    assert(entry != NULL);
+    assert(entry->flags == (OMC_ENTRY_FLAG_DIRTY | OMC_ENTRY_FLAG_DELETED));
+    assert(entry->value.kind == kind);
+    assert(entry->value.elem_type == element);
+    assert(entry->value.count == count);
+}
+
+static void
+assert_deleted_group_values(const omc_store *store,
+                            gps_lifecycle_kind kind)
+{
+    if (kind == GPS_LIFECYCLE_NAVIGATION) {
+        assert_deleted_intent(store, 7U, OMC_VAL_ARRAY,
+                              OMC_ELEM_URATIONAL, 3U);
+        assert_deleted_intent(store, 29U, OMC_VAL_TEXT, OMC_ELEM_U8, 10U);
+    } else if (kind == GPS_LIFECYCLE_DESTINATION) {
+        assert_deleted_intent(store, 19U, OMC_VAL_TEXT, OMC_ELEM_U8, 1U);
+        assert_deleted_intent(store, 20U, OMC_VAL_ARRAY,
+                              OMC_ELEM_URATIONAL, 3U);
+    } else if (kind == GPS_LIFECYCLE_QUALITY) {
+        assert_deleted_intent(store, 9U, OMC_VAL_TEXT, OMC_ELEM_U8, 1U);
+        assert_deleted_intent(store, 11U, OMC_VAL_SCALAR,
+                              OMC_ELEM_URATIONAL, 1U);
+    } else {
+        assert_deleted_intent(store, 8U, OMC_VAL_TEXT, OMC_ELEM_U8, 1U);
+        assert_deleted_intent(store, 18U, OMC_VAL_TEXT, OMC_ELEM_U8, 0U);
+    }
+}
+
+static void
+test_group_deletion_lifecycle(gps_lifecycle_kind kind,
+                              omc_entry_flags native_flags)
+{
+    omc_store source;
+    omc_store output;
+    omc_store repeated;
+    omc_store_init(&source);
+    omc_store_init(&output);
+    omc_store_init(&repeated);
+    populate_deleted_sources(&source, kind, native_flags, 1);
+    {
+        const omc_entry *before =
+            find_tag_any(&source, kind == GPS_LIFECYCLE_NAVIGATION ? 7U
+                         : kind == GPS_LIFECYCLE_DESTINATION ? 19U
+                         : kind == GPS_LIFECYCLE_QUALITY ? 9U : 8U);
+        omc_gps_translation_opts opts;
+        omc_gps_translation_res result;
+        const omc_u16 source_tag =
+            kind == GPS_LIFECYCLE_NAVIGATION ? 7U
+            : kind == GPS_LIFECYCLE_DESTINATION ? 19U
+            : kind == GPS_LIFECYCLE_QUALITY ? 9U : 8U;
+        omc_u32 expected_added = 1U;
+        omc_u32 expected_translated;
+        omc_size repeated_groups;
+        assert(before != NULL && before->flags == native_flags);
+        omc_gps_translation_opts_init(&opts);
+        opts.mappings = lifecycle_delete_mapping(kind);
+        result = lifecycle_translate(kind, &source, &output, &opts);
+        assert(result.status == OMC_GPS_TRANSLATION_OK);
+        expected_translated = lifecycle_group_count(kind);
+        if ((kind == GPS_LIFECYCLE_QUALITY || kind == GPS_LIFECYCLE_TEXT)
+            && native_flags == (OMC_ENTRY_FLAG_DIRTY | OMC_ENTRY_FLAG_DELETED)) {
+            --expected_translated;
+            assert(result.groups_unchanged == 1U);
+        }
+        assert(result.groups_translated == expected_translated);
+        assert(result.entries_added == expected_added);
+        assert(result.entries_updated ==
+               (native_flags == OMC_ENTRY_FLAG_DELETED ? 1U : 0U));
+        assert(result.entries_removed == 1U);
+        assert(find_tag(&output, 0U) == NULL);
+        assert_deleted_group_values(&output, kind);
+        if (native_flags == OMC_ENTRY_FLAG_DELETED) {
+            const omc_entry *after = find_tag_any(&output, source_tag);
+            assert(after != NULL);
+            assert_same_value_and_origin(&source, before, &output, after);
+        }
+        repeated_groups = lifecycle_group_count(kind);
+        result = lifecycle_translate(kind, &output, &repeated, &opts);
+        assert(result.status == OMC_GPS_TRANSLATION_OK);
+        assert(result.groups_unchanged == repeated_groups);
+        assert(result.entries_added == 0U && result.entries_updated == 0U
+               && result.entries_removed == 0U);
+        assert(repeated.entry_count == output.entry_count);
+        assert_deleted_group_values(&repeated, kind);
+    }
+    omc_store_fini(&repeated);
+    omc_store_fini(&output);
+    omc_store_fini(&source);
+}
+
+static void
+add_sentinel(omc_store *store)
+{
+    omc_entry entry;
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_comment(&entry.key);
+    omc_val_make_text(&entry.value, append(store, "keep"), OMC_TEXT_UTF8);
+    entry.origin.block = OMC_INVALID_BLOCK_ID;
+    assert(omc_store_add_entry(store, &entry, NULL) == OMC_STATUS_OK);
+}
+
+static void
+assert_sentinel(const omc_store *store)
+{
+    omc_const_bytes bytes;
+    assert(store->entry_count == 1U);
+    assert(store->entries[0].key.kind == OMC_KEY_COMMENT);
+    assert(store->entries[0].value.kind == OMC_VAL_TEXT);
+    bytes = omc_arena_view(&store->arena, store->entries[0].value.u.ref);
+    assert(bytes.size == 4U && memcmp(bytes.data, "keep", 4U) == 0);
+}
+
+static void
+test_group_limit_rollback(gps_lifecycle_kind kind)
+{
+    omc_store source;
+    omc_store output;
+    omc_gps_translation_opts opts;
+    omc_gps_translation_res result;
+    omc_entry_flags flags[8];
+    omc_size i;
+    omc_store_init(&source);
+    omc_store_init(&output);
+    populate_deleted_sources(&source, kind, OMC_ENTRY_FLAG_NONE, 0);
+    add_sentinel(&output);
+    assert(source.entry_count <= sizeof(flags) / sizeof(flags[0]));
+    for (i = 0U; i < source.entry_count; ++i)
+        flags[i] = source.entries[i].flags;
+
+    omc_gps_translation_opts_init(&opts);
+    opts.mappings = lifecycle_delete_mapping(kind);
+    opts.max_added_entries = 1U;
+    result = lifecycle_translate(kind, &source, &output, &opts);
+    assert(result.status == OMC_GPS_TRANSLATION_ENTRY_LIMIT);
+    assert_sentinel(&output);
+    assert(source.entry_count <= sizeof(flags) / sizeof(flags[0]));
+    for (i = 0U; i < source.entry_count; ++i)
+        assert(source.entries[i].flags == flags[i]);
+
+    opts.max_added_entries =
+        kind == GPS_LIFECYCLE_NAVIGATION
+                || kind == GPS_LIFECYCLE_DESTINATION
+            ? 9U
+            : kind == GPS_LIFECYCLE_QUALITY ? 6U : 5U;
+    opts.max_operations = 1U;
+    result = lifecycle_translate(kind, &source, &output, &opts);
+    assert(result.status == OMC_GPS_TRANSLATION_OPERATION_LIMIT);
+    assert_sentinel(&output);
+    for (i = 0U; i < source.entry_count; ++i)
+        assert(source.entries[i].flags == flags[i]);
+    omc_store_fini(&output);
+    omc_store_fini(&source);
+}
+
+static void
+test_group_v2_lifecycle(void)
+{
+    gps_lifecycle_kind kind;
+    for (kind = GPS_LIFECYCLE_NAVIGATION;
+         kind <= GPS_LIFECYCLE_TEXT; kind = (gps_lifecycle_kind)(kind + 1)) {
+        test_group_exact_promotion(kind);
+        test_group_deletion_lifecycle(
+            kind, OMC_ENTRY_FLAG_DIRTY | OMC_ENTRY_FLAG_DELETED);
+        test_group_deletion_lifecycle(kind, OMC_ENTRY_FLAG_DELETED);
+        test_group_limit_rollback(kind);
+    }
+}
+
 int
 main(void)
 {
@@ -567,5 +1146,6 @@ main(void)
     test_text_unicode_encoding();
     test_navigation_timestamp_edges();
     test_navigation_removal_cleans_version();
+    test_group_v2_lifecycle();
     return 0;
 }

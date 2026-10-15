@@ -134,6 +134,70 @@ test_commit_updates_and_tombstones(void)
 }
 
 static void
+test_mark_dirty_preserves_entry(void)
+{
+    omc_store base;
+    omc_store out;
+    omc_edit edit;
+    omc_entry entry;
+    omc_byte_ref ifd_ref;
+    omc_byte_ref wire_name_ref;
+    omc_byte_ref value_ref;
+    omc_const_bytes before_value;
+    omc_const_bytes after_value;
+
+    omc_store_init(&base);
+    omc_store_init(&out);
+    omc_edit_init(&edit);
+
+    ifd_ref = append_bytes(&base.arena, "gpsifd");
+    wire_name_ref = append_bytes(&base.arena, "GPS_RATIONAL");
+    value_ref = append_bytes(&base.arena, "original bytes");
+    memset(&entry, 0, sizeof(entry));
+    omc_key_make_exif_tag(&entry.key, ifd_ref, 6U);
+    omc_val_make_bytes(&entry.value, value_ref);
+    entry.origin.block = 17U;
+    entry.origin.order_in_block = 23U;
+    entry.origin.wire_type.family = OMC_WIRE_TIFF;
+    entry.origin.wire_type.code = 5U;
+    entry.origin.wire_count = 3U;
+    entry.origin.wire_type_name = wire_name_ref;
+    entry.origin.name_context_kind = OMC_ENTRY_NAME_CTX_CANON_MAIN_0038;
+    entry.origin.name_context_variant = 4U;
+    entry.flags = OMC_ENTRY_FLAG_UNREADABLE | OMC_ENTRY_FLAG_CONTEXTUAL_NAME;
+    assert(omc_store_add_entry(&base, &entry, NULL) == OMC_STATUS_OK);
+
+    assert(omc_edit_mark_dirty(&edit, 0U) == OMC_STATUS_OK);
+    assert(omc_edit_commit(&base, &edit, 1U, &out) == OMC_STATUS_OK);
+    assert(out.entry_count == 1U);
+    assert(out.entries[0].key.kind == base.entries[0].key.kind);
+    assert(out.entries[0].key.u.exif_tag.tag == 6U);
+    assert(out.entries[0].origin.block == 17U);
+    assert(out.entries[0].origin.order_in_block == 23U);
+    assert(out.entries[0].origin.wire_type.family == OMC_WIRE_TIFF);
+    assert(out.entries[0].origin.wire_type.code == 5U);
+    assert(out.entries[0].origin.wire_count == 3U);
+    assert(out.entries[0].origin.name_context_kind ==
+           OMC_ENTRY_NAME_CTX_CANON_MAIN_0038);
+    assert(out.entries[0].origin.name_context_variant == 4U);
+    assert(out.entries[0].value.kind == OMC_VAL_BYTES);
+    assert(out.entries[0].value.count == base.entries[0].value.count);
+    assert(out.entries[0].value.byte_order == base.entries[0].value.byte_order);
+    assert(out.entries[0].flags ==
+           (base.entries[0].flags | OMC_ENTRY_FLAG_DIRTY));
+    before_value = omc_arena_view(&base.arena, base.entries[0].value.u.ref);
+    after_value = omc_arena_view(&out.arena, out.entries[0].value.u.ref);
+    assert(before_value.size == after_value.size);
+    assert(memcmp(before_value.data, after_value.data, before_value.size) == 0);
+    expect_text_ref(&out.arena, out.entries[0].origin.wire_type_name,
+                    "GPS_RATIONAL");
+
+    omc_edit_fini(&edit);
+    omc_store_fini(&out);
+    omc_store_fini(&base);
+}
+
+static void
 test_compact_removes_deleted_entries(void)
 {
     omc_store base;
@@ -219,6 +283,7 @@ main(void)
 {
     test_commit_appends_new_entry();
     test_commit_updates_and_tombstones();
+    test_mark_dirty_preserves_entry();
     test_compact_removes_deleted_entries();
     test_failure_preserves_output();
     return 0;
