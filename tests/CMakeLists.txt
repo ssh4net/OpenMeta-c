@@ -136,6 +136,13 @@ target_link_libraries(omc_test_iptc_to_xmp PRIVATE omc)
 omc_apply_warnings(omc_test_iptc_to_xmp)
 add_test(NAME omc_test_iptc_to_xmp COMMAND omc_test_iptc_to_xmp)
 
+foreach(omc_date_case IN ITEMS iptc_dates_to_xmp iptc_dates_lifecycle)
+  add_executable(omc_test_${omc_date_case} test_omc_${omc_date_case}.c)
+  target_link_libraries(omc_test_${omc_date_case} PRIVATE omc)
+  omc_apply_warnings(omc_test_${omc_date_case})
+  add_test(NAME omc_test_${omc_date_case} COMMAND omc_test_${omc_date_case})
+endforeach()
+
 add_executable(omc_test_pay test_omc_pay.c)
 target_link_libraries(omc_test_pay PRIVATE omc)
 add_test(NAME omc_test_pay COMMAND omc_test_pay)
@@ -384,8 +391,31 @@ static_assert(openmeta::kIptcIimSerializeContractVersion >= 1U);
 static_assert(openmeta::kMetadataIptcToXmpContractVersion >= 1U);
 int main() { return 0; }"
       OMC_HAVE_CPP_IPTC_CONVERGENCE)
+    unset(OMC_HAVE_CPP_IPTC_DATE_TO_XMP CACHE)
+    check_cxx_source_compiles("#include <openmeta/metadata_translation.h>
+static_assert(openmeta::kMetadataIptcDateToXmpContractVersion >= 1U);
+int main() { return 0; }"
+      OMC_HAVE_CPP_IPTC_DATE_TO_XMP)
   endfunction()
   omc_check_translation_contracts()
+  if(OMC_HAVE_CPP_IPTC_DATE_TO_XMP)
+    add_executable(omc_test_iptc_dates_to_xmp_parity test_omc_iptc_dates_to_xmp_parity.cc)
+    set_target_properties(omc_test_iptc_dates_to_xmp_parity PROPERTIES
+      CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    target_link_libraries(omc_test_iptc_dates_to_xmp_parity PRIVATE omc OpenMeta::openmeta)
+    if(MSVC)
+      target_compile_options(omc_test_iptc_dates_to_xmp_parity PRIVATE /UNDEBUG)
+    else()
+      target_compile_options(omc_test_iptc_dates_to_xmp_parity PRIVATE -UNDEBUG)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      target_compile_options(omc_test_iptc_dates_to_xmp_parity PRIVATE -stdlib=libc++)
+      target_link_options(omc_test_iptc_dates_to_xmp_parity PRIVATE -stdlib=libc++)
+    endif()
+    add_test(NAME omc_test_iptc_dates_to_xmp_parity COMMAND omc_test_iptc_dates_to_xmp_parity)
+  else()
+    message(STATUS "IPTC date parity requires the C++ 0.8.18 contract")
+  endif()
   if(OMC_HAVE_CPP_IPTC_CONVERGENCE)
     foreach(omc_iptc_case IN ITEMS jpeg_iptc iptc_serialize iptc_to_xmp)
       add_executable(omc_test_${omc_iptc_case}_parity test_omc_${omc_iptc_case}_parity.cc)

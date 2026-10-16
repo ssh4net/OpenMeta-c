@@ -63,6 +63,7 @@ set(OMC_SOURCES
   edit/omc_translation_exif_text.c
   edit/omc_translation_iptc.c
   edit/omc_translation_iptc_to_xmp.c
+  edit/omc_translation_iptc_dates_to_xmp.c
   edit/omc_transfer_persist.c
   edit/omc_xmp_apply.c
   edit/omc_xmp_embed.c

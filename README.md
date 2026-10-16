@@ -24,7 +24,7 @@ The C library may later serve as the C++ implementation core. Temporary
 implementation overlap is expected while behavior is ported and verified.
 
 The [porting plan](porting_plan.md) records the source-reviewed history from
-C++ `0.4.127`, the scope clarification of 2026-09-08, the current C++ `0.8.17`
+C++ `0.4.127`, the scope clarification of 2026-09-08, the current C++ `0.8.18`
 reference review, the parity matrix and acceptance gates. Earlier percentage
 estimates based on a narrower core boundary do not measure this scope. The
 [authoring contract](authoring.md) documents typed construction, detached
@@ -39,8 +39,8 @@ Version 0.12.0 extends transfer prepare options, bundles and executors with
 native EXIF output control and owned native edit intent. Rebuild their callers
 and use `omc_transfer_prepare_opts_init()`; native EXIF output defaults to on.
 
-The [current roadmap](porting_plan.md#upstream-0817-iptc-convergence-batch) pins C++
-0.8.17 at `d281e04`. C package 0.11.0 adds aggregate JUMBF semantic-work limits,
+The [current roadmap](porting_plan.md#upstream-0818-native-iptc-dates) pins C++
+0.8.18 at `7712c21`. C package 0.11.0 adds aggregate JUMBF semantic-work limits,
 rejects retained `dimg` relations losing an input, and corrects exact-cap
 streaming decompression. Payload output limit zero now means unlimited; the
 default remains 64 MiB. The [execution receipt](up0_up1_0814.md) records fresh
@@ -64,9 +64,15 @@ matching headers and binaries. Existing reverse-translation defaults and
 package wire versions are unchanged. See [authoring.md](authoring.md) for the
 new API contracts and [the batch receipt](iptc_convergence_0817.md) for evidence.
 
-Next: the newly committed C++ 0.8.18 native IPTC date/time forward API, then
-UP4 dates/basic capture/sensitivity/Flash/lens lifecycle and shared
-destination validation. Reader batches can advance independently. Broader
+Version 0.14.0 adds explicit native IPTC date/time to XMP translation for the
+creation and digital-creation pairs. It preserves year/month precision, signed
+or absent offsets and dirty deletion intent in one bounded transaction. Existing
+reverse-date and portable-projection policies remain unchanged. See the
+[date batch receipt](iptc_dates_0818.md) for the pinned contract and validation.
+
+Next: C++ 0.8.19 reverse creation-date precision and stale-time lifecycle,
+then UP4 basic capture/sensitivity/Flash/lens and shared destination validation.
+Reader batches can advance independently. Broader
 capture/identity, patch binding, snapshots and non-fuzzy semantic stages remain
 tracked work. Preserve older read/decode and IPTC evidence under its recorded
 reference pins.

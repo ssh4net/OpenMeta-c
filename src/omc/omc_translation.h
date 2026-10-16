@@ -368,6 +368,72 @@ OMC_API omc_iptc_to_xmp_translation_res omc_translate_iptc_to_xmp(
     const omc_store *source, omc_store *out,
     const omc_iptc_to_xmp_translation_opts *opts);
 
+/* Native IPTC creation-date pairs -> materialized XMP, contract 1. */
+#define OMC_IPTC_DATE_TO_XMP_TRANSLATION_CONTRACT_VERSION 1U
+#define OMC_IPTC_DATE_TO_XMP_TRANSLATION_MAX_SOURCE_PROPERTIES 1024U
+#define OMC_IPTC_DATE_TO_XMP_TRANSLATION_MAX_ADDED_ENTRIES 2U
+#define OMC_IPTC_DATE_TO_XMP_TRANSLATION_MAX_OPERATIONS 2U
+#define OMC_IPTC_DATE_TO_XMP_TRANSLATION_MAX_TOTAL_TEXT_BYTES 8192U
+
+typedef enum omc_iptc_date_to_xmp_translation_status {
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_OK = 0,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_NULL_OUTPUT,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_INVALID_OPTIONS,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_INVALID_SOURCE,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_SOURCE_LIMIT,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_AMBIGUOUS_SOURCE,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_INVALID_SOURCE_VALUE,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_INVALID_DATETIME,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_UNSUPPORTED_PRECISION,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_INCOMPLETE_SOURCE,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_DESTINATION_CONFLICT,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_UNSUPPORTED_DESTINATION_SHAPE,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_ENTRY_LIMIT,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_OPERATION_LIMIT,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_NO_MEMORY,
+    OMC_IPTC_DATE_TO_XMP_TRANSLATION_INTERNAL
+} omc_iptc_date_to_xmp_translation_status;
+
+typedef struct omc_iptc_date_to_xmp_translation_opts {
+    int created;
+    int digital_creation;
+    int all_sources;
+    omc_translation_conflict conflict;
+    omc_u32 max_source_properties;
+    omc_u32 max_added_entries;
+    omc_u32 max_operations;
+    omc_u64 max_total_text_bytes;
+} omc_iptc_date_to_xmp_translation_opts;
+
+typedef struct omc_iptc_date_to_xmp_translation_res {
+    omc_iptc_date_to_xmp_translation_status status;
+    omc_u32 failed_mapping;
+    omc_entry_id failed_source;
+    omc_u32 source_properties;
+    omc_u32 groups_translated;
+    omc_u32 groups_preserved;
+    omc_u32 groups_unchanged;
+    omc_u32 entries_added;
+    omc_u32 entries_updated;
+    omc_u32 entries_removed;
+} omc_iptc_date_to_xmp_translation_res;
+
+/* failed_mapping is OMC_TRANSLATE_DATE_CREATED or OMC_TRANSLATE_CREATE_IPTC
+ * when an error is tied to one pair, and zero when it is not mapping-specific. */
+/* Record 2 datasets 55/60 map to photoshop:DateCreated; datasets 62/63 map
+ * to xmp:CreateDate. Dates use YYYYMMDD and accept hierarchical partial
+ * precision (YYYY or YYYY-MM); times use HHMMSS or HHMMSS+/-HHMM and require
+ * a full date. All is the default source mode. DirtyOnly selects a pair when
+ * either member is dirty; selected active members participate together.
+ * Numeric source bytes are ASCII syntax and ignore IPTC charset markers.
+ * Source and initialized output may alias. Success replaces output with an
+ * owned clone and additions/edits; failure leaves both unchanged. */
+OMC_API void omc_iptc_date_to_xmp_translation_opts_init(
+    omc_iptc_date_to_xmp_translation_opts *opts);
+OMC_API omc_iptc_date_to_xmp_translation_res omc_translate_iptc_dates_to_xmp(
+    const omc_store *source, omc_store *out,
+    const omc_iptc_date_to_xmp_translation_opts *opts);
+
 OMC_API void omc_gps_translation_opts_init(omc_gps_translation_opts *opts);
 
 /* Primary GPS reverse translation. The selected XMP properties are

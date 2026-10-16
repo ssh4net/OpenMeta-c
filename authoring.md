@@ -562,3 +562,64 @@ Default hard ceilings are 1024 selected source properties, 1024 additions,
 owned destination text. Aggregate text sizes are checked before UTF-8 scanning.
 Late errors and budget failures publish no partial transaction. Use the result's
 status and failed mapping/source to diagnose rejection.
+
+## Native IPTC date/time to materialized XMP (0.14.0)
+
+`omc_translate_iptc_dates_to_xmp()` implements the separate C++ 0.8.18 date
+contract. Initialize `omc_iptc_date_to_xmp_translation_opts` with
+`omc_iptc_date_to_xmp_translation_opts_init()`. Both selectors default to true,
+with All sources and FailOnConflict.
+
+| Selector | Native date/time datasets | XMP property | Failure mapping ID |
+| --- | --- | --- | --- |
+| `created` | 2:55 / 2:60 | `photoshop:DateCreated` | `OMC_TRANSLATE_DATE_CREATED` |
+| `digital_creation` | 2:62 / 2:63 | `xmp:CreateDate` | `OMC_TRANSLATE_CREATE_IPTC` |
+
+Dates contain exactly eight ASCII digits. Positive-year `YYYY0000` emits
+`YYYY`; `YYYYMM00` emits `YYYY-MM`. Full dates must be Gregorian-valid. Unknown
+years, a known day without a month, or time attached to a partial date report
+UnsupportedPrecision. Invalid syntax or calendar values report InvalidDatetime.
+Time accepts `HHMMSS` or `HHMMSS+/-HHMM`, with seconds through 60 and offsets
+through 23:59. It preserves the offset sign, including `-0000` as `-00:00`.
+No timezone conversion or leap-second-event validation occurs. Fractions,
+whitespace and trailing NUL/padding are rejected. Numeric Bytes ignore text
+hints; Text requires ASCII or UTF-8. IPTC charset markers do not affect selection
+or interpretation of these numeric fields.
+
+DirtyOnly selects a pair when either member is dirty and includes its clean
+active companion. Multiple active dates or times are ambiguous even when equal.
+Active members must share a valid block or the authored invalid-block sentinel.
+A time without a date is incomplete. Clean tombstones are ignored. A dirty time
+tombstone reduces an active pair to date-only; a dirty date tombstone requests
+destination removal only if no active member remains. Active replacements win
+over same-field tombstones. Missing inputs alone do not remove destinations.
+
+Selected dirty tombstones count toward the source limit, but their payload,
+origin and known damage flags are ignored. Unknown C entry flags still fail.
+The date module retains tombstones and unrelated entries verbatim in a private
+copy of the used arena, entry array and block array. Unlike generic edit commit,
+it does not inspect ignored refs while copying. The C and C++ flag layouts are
+different; use C flag constants, not C++ numeric flag values. Existing generic
+edit and twenty-field forward-translation contracts are unchanged.
+
+FailOnConflict accepts an absent target or exact lexical equality. Preserve
+keeps a recognized root without inspecting its value, after source validation.
+Replace updates/removes one exact supported scalar target. Duplicate targets,
+indexed/structured descendants, damaged values, malformed refs and unsupported
+encodings fail under Fail/Replace. Other roots and namespaces survive. New XMP
+is Dirty UTF-8, with the date source's block/order and no native wire hints;
+updates retain destination provenance.
+
+The positive hard ceilings are 1024 selected native entries, two additions,
+two operations and 8192 inspected source plus owned-destination text bytes.
+Options may lower them. Both selectors may be disabled for a no-op copy.
+Validation and size planning precede allocation/publication. The caller provides
+initialized stores with valid aggregate storage; distinct stores own independent
+storage. Source/output identity is supported. Failure preserves both stores,
+and success replaces the output store. Preparation allocates in proportion to
+the complete source store; the text/operation caps are not a total memory bound.
+
+Serialize the materialized properties with `include_existing_xmp=1`,
+`include_iptc=0`, `include_exif=0`. This operation does not create EXIF dates or
+change the existing portable projection. The existing C reverse-date API still
+requires a full calendar date; year/month-only XMP is rejected transactionally.
