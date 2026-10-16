@@ -247,6 +247,8 @@ typedef struct omc_transfer_res {
     int sidecar_present;
     omc_xmp_write_res embedded;
     omc_xmp_dump_res sidecar;
+    /* Damaged native IPTC entries skipped during canonical payload building. */
+    omc_u32 iptc_entries_skipped;
 } omc_transfer_res;
 
 OMC_API void

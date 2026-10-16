@@ -477,3 +477,88 @@ implemented in C++. RelatedSoundFile raises the removal allowlist to 85.
 ColorSpace is host-owned: explicit destination image facts may replace it,
 source filtering/deletion cannot. Add the shared opt-in destination-profile
 validator with UP4 and bounded structured XMP editing with UP5.
+
+## Canonical IPTC-IIM and transfer (0.13.0)
+
+`omc/omc_iptc_serialize.h` exposes contract 1 through
+`omc_serialize_iptc_iim()`. Initialize limits with
+`omc_iptc_iim_serialize_opts_init()`: 200,000 active datasets, 8 MiB per dataset,
+64 MiB total output. Limits must be nonzero; total output must fit the arena's
+32-bit span range and `omc_size`.
+
+An empty output measures without allocating sort or payload storage. A short
+output receives the exact canonical prefix after full preflight. Other errors
+leave output bytes unchanged. Output may not overlap the source store or its
+arena, entry or block storage. The C store has no finalized-state bit; callers
+supply an initialized, structurally valid store and keep it immutable during
+serialization. Writing allocates a bounded descriptor array during preparation.
+
+Deleted entries and other metadata families are ignored. Active IPTC entries
+must have byte-sized record/dataset keys, valid counts/spans and supported
+Bytes, Text or Array values without unreadable/truncated flags. Serialization
+preserves raw stored bytes, including empty values, duplicates and numeric
+array byte order. It does not transcode or certify field semantics. Charset
+1:90 sorts first, followed by source order, record, dataset and entry ordinal.
+Lengths through 32767 use two bytes; larger lengths use `0x8004` and a big-endian
+32-bit length.
+
+JPEG/TIFF/DNG native IPTC rebuilds use the same wire engine. Transfer skips
+malformed or unsupported native entries and reports their count through
+`iptc_entries_skipped` in transfer/payload-build/package-build results. These
+are build diagnostics; they are not persisted in package wire data. Resource
+limits remain fatal. Clean opaque Photoshop resource 0x0404 retains precedence;
+any dirty native IPTC entry, including deletion intent, suppresses that stale
+fallback. Opaque fallback bytes are outside canonical dataset validation.
+If no live native datasets remain, no IPTC update is emitted and the existing
+destination carrier remains; source deletion alone is not destination redaction.
+C empty payload preparation succeeds with no payload, while C++ reports
+IptcPackFailed (fatal for IPTC-only preparation, a warning with successful other
+families). The C skipped-entry counter reports damaged entries, not that
+C++ mixed-family diagnostic policy.
+
+JPEG replacement validates complete Photoshop 8BIM resource streams before
+allocating the replacement output. Pure non-IPTC APP13 segments remain byte
+identical. Each mixed carrier retains its own unrelated records, including
+names, duplicate IDs and padding, in source order. Every old IPTC resource is
+removed; the new carrier replaces the first affected carrier, or is inserted
+before SOS/EOI if none exists. Carriers are not merged. Post-SOS bytes are copied
+without inspection. With no IPTC update, resource inspection is bypassed.
+Public execute failures preserve both output arenas, including input aliasing
+old edited output. Executed-output packages retain the resulting bytes through
+serialization, restoration, materialization and replay. This does not add a
+C++-style in-place JPEG planner or full signed C2PA support.
+
+## Native IPTC to materialized XMP (0.13.0)
+
+`omc_translate_iptc_to_xmp()` implements contract 1 for the same twenty mapping
+identities as `omc_translate_xmp_iptc()`. Initialize its separate options with
+`omc_iptc_to_xmp_translation_opts_init()`. Defaults select all mappings and all
+sources with FailOnConflict. DirtyOnly selects whole groups affected by native
+edits or their block's dirty charset marker. Native date/time pairs are outside
+this forward contract; the existing reverse date/time behavior is unchanged.
+
+The source contains both native IPTC and existing destination XMP. On success,
+`out` receives the complete translated store; its previous contents are replaced.
+Source/output identity is supported through staged commit. Failure preserves
+both stores. The operation allocates bounded planning storage and a temporary
+store; it is not an allocation-free execution API.
+Both stores must be initialized and structurally valid, including their value
+enum fields. Irrelevant valid encoding/byte-order hints do not affect IPTC text
+interpretation and remain intact on retained native entries; invalid enum
+values can still be rejected by the core transactional clone.
+
+The translator accepts ASCII or per-block `ESC % G` declared UTF-8, validates
+selected values and field limits, preserves repeated values in block/order/
+entry-ID order, and retains duplicates. Raw Bytes need no text encoding hints.
+LangAlt mappings own only `x-default`; other languages and unrelated metadata
+survive. New XMP values are Dirty UTF-8 with source provenance and no native
+wire hints. Updates retain destination provenance. Fail, Preserve and Replace
+policies govern existing destination groups; malformed selected source values
+still fail under Preserve. Unsupported destination shapes fail unless the
+policy preserves the existing group without inspecting its value.
+
+Default hard ceilings are 1024 selected source properties, 1024 additions,
+4096 destination values/operations and 8 MiB of selected source plus inspected
+owned destination text. Aggregate text sizes are checked before UTF-8 scanning.
+Late errors and budget failures publish no partial transaction. Use the result's
+status and failed mapping/source to diagnose rejection.

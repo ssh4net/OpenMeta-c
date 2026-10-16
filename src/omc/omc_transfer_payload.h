@@ -87,6 +87,8 @@ typedef struct omc_transfer_payload_io_res {
     omc_transfer_status status;
     omc_u64 bytes;
     omc_u32 payload_count;
+    /* Damaged native IPTC entries skipped during canonical payload building. */
+    omc_u32 iptc_entries_skipped;
 } omc_transfer_payload_io_res;
 
 typedef omc_transfer_status (*omc_transfer_payload_begin_batch_fn)(

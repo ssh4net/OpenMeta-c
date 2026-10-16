@@ -1,6 +1,6 @@
 # OpenMeta-c Porting Plan
 
-Updated: 2026-10-15.
+Updated: 2026-10-16.
 
 ## Goal And Reference Baseline
 
@@ -47,9 +47,35 @@ The conversational estimate of about 75% used the narrower boundary and is
 not a completion estimate for this clarified scope. Define feature cases for
 interpretation and non-fuzzy query before publishing revised percentages.
 
+## Upstream 0.8.17 IPTC Convergence Batch
+
+The active implementation target is C++ `0.8.17`, commit
+`d281e041d940510d97c3e8539e2840a7fca6c679`. The accepted 0.8.14 receipts below
+retain their original pin. Upstream date/time work was uncommitted at batch start
+and landed as 0.8.18, `7712c21b3dfb66ed6a2592263e087920a3b70b44`, during the batch.
+It remains outside this fixed reference. The C starting revision is
+`cb9d91fbe6f791c5e0576b49e1d685b73f24f2bb`.
+
+| Order | Upstream change | C implementation and acceptance gate |
+| --- | --- | --- |
+| 1 | Pin and baseline | Detached 0.8.17 reference; fresh Clang 20 direct and differential baselines; retain the exact broad-inventory residuals. |
+| 2 | 0.8.15 canonical IPTC-IIM | Bounded C measure/write API and shared transfer wire engine; deterministic ordering, raw payload fidelity, duplicates, strict validation, limits, overlap and output preservation. |
+| 3 | 0.8.16 JPEG Photoshop resources | Preserve pure APP13 segments and each mixed segment's unrelated resources at its source position. No merging; retain names, duplicates and padding. Check malformed rollback, aliasing and executed-package replay. |
+| 4 | 0.8.17 native IPTC to XMP | Twenty mappings with per-block charset handling, bounded transactional publication, conflicts/deletions, repeated-value ordering and x-default ownership. Direct tests and paired C++ cases. |
+
+These four scoped steps are accepted in C `0.13.0.013`: focused 11/11,
+ASan/UBSan direct 52/52 and dependency-disabled shared direct 52/52. The full
+Release schedule is 64/72 with the same eight historical failures; diagnostic
+multisets remain 135 in CTest and 176 in `--all`. See
+[the batch receipt](iptc_convergence_0817.md) for cases and limits. Next port
+the committed 0.8.18 native IPTC date/time forward API (two bounded pairs,
+partial-date precision, signed/absent offsets, conflicts, tombstones and rollback),
+then resume UP4 destination validation and dates/basic capture/sensitivity/
+Flash/lens lifecycle. RD9/RD10 remains a separate reader/decode workstream.
+
 ## Upstream 0.8.14 Execution Baseline
 
-The active comparison is now C++ `0.8.14`, commit
+The previous accepted comparison is C++ `0.8.14`, commit
 `fc2052b9eac0c7819c09a067e0c698fe38a2a155`. The 0.8.11 source review below is
 retained as history. Five further commits add these portable-core requirements:
 
@@ -910,11 +936,11 @@ semantics. C++ ownership and presentation APIs need not be reproduced.
 | --- | --- | --- | --- |
 | W1 | Typed authoring | C++ `create_metadata_store()` preflights, copies, validates and publishes atomically. C has typed value makers, explicit array byte order, and candidate-based edit publication. | Implemented bounded typed helpers and output-preserving transactions; see `authoring.md`. Owning logical builders and FlatHost wrappers remain above C; reusable metadata construction and validation semantics remain C targets. |
 | W2 | Canonical TIFF/EXIF serialization | C++ `serialize_exif_tiff()` is target-neutral and honors supported wire hints. C's public serializer builds typed TIFF; internal transfer payloads apply target framing above it. | Present with historical exact-byte comparisons. UP4/UP6a must reconcile type-129 text, retained terminal NULs and structured/learning numeric endian conversion across canonical output and LE/BE destinations. |
-| W3 | EXIF/IPTC to portable XMP | C has projection, conflict policies, custom namespaces and managed canonicalization | Partial against 0.8.14. Retain accepted IPTC and primary GPS cases. Port exact fractions, aliases, sentinels, development/learning/profile and remaining capture/text projection with the corresponding validators and translators. |
-| W4 | Explicit XMP to native metadata | C has original groups, flat locations, combined IPTC, all five GPS APIs and four EXIF text/version fields | Partial against 0.8.14. The 32-tag GPS C matrix and representative v1 comparisons remain; UP3 now needs v2 promotion/absent deletion and carrier lifecycle. UP4 has nine further EXIF-text fields plus capture/development/learning/profile work. UP5 owns structured locations; old masks stay stable. |
-| W5 | Native IPTC-IIM emission | Internal `omc_transfer_build_iptc_iim()`; JPEG IRB and TIFF tag `33723` carriers | Present bounded mechanism with 0.10.0 charset, repeated growth, tombstone and stale-IRB persistence tests. Broader transfer remains UP6. A separate public IPTC writer is not a prerequisite. |
+| W3 | EXIF/IPTC to portable or materialized XMP | Projection, custom namespaces and managed canonicalization; 0.13.0 adds explicit twenty-mapping native IPTC to XMP | The 0.8.17 IPTC contract has direct and paired cases in the current batch. Native IPTC dates added in C++ 0.8.18 remain next. Exact fractions, aliases, sentinels, development/learning/profile and remaining capture/text projection remain separate UP4 families. |
+| W4 | Explicit XMP to native metadata | Original groups, flat locations, combined IPTC, all five GPS v2 APIs and four EXIF text/version fields | GPS v2 promotion/absent deletion and representative carrier lifecycle were accepted in 0.12.0 against 0.8.14; retain that receipt. UP4 has nine further EXIF-text fields plus capture/development/learning/profile work. UP5 owns structured locations; old masks stay stable. |
+| W5 | Native IPTC-IIM emission | Public `omc_serialize_iptc_iim()` and shared transfer engine; JPEG IRB and TIFF/DNG tag `33723` carriers | 0.13.0 adds canonical ordering, raw payload fidelity, strict bounded measure/write, transfer skip counts and per-carrier JPEG resource preservation against 0.8.17. See the scoped batch receipt; prepared IPTC patching and in-place JPEG planning remain separate. |
 | W6 | Target image facts and transfer safety | C has target image spec, CompatibleFile/RenderedImage and diagnostics; C++ has wider source-processing classification and a RAW-data descriptor | Partial. Port descriptor-based RAW curve/linearity applicability, exact-IFD MakerNote trust and existing/template DNGVersion policy. Source filtering must preserve unspecified destination fields during merge; it is not redaction. Unknown context remains conditional. |
-| W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h`, direct overlay and persistence tests | Present pipeline, incomplete current native edit contract. UP6a comes before UP3/UP4 expansion: bounded IFD0/Exif/GPS intent, selected merge, version checks, LE/BE destinations, clear conflicts and unsupported-consumer rejection. Preserve unselected native fields, opaque notes and media. |
+| W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h`, direct overlay and persistence tests | 0.12.0 accepted bounded native edit intent and GPS v2 lifecycle against 0.8.14. 0.13.0 adds canonical IPTC transfer and JPEG executed-output replay. Extend this pipeline once per UP4 family; broader inventories and consumer-specific acceptance remain open. Preserve unselected native fields, opaque notes and media. |
 | W8 | XMP carrier merge and lifecycle | C has destination embedded/sidecar stores, precedence, writeback and persistence options | Present controls, Partial lifecycle parity. Test modes/defaults, strip/overwrite/failure behavior and source/destination conflicts. |
 | W9 | Payload/package artifacts | C has `OMTPLD01` v1, `OMTPKG01` v2, semantic views, replay, executed-output materialization and artifact inspection | Present bounded wire families. Carry or explicitly reject new native edit intent according to each consumer's schema. Qualify interoperation separately from C++ prepared-object layout and decoded snapshot v1. |
 | W10 | BMFF package item insertion | C has Exif/XMP/JUMBF/C2PA routes, ICC, synthesized `idat`, inserted 32-bit IDs and bounded method-2 references | Shared bounded materializer now replaces managed families and remaps unambiguous IDs. Append layout preserves existing media addresses; physical byte layout differs from C++. |

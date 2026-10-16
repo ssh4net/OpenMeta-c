@@ -24,7 +24,7 @@ The C library may later serve as the C++ implementation core. Temporary
 implementation overlap is expected while behavior is ported and verified.
 
 The [porting plan](porting_plan.md) records the source-reviewed history from
-C++ `0.4.127`, the scope clarification of 2026-09-08, the current C++ `0.8.14`
+C++ `0.4.127`, the scope clarification of 2026-09-08, the current C++ `0.8.17`
 reference review, the parity matrix and acceptance gates. Earlier percentage
 estimates based on a narrower core boundary do not measure this scope. The
 [authoring contract](authoring.md) documents typed construction, detached
@@ -39,8 +39,8 @@ Version 0.12.0 extends transfer prepare options, bundles and executors with
 native EXIF output control and owned native edit intent. Rebuild their callers
 and use `omc_transfer_prepare_opts_init()`; native EXIF output defaults to on.
 
-The [current roadmap](porting_plan.md#upstream-0814-execution-baseline) pins C++
-0.8.14 at `fc2052b`. C package 0.11.0 adds aggregate JUMBF semantic-work limits,
+The [current roadmap](porting_plan.md#upstream-0817-iptc-convergence-batch) pins C++
+0.8.17 at `d281e04`. C package 0.11.0 adds aggregate JUMBF semantic-work limits,
 rejects retained `dimg` relations losing an input, and corrects exact-cap
 streaming decompression. Payload output limit zero now means unlimited; the
 default remains 64 MiB. The [execution receipt](up0_up1_0814.md) records fresh
@@ -56,7 +56,16 @@ records GPS carrier readback, selected-edit parity and the remaining inventory
 failures. This is a bounded transfer foundation; full prepared snapshots and
 the remaining replacement/patch consumers are still planned.
 
-Next: UP4 dates/basic capture/sensitivity/Flash/lens lifecycle and shared
+Version 0.13.0 adds canonical IPTC-IIM serialization, preserves each JPEG
+Photoshop carrier during IPTC replacement, and materializes native IPTC into
+XMP through a bounded twenty-mapping transaction. The transfer, payload-build
+and package-build results gain `iptc_entries_skipped`; rebuild callers against
+matching headers and binaries. Existing reverse-translation defaults and
+package wire versions are unchanged. See [authoring.md](authoring.md) for the
+new API contracts and [the batch receipt](iptc_convergence_0817.md) for evidence.
+
+Next: the newly committed C++ 0.8.18 native IPTC date/time forward API, then
+UP4 dates/basic capture/sensitivity/Flash/lens lifecycle and shared
 destination validation. Reader batches can advance independently. Broader
 capture/identity, patch binding, snapshots and non-fuzzy semantic stages remain
 tracked work. Preserve older read/decode and IPTC evidence under its recorded

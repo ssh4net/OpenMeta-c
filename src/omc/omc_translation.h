@@ -164,6 +164,55 @@ typedef struct omc_iptc_translation_opts {
     omc_u64 max_total_text_bytes;
 } omc_iptc_translation_opts;
 
+/* Native IPTC -> materialized XMP contract 1. Reuses OMC_IPTC_TRANSLATE_*
+ * identities, with a separate options and result type from the reverse path. */
+#define OMC_IPTC_TO_XMP_TRANSLATION_CONTRACT_VERSION 1U
+#define OMC_IPTC_TO_XMP_TRANSLATION_MAX_SOURCE_PROPERTIES 1024U
+#define OMC_IPTC_TO_XMP_TRANSLATION_MAX_ADDED_ENTRIES 1024U
+#define OMC_IPTC_TO_XMP_TRANSLATION_MAX_OPERATIONS 4096U
+#define OMC_IPTC_TO_XMP_TRANSLATION_MAX_TOTAL_TEXT_BYTES \
+    ((omc_u64)8U * 1024U * 1024U)
+typedef enum omc_iptc_to_xmp_translation_status {
+    OMC_IPTC_TO_XMP_TRANSLATION_OK = 0,
+    OMC_IPTC_TO_XMP_TRANSLATION_NULL_OUTPUT,
+    OMC_IPTC_TO_XMP_TRANSLATION_INVALID_OPTIONS,
+    OMC_IPTC_TO_XMP_TRANSLATION_INVALID_SOURCE,
+    OMC_IPTC_TO_XMP_TRANSLATION_SOURCE_LIMIT,
+    OMC_IPTC_TO_XMP_TRANSLATION_AMBIGUOUS_SOURCE,
+    OMC_IPTC_TO_XMP_TRANSLATION_INVALID_SOURCE_VALUE,
+    OMC_IPTC_TO_XMP_TRANSLATION_VALUE_TOO_LONG,
+    OMC_IPTC_TO_XMP_TRANSLATION_SOURCE_ENCODING_CONFLICT,
+    OMC_IPTC_TO_XMP_TRANSLATION_DESTINATION_CONFLICT,
+    OMC_IPTC_TO_XMP_TRANSLATION_UNSUPPORTED_DESTINATION_SHAPE,
+    OMC_IPTC_TO_XMP_TRANSLATION_ENTRY_LIMIT,
+    OMC_IPTC_TO_XMP_TRANSLATION_OPERATION_LIMIT,
+    OMC_IPTC_TO_XMP_TRANSLATION_NO_MEMORY,
+    OMC_IPTC_TO_XMP_TRANSLATION_INTERNAL
+} omc_iptc_to_xmp_translation_status;
+
+typedef struct omc_iptc_to_xmp_translation_opts {
+    omc_u32 mappings;
+    int all_sources;
+    omc_translation_conflict conflict;
+    omc_u32 max_source_properties;
+    omc_u32 max_added_entries;
+    omc_u32 max_operations;
+    omc_u64 max_total_text_bytes;
+} omc_iptc_to_xmp_translation_opts;
+
+typedef struct omc_iptc_to_xmp_translation_res {
+    omc_iptc_to_xmp_translation_status status;
+    omc_u32 failed_mapping;
+    omc_entry_id failed_source;
+    omc_u32 source_properties;
+    omc_u32 groups_translated;
+    omc_u32 groups_preserved;
+    omc_u32 groups_unchanged;
+    omc_u32 entries_added;
+    omc_u32 entries_updated;
+    omc_u32 entries_removed;
+} omc_iptc_to_xmp_translation_res;
+
 typedef enum omc_gps_translation_status {
     OMC_GPS_TRANSLATION_OK = 0,
     OMC_GPS_TRANSLATION_NULL_OUTPUT,
@@ -297,6 +346,27 @@ OMC_API void omc_iptc_translation_opts_init(omc_iptc_translation_opts *opts);
  * Source and initialized out must be distinct. Failure preserves both. */
 OMC_API omc_translation_res omc_translate_xmp_iptc(
     const omc_store *source, omc_store *out, const omc_iptc_translation_opts *opts);
+
+/* Contract 1 materializes selected native IPTC text as XMP. The C store has
+ * no finalized state; both stores must be initialized and structurally valid.
+ * A null options pointer uses All sources, all 20 mapping identities and
+ * FailOnConflict. DirtyOnly selects a mapping when a source member (including
+ * a dirty tombstone) or a live charset marker in a candidate's block is dirty.
+ * The call validates
+ * all selected active members, including source text and charset records.
+ * Repeated values retain (block, order_in_block, entry ID) order and duplicate
+ * texts remain separate. Failed preparation or commit preserves source and
+ * output. Passing source as out is supported through a temporary cloned
+ * commit; the caller's source-store views expire only after success. Unlike
+ * the C++ API, the output is a C-owned store that is replaced on success.
+ * Limits default to 1024 selected properties, 1024 additions, 4096 inspected
+ * destination values/operations and 8 MiB selected source plus owned
+ * destination text. */
+OMC_API void omc_iptc_to_xmp_translation_opts_init(
+    omc_iptc_to_xmp_translation_opts *opts);
+OMC_API omc_iptc_to_xmp_translation_res omc_translate_iptc_to_xmp(
+    const omc_store *source, omc_store *out,
+    const omc_iptc_to_xmp_translation_opts *opts);
 
 OMC_API void omc_gps_translation_opts_init(omc_gps_translation_opts *opts);
 

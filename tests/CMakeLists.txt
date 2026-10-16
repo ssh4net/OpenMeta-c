@@ -116,6 +116,26 @@ add_executable(omc_test_iptc test_omc_iptc.c)
 target_link_libraries(omc_test_iptc PRIVATE omc)
 add_test(NAME omc_test_iptc COMMAND omc_test_iptc)
 
+add_executable(omc_test_jpeg_iptc test_omc_jpeg_iptc.c)
+target_link_libraries(omc_test_jpeg_iptc PRIVATE omc)
+omc_apply_warnings(omc_test_jpeg_iptc)
+add_test(NAME omc_test_jpeg_iptc COMMAND omc_test_jpeg_iptc)
+
+add_executable(omc_test_iptc_serialize test_omc_iptc_serialize.c)
+target_link_libraries(omc_test_iptc_serialize PRIVATE omc)
+omc_apply_warnings(omc_test_iptc_serialize)
+add_test(NAME omc_test_iptc_serialize COMMAND omc_test_iptc_serialize)
+
+add_executable(omc_test_iptc_transfer test_omc_iptc_transfer.c)
+target_link_libraries(omc_test_iptc_transfer PRIVATE omc)
+omc_apply_warnings(omc_test_iptc_transfer)
+add_test(NAME omc_test_iptc_transfer COMMAND omc_test_iptc_transfer)
+
+add_executable(omc_test_iptc_to_xmp test_omc_iptc_to_xmp.c)
+target_link_libraries(omc_test_iptc_to_xmp PRIVATE omc)
+omc_apply_warnings(omc_test_iptc_to_xmp)
+add_test(NAME omc_test_iptc_to_xmp COMMAND omc_test_iptc_to_xmp)
+
 add_executable(omc_test_pay test_omc_pay.c)
 target_link_libraries(omc_test_pay PRIVATE omc)
 add_test(NAME omc_test_pay COMMAND omc_test_pay)
@@ -357,8 +377,35 @@ int main() { return openmeta::kMetadataLocationTranslationContractVersion == 0; 
     check_cxx_source_compiles("#include <openmeta/metadata_translation.h>
 int main() { return openmeta::kMetadataIptcTranslationContractVersion == 0; }"
       OMC_HAVE_CPP_IPTC_TRANSLATION)
+    unset(OMC_HAVE_CPP_IPTC_CONVERGENCE CACHE)
+    check_cxx_source_compiles("#include <openmeta/iptc_iim_serialize.h>
+#include <openmeta/metadata_translation.h>
+static_assert(openmeta::kIptcIimSerializeContractVersion >= 1U);
+static_assert(openmeta::kMetadataIptcToXmpContractVersion >= 1U);
+int main() { return 0; }"
+      OMC_HAVE_CPP_IPTC_CONVERGENCE)
   endfunction()
   omc_check_translation_contracts()
+  if(OMC_HAVE_CPP_IPTC_CONVERGENCE)
+    foreach(omc_iptc_case IN ITEMS jpeg_iptc iptc_serialize iptc_to_xmp)
+      add_executable(omc_test_${omc_iptc_case}_parity test_omc_${omc_iptc_case}_parity.cc)
+      set_target_properties(omc_test_${omc_iptc_case}_parity PROPERTIES
+        CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+      target_link_libraries(omc_test_${omc_iptc_case}_parity PRIVATE omc OpenMeta::openmeta)
+      if(MSVC)
+        target_compile_options(omc_test_${omc_iptc_case}_parity PRIVATE /UNDEBUG)
+      else()
+        target_compile_options(omc_test_${omc_iptc_case}_parity PRIVATE -UNDEBUG)
+      endif()
+      if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(omc_test_${omc_iptc_case}_parity PRIVATE -stdlib=libc++)
+        target_link_options(omc_test_${omc_iptc_case}_parity PRIVATE -stdlib=libc++)
+      endif()
+      add_test(NAME omc_test_${omc_iptc_case}_parity COMMAND omc_test_${omc_iptc_case}_parity)
+    endforeach()
+  else()
+    message(STATUS "IPTC convergence parity requires the C++ 0.8.17 contracts")
+  endif()
   if(OMC_HAVE_CPP_LOCATION_TRANSLATION)
     add_executable(omc_test_location_parity
       test_omc_location_parity.cc test_omc_location_translation.c)

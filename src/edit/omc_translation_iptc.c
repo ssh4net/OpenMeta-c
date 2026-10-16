@@ -1,5 +1,6 @@
 #include "omc/omc_translation.h"
 #include "../core/omc_value_internal.h"
+#include "omc_translation_iptc_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -8,16 +9,7 @@ static const char omc_iptc_ns_dc[] = "http://purl.org/dc/elements/1.1/";
 static const char omc_iptc_ns_ps[] = "http://ns.adobe.com/photoshop/1.0/";
 static const char omc_iptc_ns_core[] = "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/";
 
-typedef struct omc_iptc_mapping {
-    const char *ns;
-    const char *path;
-    omc_u32 bit;
-    omc_u16 dataset;
-    omc_u16 max_bytes;
-    int repeated;
-} omc_iptc_mapping;
-
-static const omc_iptc_mapping omc_iptc_mappings[] = {
+const omc_iptc_mapping omc_iptc_mappings[OMC_IPTC_MAPPING_COUNT] = {
     {omc_iptc_ns_dc, "title[@xml:lang=x-default]", OMC_IPTC_TRANSLATE_TITLE, 5U, 64U,
      0},
     {omc_iptc_ns_dc, "description[@xml:lang=x-default]", OMC_IPTC_TRANSLATE_DESCRIPTION,

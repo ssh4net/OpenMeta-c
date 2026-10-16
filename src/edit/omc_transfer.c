@@ -8,6 +8,8 @@
 #include "omc/omc_transfer_payload.h"
 #include "omc/omc_xmp_embed.h"
 #include "omc_exif_write.h"
+#include "omc_iptc_serialize_internal.h"
+#include "../core/omc_value_internal.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -55,7 +57,8 @@ omc_transfer_build_png_iccp_payload(const omc_u8* profile,
 
 static omc_status
 omc_transfer_build_iptc_iim(const omc_store* store, omc_arena* out,
-                            int* out_has_iptc, int* out_supported);
+                            int* out_has_iptc, omc_transfer_status* out_status,
+                            omc_u32* out_skipped);
 
 static omc_status
 omc_transfer_build_photoshop_iptc_irb(const omc_u8* iim_bytes,
@@ -1972,7 +1975,9 @@ omc_transfer_store_has_iptc(const omc_store* store)
         if ((store->entries[i].flags & OMC_ENTRY_FLAG_DELETED) != 0U) {
             continue;
         }
-        if (store->entries[i].key.kind == OMC_KEY_IPTC_DATASET) {
+        if (store->entries[i].key.kind == OMC_KEY_IPTC_DATASET ||
+            (store->entries[i].key.kind == OMC_KEY_PHOTOSHOP_IRB &&
+             store->entries[i].key.u.photoshop_irb.resource_id == 0x0404U)) {
             return 1;
         }
     }
@@ -2720,6 +2725,7 @@ omc_transfer_payload_io_res_init(omc_transfer_payload_io_res* res)
     res->status        = OMC_TRANSFER_UNSUPPORTED;
     res->bytes         = 0U;
     res->payload_count = 0U;
+    res->iptc_entries_skipped = 0U;
 }
 
 void
@@ -2732,6 +2738,7 @@ omc_transfer_package_io_res_init(omc_transfer_package_io_res* res)
     res->status      = OMC_TRANSFER_UNSUPPORTED;
     res->bytes       = 0U;
     res->chunk_count = 0U;
+    res->iptc_entries_skipped = 0U;
 }
 
 void
@@ -4855,7 +4862,7 @@ omc_transfer_payload_batch_build(const omc_store* store,
     int have_icc;
     int have_iptc;
     int have_jumbf;
-    int iptc_supported;
+    omc_transfer_status iptc_build_status;
     int has_profile;
     int target_store_ready;
     omc_store target_store;
@@ -4913,7 +4920,7 @@ omc_transfer_payload_batch_build(const omc_store* store,
     have_icc                 = 0;
     have_iptc                = 0;
     have_jumbf               = 0;
-    iptc_supported           = 1;
+    iptc_build_status        = OMC_TRANSFER_OK;
     has_profile              = 0;
     jpeg_icc_chunk_count     = 0U;
     jumbf_payload_refs       = (omc_byte_ref*)0;
@@ -5024,12 +5031,13 @@ omc_transfer_payload_batch_build(const omc_store* store,
 
     if (opts->include_iptc) {
         status = omc_transfer_build_iptc_iim(effective_store, &iptc_iim,
-                                             &have_iptc, &iptc_supported);
+                                             &have_iptc, &iptc_build_status,
+                                             &out_res->iptc_entries_skipped);
         if (status != OMC_STATUS_OK) {
             goto omc_transfer_payload_build_done;
         }
-        if (have_iptc && !iptc_supported) {
-            out_res->status = OMC_TRANSFER_UNSUPPORTED;
+        if (iptc_build_status != OMC_TRANSFER_OK) {
+            out_res->status = iptc_build_status;
             status          = OMC_STATUS_OK;
             goto omc_transfer_payload_build_done;
         }
@@ -5871,6 +5879,7 @@ omc_transfer_package_batch_build(const omc_store* store,
         goto omc_transfer_package_batch_build_done;
     }
     out_res->status = payload_res.status;
+    out_res->iptc_entries_skipped = payload_res.iptc_entries_skipped;
     if (payload_res.status != OMC_TRANSFER_OK) {
         status = OMC_STATUS_OK;
         goto omc_transfer_package_batch_build_done;
@@ -7570,140 +7579,71 @@ omc_transfer_append_jpeg_icc_segment(omc_arena* out, omc_u8 seq_no,
 }
 
 static omc_status
-omc_transfer_append_iptc_length(omc_arena* out, omc_size value_size)
-{
-    omc_u8 buf[6];
-
-    if (out == (omc_arena*)0) {
-        return OMC_STATUS_INVALID_ARGUMENT;
-    }
-    if (value_size <= 0x7FFFU) {
-        omc_transfer_store_u16be(buf, (omc_u16)value_size);
-        return omc_transfer_append_bytes(out, buf, 2U);
-    }
-    if ((omc_u64)value_size > 0xFFFFFFFFU) {
-        return OMC_STATUS_OVERFLOW;
-    }
-
-    buf[0] = 0x80U;
-    buf[1] = 0x04U;
-    omc_transfer_store_u32be(buf + 2U, (omc_u32)value_size);
-    return omc_transfer_append_bytes(out, buf, sizeof(buf));
-}
-
-static omc_status
-omc_transfer_append_iptc_value(omc_arena* out, const omc_store* store,
-                               const omc_val* value, int* out_supported)
-{
-    omc_const_bytes view;
-    omc_u8 byte_value;
-
-    if (out_supported == (int*)0) {
-        return OMC_STATUS_INVALID_ARGUMENT;
-    }
-    *out_supported = 0;
-    if (out == (omc_arena*)0 || store == (const omc_store*)0
-        || value == (const omc_val*)0) {
-        return OMC_STATUS_INVALID_ARGUMENT;
-    }
-
-    if (value->kind == OMC_VAL_BYTES || value->kind == OMC_VAL_TEXT) {
-        view           = omc_arena_view(&store->arena, value->u.ref);
-        *out_supported = 1;
-        return omc_transfer_append_bytes(out, view.data, view.size);
-    }
-    if (value->kind == OMC_VAL_ARRAY
-        && (value->elem_type == OMC_ELEM_U8
-            || value->elem_type == OMC_ELEM_I8)) {
-        view           = omc_arena_view(&store->arena, value->u.ref);
-        *out_supported = 1;
-        return omc_transfer_append_bytes(out, view.data, view.size);
-    }
-    if (value->kind == OMC_VAL_SCALAR
-        && (value->elem_type == OMC_ELEM_U8
-            || value->elem_type == OMC_ELEM_I8)) {
-        byte_value     = (omc_u8)(value->u.u64 & 0xFFU);
-        *out_supported = 1;
-        return omc_transfer_append_bytes(out, &byte_value, 1U);
-    }
-    return OMC_STATUS_OK;
-}
-
-static omc_status
 omc_transfer_build_iptc_iim(const omc_store* store, omc_arena* out,
-                            int* out_has_iptc, int* out_supported)
+                            int* out_has_iptc, omc_transfer_status* out_status,
+                            omc_u32* out_skipped)
 {
     omc_size i;
+    int dirty;
+    omc_mut_bytes bytes;
+    omc_iptc_iim_serialize_res result;
     omc_status status;
-    omc_arena value_bytes;
 
-    if (out_has_iptc == (int*)0 || out_supported == (int*)0) {
+    if (!omc_store_shape_valid(store) || out == NULL || out_has_iptc == NULL ||
+        out_status == NULL || out_skipped == NULL)
         return OMC_STATUS_INVALID_ARGUMENT;
-    }
-    *out_has_iptc  = 0;
-    *out_supported = 1;
-    if (store == (const omc_store*)0 || out == (omc_arena*)0) {
-        return OMC_STATUS_INVALID_ARGUMENT;
-    }
-
-    omc_arena_reset(out);
-    omc_arena_init(&value_bytes);
+    *out_has_iptc = 0;
+    *out_status = OMC_TRANSFER_OK;
+    *out_skipped = 0U;
+    dirty = 0;
     for (i = 0U; i < store->entry_count; ++i) {
-        const omc_entry* entry;
-        int value_supported;
-        omc_u8 header[3];
-
-        entry = &store->entries[i];
-        if ((entry->flags & OMC_ENTRY_FLAG_DELETED) != 0U
-            || entry->key.kind != OMC_KEY_IPTC_DATASET) {
-            continue;
+        if (store->entries[i].key.kind == OMC_KEY_IPTC_DATASET &&
+            (store->entries[i].flags & OMC_ENTRY_FLAG_DIRTY) != 0U) {
+            dirty = 1;
+            break;
         }
-
-        if (entry->key.u.iptc_dataset.record > 255U
-            || entry->key.u.iptc_dataset.dataset > 255U) {
-            *out_has_iptc  = 1;
-            *out_supported = 0;
-            return OMC_STATUS_OK;
-        }
-
-        header[0] = 0x1CU;
-        header[1] = (omc_u8)entry->key.u.iptc_dataset.record;
-        header[2] = (omc_u8)entry->key.u.iptc_dataset.dataset;
-        omc_arena_reset(&value_bytes);
-        status = omc_transfer_append_iptc_value(&value_bytes, store,
-                                                &entry->value,
-                                                &value_supported);
-        if (status != OMC_STATUS_OK) {
-            omc_arena_fini(&value_bytes);
-            return status;
-        }
-        if (!value_supported) {
-            *out_has_iptc  = 1;
-            *out_supported = 0;
-            omc_arena_fini(&value_bytes);
-            return OMC_STATUS_OK;
-        }
-        status = omc_transfer_append_bytes(out, header, sizeof(header));
-        if (status != OMC_STATUS_OK) {
-            omc_arena_fini(&value_bytes);
-            return status;
-        }
-        status = omc_transfer_append_iptc_length(out, value_bytes.size);
-        if (status != OMC_STATUS_OK) {
-            omc_arena_fini(&value_bytes);
-            return status;
-        }
-        if (value_bytes.size != 0U) {
-            status = omc_transfer_append_bytes(out, value_bytes.data,
-                                               value_bytes.size);
-            if (status != OMC_STATUS_OK) {
-                omc_arena_fini(&value_bytes);
-                return status;
-            }
-        }
-        *out_has_iptc = 1;
     }
-    omc_arena_fini(&value_bytes);
+    /* Native edits suppress stale opaque carriers, including deletion intent.
+     * Clean opaque bytes retain their established fallback precedence. */
+    if (!dirty) {
+        for (i = 0U; i < store->entry_count; ++i) {
+            const omc_entry* e;
+            e = &store->entries[i];
+            if ((e->flags & OMC_ENTRY_FLAG_DELETED) != 0U ||
+                e->key.kind != OMC_KEY_PHOTOSHOP_IRB ||
+                e->key.u.photoshop_irb.resource_id != 0x0404U ||
+                (e->value.kind != OMC_VAL_BYTES && e->value.kind != OMC_VAL_TEXT &&
+                 e->value.kind != OMC_VAL_ARRAY) ||
+                !omc_ref_valid(&store->arena, e->value.u.ref) || e->value.u.ref.size == 0U)
+                continue;
+            omc_arena_reset(out);
+            status = omc_transfer_append_bytes(out, store->arena.data + e->value.u.ref.offset,
+                                                e->value.u.ref.size);
+            if (status == OMC_STATUS_OK) *out_has_iptc = 1;
+            return status;
+        }
+    }
+    bytes.data = NULL; bytes.size = 0U;
+    result = omc_iptc_iim_serialize_internal(store, NULL, 1, bytes);
+    *out_skipped = result.entries_skipped;
+    if (result.status != OMC_IPTC_IIM_SERIALIZE_OK &&
+        result.status != OMC_IPTC_IIM_SERIALIZE_OUTPUT_TRUNCATED) {
+        *out_status = result.status == OMC_IPTC_IIM_SERIALIZE_LIMIT ?
+            OMC_TRANSFER_LIMIT : OMC_TRANSFER_MALFORMED;
+        return result.status == OMC_IPTC_IIM_SERIALIZE_NO_MEMORY ?
+            OMC_STATUS_NO_MEMORY : OMC_STATUS_OK;
+    }
+    if (result.entries_serialized == 0U)
+        return OMC_STATUS_OK;
+    status = omc_arena_reserve(out, (omc_size)result.needed);
+    if (status != OMC_STATUS_OK) return status;
+    bytes.data = out->data; bytes.size = (omc_size)result.needed;
+    result = omc_iptc_iim_serialize_internal(store, NULL, 1, bytes);
+    if (result.status != OMC_IPTC_IIM_SERIALIZE_OK)
+        return result.status == OMC_IPTC_IIM_SERIALIZE_NO_MEMORY ?
+            OMC_STATUS_NO_MEMORY : OMC_STATUS_STATE;
+    out->size = (omc_size)result.written;
+    *out_has_iptc = 1;
     return OMC_STATUS_OK;
 }
 
@@ -7846,327 +7786,187 @@ omc_transfer_irb_resource_span(const omc_u8* bytes, omc_size size,
     return 1;
 }
 
-static omc_status
-omc_transfer_append_irb_without_iptc(const omc_u8* irb_bytes, omc_size irb_size,
-                                     omc_arena* out, int* out_malformed)
+/* A complete resource stream is inspected before any output allocation. */
+static int
+omc_transfer_inspect_irb(const omc_u8* bytes, omc_size size,
+                         omc_size* retained, omc_u32* iptc_count)
 {
     omc_size offset;
-
-    if (out_malformed == (int*)0) {
-        return OMC_STATUS_INVALID_ARGUMENT;
-    }
-    *out_malformed = 0;
-    if (irb_bytes == (const omc_u8*)0 || out == (omc_arena*)0) {
-        return OMC_STATUS_INVALID_ARGUMENT;
-    }
-
+    *retained = 0U;
+    *iptc_count = 0U;
     offset = 0U;
-    while (offset < irb_size) {
-        omc_u16 resource_id;
-        omc_size span_size;
-        omc_status status;
-
-        if (!omc_transfer_irb_resource_span(irb_bytes, irb_size, offset,
-                                            &resource_id, &span_size)) {
-            *out_malformed = 1;
-            return OMC_STATUS_OK;
-        }
-        if (resource_id != 0x0404U) {
-            status = omc_transfer_append_bytes(out, irb_bytes + offset,
-                                               span_size);
-            if (status != OMC_STATUS_OK) {
-                return status;
-            }
-        }
-        offset += span_size;
+    while (offset < size) {
+        omc_u16 id;
+        omc_size span;
+        if (!omc_transfer_irb_resource_span(bytes, size, offset, &id, &span))
+            return 0;
+        if (id == 0x0404U)
+            *iptc_count += 1U;
+        else
+            *retained += span;
+        offset += span;
     }
-    return OMC_STATUS_OK;
+    return 1;
 }
 
+/* The caller supplies private scratch and publishes it only after success.
+ * Both passes stop at SOS; entropy-coded data is copied without inspection. */
 static omc_status
 omc_transfer_rewrite_jpeg_iptc(const omc_u8* file_bytes, omc_size file_size,
                                const omc_u8* irb_payload,
                                omc_size irb_payload_size, omc_arena* out,
                                omc_transfer_status* out_status)
 {
-    omc_size offset;
+    omc_size retained;
+    omc_u32 iptc_count;
+    omc_size needed;
+    int pass;
     omc_status status;
-    int inserted;
-    omc_arena merged_irb;
 
-    if (out_status == (omc_transfer_status*)0) {
+    if (out_status == NULL || file_bytes == NULL || irb_payload == NULL || out == NULL)
         return OMC_STATUS_INVALID_ARGUMENT;
-    }
-    *out_status = OMC_TRANSFER_UNSUPPORTED;
-    if (file_bytes == (const omc_u8*)0 || irb_payload == (const omc_u8*)0
-        || out == (omc_arena*)0) {
-        return OMC_STATUS_INVALID_ARGUMENT;
-    }
-    if (file_size < 2U || file_bytes[0] != 0xFFU || file_bytes[1] != 0xD8U) {
-        *out_status = OMC_TRANSFER_MALFORMED;
+    *out_status = OMC_TRANSFER_MALFORMED;
+    if (file_size < 2U || file_bytes[0] != 0xFFU || file_bytes[1] != 0xD8U)
+        return OMC_STATUS_OK;
+    if (!omc_transfer_inspect_irb(irb_payload, irb_payload_size, &retained,
+                                  &iptc_count))
+        return OMC_STATUS_OK;
+    if (retained != 0U || iptc_count == 0U) {
+        *out_status = OMC_TRANSFER_UNSUPPORTED;
         return OMC_STATUS_OK;
     }
-
-    omc_arena_init(&merged_irb);
-    offset = 2U;
-    while (offset + 2U <= file_size) {
-        omc_u8 marker;
-
-        if (file_bytes[offset] != 0xFFU) {
-            omc_arena_fini(&merged_irb);
-            *out_status = OMC_TRANSFER_MALFORMED;
-            return OMC_STATUS_OK;
-        }
-        offset += 1U;
-        while (offset < file_size && file_bytes[offset] == 0xFFU) {
-            offset += 1U;
-        }
-        if (offset >= file_size) {
-            omc_arena_fini(&merged_irb);
-            *out_status = OMC_TRANSFER_MALFORMED;
-            return OMC_STATUS_OK;
-        }
-
-        marker = file_bytes[offset];
-        offset += 1U;
-        if (marker == 0xD9U) {
-            break;
-        }
-        if (marker == 0xDAU) {
-            if (offset + 2U > file_size) {
-                omc_arena_fini(&merged_irb);
-                *out_status = OMC_TRANSFER_MALFORMED;
-                return OMC_STATUS_OK;
-            }
-            break;
-        }
-        if (marker >= 0xD0U && marker <= 0xD7U) {
-            continue;
-        }
-
-        {
-            omc_u16 seg_len;
-            omc_size segment_end;
-            const omc_u8* seg_data;
-            omc_size seg_data_size;
-
-            if (offset + 2U > file_size) {
-                omc_arena_fini(&merged_irb);
-                *out_status = OMC_TRANSFER_MALFORMED;
-                return OMC_STATUS_OK;
-            }
-            seg_len = omc_transfer_read_u16be(file_bytes + offset);
-            if (seg_len < 2U || (omc_size)seg_len > file_size - offset) {
-                omc_arena_fini(&merged_irb);
-                *out_status = OMC_TRANSFER_MALFORMED;
-                return OMC_STATUS_OK;
-            }
-            segment_end   = offset + (omc_size)seg_len;
-            seg_data      = file_bytes + offset + 2U;
-            seg_data_size = (omc_size)seg_len - 2U;
-
-            if (marker == 0xEDU
-                && omc_transfer_jpeg_is_photoshop_app13(seg_data,
-                                                        seg_data_size)) {
-                int malformed;
-
-                status = omc_transfer_append_irb_without_iptc(
-                    seg_data + sizeof(k_omc_transfer_jpeg_photoshop_prefix)
-                        - 1U,
-                    seg_data_size
-                        - (sizeof(k_omc_transfer_jpeg_photoshop_prefix) - 1U),
-                    &merged_irb, &malformed);
-                if (status != OMC_STATUS_OK) {
-                    omc_arena_fini(&merged_irb);
-                    return status;
-                }
-                if (malformed) {
-                    omc_arena_fini(&merged_irb);
-                    *out_status = OMC_TRANSFER_MALFORMED;
-                    return OMC_STATUS_OK;
-                }
-            }
-            offset = segment_end;
-        }
-    }
-
-    status = omc_transfer_append_bytes(&merged_irb, irb_payload,
-                                       irb_payload_size);
-    if (status != OMC_STATUS_OK) {
-        omc_arena_fini(&merged_irb);
-        return status;
-    }
-    if (merged_irb.size > 65519U) {
-        omc_arena_fini(&merged_irb);
+    if (irb_payload_size > 65519U) {
         *out_status = OMC_TRANSFER_LIMIT;
         return OMC_STATUS_OK;
     }
-    if ((omc_u64)file_size + (omc_u64)merged_irb.size + 18U
-        > (omc_u64)(~(omc_size)0)) {
-        omc_arena_fini(&merged_irb);
+    if (irb_payload_size > (~(omc_size)0) - 18U ||
+        file_size > (~(omc_size)0) - irb_payload_size - 18U)
         return OMC_STATUS_OVERFLOW;
-    }
-
-    omc_arena_reset(out);
-    status = omc_arena_reserve(out, file_size + merged_irb.size + 18U);
-    if (status != OMC_STATUS_OK) {
-        omc_arena_fini(&merged_irb);
-        return status;
-    }
-    status = omc_transfer_append_bytes(out, file_bytes, 2U);
-    if (status != OMC_STATUS_OK) {
-        omc_arena_fini(&merged_irb);
-        return status;
-    }
-
-    inserted = 0;
-    offset   = 2U;
-    while (offset + 2U <= file_size) {
-        omc_size marker_start;
-        omc_u8 marker;
-
-        marker_start = offset;
-        if (file_bytes[offset] != 0xFFU) {
-            omc_arena_fini(&merged_irb);
-            *out_status = OMC_TRANSFER_MALFORMED;
-            return OMC_STATUS_OK;
-        }
-        offset += 1U;
-        while (offset < file_size && file_bytes[offset] == 0xFFU) {
-            offset += 1U;
-        }
-        if (offset >= file_size) {
-            omc_arena_fini(&merged_irb);
-            *out_status = OMC_TRANSFER_MALFORMED;
-            return OMC_STATUS_OK;
-        }
-
-        marker = file_bytes[offset];
-        offset += 1U;
-        if (marker == 0xD9U) {
-            if (!inserted) {
-                status = omc_transfer_append_jpeg_photoshop_segment(
-                    out, merged_irb.data, merged_irb.size);
-                if (status != OMC_STATUS_OK) {
-                    omc_arena_fini(&merged_irb);
-                    return status;
-                }
-                inserted = 1;
-            }
-            status = omc_transfer_append_bytes(out, file_bytes + marker_start,
-                                               file_size - marker_start);
-            if (status != OMC_STATUS_OK) {
-                omc_arena_fini(&merged_irb);
+    needed = file_size + irb_payload_size + 18U;
+    for (pass = 0; pass < 2; ++pass) {
+        omc_size offset;
+        int inserted;
+        int terminal;
+        offset = 2U;
+        inserted = 0;
+        terminal = 0;
+        if (pass != 0) {
+            omc_arena_reset(out);
+            status = omc_arena_reserve(out, needed);
+            if (status != OMC_STATUS_OK)
                 return status;
-            }
-            omc_arena_fini(&merged_irb);
-            *out_status = OMC_TRANSFER_OK;
-            return OMC_STATUS_OK;
-        }
-        if (marker == 0xDAU) {
-            omc_u16 seg_len;
-
-            if (offset + 2U > file_size) {
-                omc_arena_fini(&merged_irb);
-                *out_status = OMC_TRANSFER_MALFORMED;
-                return OMC_STATUS_OK;
-            }
-            seg_len = omc_transfer_read_u16be(file_bytes + offset);
-            if (seg_len < 2U || offset + (omc_size)seg_len > file_size) {
-                omc_arena_fini(&merged_irb);
-                *out_status = OMC_TRANSFER_MALFORMED;
-                return OMC_STATUS_OK;
-            }
-            if (!inserted) {
-                status = omc_transfer_append_jpeg_photoshop_segment(
-                    out, merged_irb.data, merged_irb.size);
-                if (status != OMC_STATUS_OK) {
-                    omc_arena_fini(&merged_irb);
-                    return status;
-                }
-                inserted = 1;
-            }
-            status = omc_transfer_append_bytes(out, file_bytes + marker_start,
-                                               file_size - marker_start);
-            if (status != OMC_STATUS_OK) {
-                omc_arena_fini(&merged_irb);
+            status = omc_transfer_append_bytes(out, file_bytes, 2U);
+            if (status != OMC_STATUS_OK)
                 return status;
-            }
-            omc_arena_fini(&merged_irb);
-            *out_status = OMC_TRANSFER_OK;
-            return OMC_STATUS_OK;
         }
-        if (marker >= 0xD0U && marker <= 0xD7U) {
-            status = omc_transfer_append_bytes(out, file_bytes + marker_start,
-                                               offset - marker_start);
-            if (status != OMC_STATUS_OK) {
-                omc_arena_fini(&merged_irb);
-                return status;
-            }
-            continue;
-        }
-
-        {
-            omc_u16 seg_len;
+        while (offset < file_size) {
+            omc_size marker_start;
             omc_size segment_end;
-            const omc_u8* seg_data;
-            omc_size seg_data_size;
-            int is_photoshop;
-            int is_leading;
-
-            if (offset + 2U > file_size) {
-                omc_arena_fini(&merged_irb);
-                *out_status = OMC_TRANSFER_MALFORMED;
+            omc_size payload_size;
+            const omc_u8* payload;
+            omc_u8 marker;
+            int photoshop;
+            marker_start = offset;
+            if (file_bytes[offset++] != 0xFFU)
                 return OMC_STATUS_OK;
-            }
-            seg_len = omc_transfer_read_u16be(file_bytes + offset);
-            if (seg_len < 2U || (omc_size)seg_len > file_size - offset) {
-                omc_arena_fini(&merged_irb);
-                *out_status = OMC_TRANSFER_MALFORMED;
+            while (offset < file_size && file_bytes[offset] == 0xFFU)
+                ++offset;
+            if (offset >= file_size)
                 return OMC_STATUS_OK;
+            marker = file_bytes[offset++];
+            payload = NULL;
+            payload_size = 0U;
+            segment_end = offset;
+            if (marker == 0U || marker == 0xD8U)
+                return OMC_STATUS_OK;
+            if (marker != 0xD9U && marker != 0x01U &&
+                !(marker >= 0xD0U && marker <= 0xD7U)) {
+                omc_u16 length;
+                if (file_size - offset < 2U)
+                    return OMC_STATUS_OK;
+                length = omc_transfer_read_u16be(file_bytes + offset);
+                if (length < 2U || (omc_size)length > file_size - offset)
+                    return OMC_STATUS_OK;
+                segment_end = offset + (omc_size)length;
+                payload = file_bytes + offset + 2U;
+                payload_size = (omc_size)length - 2U;
             }
-
-            segment_end   = offset + (omc_size)seg_len;
-            seg_data      = file_bytes + offset + 2U;
-            seg_data_size = (omc_size)seg_len - 2U;
-            is_photoshop
-                = marker == 0xEDU
-                  && omc_transfer_jpeg_is_photoshop_app13(seg_data,
-                                                          seg_data_size);
-            is_leading
-                = marker == 0xE0U
-                  || (marker == 0xE1U
-                      && (omc_transfer_jpeg_is_exif_app1(seg_data, seg_data_size)
-                          || omc_transfer_jpeg_is_xmp_app1(seg_data,
-                                                           seg_data_size)))
-                  || (marker == 0xE2U
-                      && omc_transfer_jpeg_is_icc_app2(seg_data, seg_data_size));
-
-            if (is_photoshop) {
-                offset = segment_end;
-                continue;
-            }
-            if (!inserted && !is_leading) {
-                status = omc_transfer_append_jpeg_photoshop_segment(
-                    out, merged_irb.data, merged_irb.size);
-                if (status != OMC_STATUS_OK) {
-                    omc_arena_fini(&merged_irb);
-                    return status;
+            if (marker == 0xDAU || marker == 0xD9U) {
+                if (pass != 0) {
+                    if (!inserted) {
+                        status = omc_transfer_append_jpeg_photoshop_segment(
+                            out, irb_payload, irb_payload_size);
+                        if (status != OMC_STATUS_OK)
+                            return status;
+                    }
+                    status = omc_transfer_append_bytes(out, file_bytes + marker_start,
+                                                       file_size - marker_start);
+                    if (status != OMC_STATUS_OK)
+                        return status;
                 }
-                inserted = 1;
+                terminal = 1;
+                break;
             }
-            status = omc_transfer_append_bytes(out, file_bytes + marker_start,
-                                               segment_end - marker_start);
-            if (status != OMC_STATUS_OK) {
-                omc_arena_fini(&merged_irb);
-                return status;
+            photoshop = marker == 0xEDU &&
+                omc_transfer_jpeg_is_photoshop_app13(payload, payload_size);
+            retained = 0U;
+            iptc_count = 0U;
+            if (photoshop) {
+                if (!omc_transfer_inspect_irb(payload + 14U, payload_size - 14U,
+                                              &retained, &iptc_count))
+                    return OMC_STATUS_OK;
+                if (pass == 0 && iptc_count != 0U) {
+                    needed -= segment_end - marker_start;
+                    if (retained != 0U)
+                        needed += retained + 18U;
+                }
+            }
+            if (pass != 0) {
+                if (!inserted && photoshop && iptc_count != 0U) {
+                    status = omc_transfer_append_jpeg_photoshop_segment(
+                        out, irb_payload, irb_payload_size);
+                    if (status != OMC_STATUS_OK)
+                        return status;
+                    inserted = 1;
+                }
+                if (!photoshop || iptc_count == 0U) {
+                    status = omc_transfer_append_bytes(out, file_bytes + marker_start,
+                                                       segment_end - marker_start);
+                    if (status != OMC_STATUS_OK)
+                        return status;
+                } else if (retained != 0U) {
+                    omc_u8 header[18];
+                    omc_size resource_offset;
+                    header[0] = 0xFFU;
+                    header[1] = 0xEDU;
+                    omc_transfer_store_u16be(header + 2U, (omc_u16)(retained + 16U));
+                    memcpy(header + 4U, k_omc_transfer_jpeg_photoshop_prefix, 14U);
+                    status = omc_transfer_append_bytes(out, header, sizeof(header));
+                    if (status != OMC_STATUS_OK)
+                        return status;
+                    resource_offset = 14U;
+                    while (resource_offset < payload_size) {
+                        omc_u16 id;
+                        omc_size span;
+                        /* Validated above and in the complete preflight pass. */
+                        if (!omc_transfer_irb_resource_span(payload, payload_size,
+                                                           resource_offset, &id, &span))
+                            return OMC_STATUS_STATE;
+                        if (id != 0x0404U) {
+                            status = omc_transfer_append_bytes(out, payload + resource_offset, span);
+                            if (status != OMC_STATUS_OK)
+                                return status;
+                        }
+                        resource_offset += span;
+                    }
+                }
             }
             offset = segment_end;
         }
+        if (!terminal)
+            return OMC_STATUS_OK;
     }
-
-    omc_arena_fini(&merged_irb);
-    *out_status = OMC_TRANSFER_MALFORMED;
+    *out_status = OMC_TRANSFER_OK;
     return OMC_STATUS_OK;
 }
 
@@ -9728,7 +9528,7 @@ omc_transfer_apply_iptc_overlay(const omc_u8* current_bytes,
     omc_status status;
     omc_transfer_status iptc_status;
     int has_iptc;
-    int iptc_supported;
+    omc_transfer_status iptc_build_status;
 
     if (current_bytes == (const omc_u8*)0 || store == (const omc_store*)0
         || edited_out == (omc_arena*)0 || out_res == (omc_transfer_res*)0) {
@@ -9742,23 +9542,24 @@ omc_transfer_apply_iptc_overlay(const omc_u8* current_bytes,
     omc_arena_init(&iim);
     omc_arena_init(&iptc_out);
     has_iptc       = 0;
-    iptc_supported = 1;
+    iptc_build_status = OMC_TRANSFER_OK;
     status         = omc_transfer_build_iptc_iim(store, &iim, &has_iptc,
-                                                 &iptc_supported);
+                                                 &iptc_build_status,
+                                                 &out_res->iptc_entries_skipped);
     if (status != OMC_STATUS_OK) {
         omc_arena_fini(&iptc_out);
         omc_arena_fini(&iim);
         return status;
     }
-    if (!has_iptc) {
+    if (!has_iptc && iptc_build_status == OMC_TRANSFER_OK) {
         omc_arena_fini(&iptc_out);
         omc_arena_fini(&iim);
         return OMC_STATUS_OK;
     }
-    if (!iptc_supported) {
+    if (iptc_build_status != OMC_TRANSFER_OK) {
         omc_arena_fini(&iptc_out);
         omc_arena_fini(&iim);
-        out_res->status = OMC_TRANSFER_UNSUPPORTED;
+        out_res->status = iptc_build_status;
         return OMC_STATUS_OK;
     }
 
