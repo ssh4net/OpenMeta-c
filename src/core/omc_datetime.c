@@ -53,6 +53,7 @@ omc_datetime_parse(const omc_u8 *p, omc_size n, omc_datetime *out)
                         omc_decimal_digits(p + 8U, 2U)))
         return 0;
     memcpy(out->date, p, 10U);
+    out->precision = OMC_DATETIME_PRECISION_FULL;
     if (n == 10U)
         return 1;
     if (n < 19U || p[10] != 'T' || p[13] != ':' || p[16] != ':' ||
@@ -82,6 +83,39 @@ omc_datetime_parse(const omc_u8 *p, omc_size n, omc_datetime *out)
         return 0;
     memcpy(out->offset, p + i, 6U);
     return 1;
+}
+
+int
+omc_datetime_parse_creation(const omc_u8 *p, omc_size n, omc_datetime *out)
+{
+    int year;
+    int month;
+
+    if (out == NULL)
+        return 0;
+    memset(out, 0, sizeof(*out));
+    if (p == NULL)
+        return 0;
+    if (n == 4U) {
+        year = omc_decimal_digits(p, 4U);
+        if (year <= 0)
+            return 0;
+        memcpy(out->date, p, 4U);
+        memcpy(out->date + 4U, "-00-00", 6U);
+        out->precision = OMC_DATETIME_PRECISION_YEAR;
+        return 1;
+    }
+    if (n == 7U && p[4] == '-') {
+        year = omc_decimal_digits(p, 4U);
+        month = omc_decimal_digits(p + 5U, 2U);
+        if (year <= 0 || month < 1 || month > 12)
+            return 0;
+        memcpy(out->date, p, 7U);
+        memcpy(out->date + 7U, "-00", 3U);
+        out->precision = OMC_DATETIME_PRECISION_MONTH;
+        return 1;
+    }
+    return omc_datetime_parse(p, n, out);
 }
 
 int

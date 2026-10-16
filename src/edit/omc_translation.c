@@ -428,7 +428,7 @@ omc_translation_field_text(omc_translation *t, omc_translation_field *f,
 
 static int
 omc_translation_date(omc_translation *t, const char *ns, const char *name, int exif,
-                     int which)
+                     int which, int allow_partial)
 {
     omc_datetime d;
     omc_const_bytes bytes;
@@ -446,8 +446,13 @@ omc_translation_date(omc_translation *t, const char *ns, const char *name, int e
     if (!deleted) {
         if (!omc_translation_text(t, id, &bytes))
             return 0;
-        if (!omc_datetime_parse(bytes.data, bytes.size, &d)) {
+        if (!(allow_partial ? omc_datetime_parse_creation(bytes.data, bytes.size, &d)
+                            : omc_datetime_parse(bytes.data, bytes.size, &d))) {
             t->res.status = OMC_TRANSLATION_INVALID_SOURCE;
+            return 0;
+        }
+        if (exif && d.precision != OMC_DATETIME_PRECISION_FULL) {
+            t->res.status = OMC_TRANSLATION_UNSUPPORTED_PRECISION;
             return 0;
         }
         if ((exif && d.time[0] == 0) || (!exif && d.fraction[0] != 0)) {
@@ -1092,19 +1097,19 @@ omc_translate_xmp(const omc_store *source, omc_store *out,
         ok = 1;
         switch (bit) {
         case OMC_TRANSLATE_CREATE_EXIF:
-            ok = omc_translation_date(&t, omc_ns_xmp, "CreateDate", 1, 2);
+            ok = omc_translation_date(&t, omc_ns_xmp, "CreateDate", 1, 2, 1);
             break;
         case OMC_TRANSLATE_CREATE_IPTC:
-            ok = omc_translation_date(&t, omc_ns_xmp, "CreateDate", 0, 1);
+            ok = omc_translation_date(&t, omc_ns_xmp, "CreateDate", 0, 1, 1);
             break;
         case OMC_TRANSLATE_DATE_CREATED:
-            ok = omc_translation_date(&t, omc_ns_ps, "DateCreated", 0, 0);
+            ok = omc_translation_date(&t, omc_ns_ps, "DateCreated", 0, 0, 1);
             break;
         case OMC_TRANSLATE_DATE_ORIGINAL:
-            ok = omc_translation_date(&t, omc_ns_exif, "DateTimeOriginal", 1, 1);
+            ok = omc_translation_date(&t, omc_ns_exif, "DateTimeOriginal", 1, 1, 1);
             break;
         case OMC_TRANSLATE_MODIFY_DATE:
-            ok = omc_translation_date(&t, omc_ns_xmp, "ModifyDate", 1, 0);
+            ok = omc_translation_date(&t, omc_ns_xmp, "ModifyDate", 1, 0, 0);
             break;
         case OMC_TRANSLATE_MAKE:
             ok = omc_translation_text_group(&t, omc_ns_tiff, "Make", "ifd0", 0x010FU, 0,
@@ -1183,6 +1188,12 @@ omc_translate_xmp(const omc_store *source, omc_store *out,
     t.res.failed_mapping = 0U;
     t.res.failed_source = OMC_INVALID_ENTRY_ID;
 done:
+    if (t.res.status != OMC_TRANSLATION_OK) {
+        t.res.groups_translated = 0U;
+        t.res.entries_added = 0U;
+        t.res.entries_updated = 0U;
+        t.res.entries_removed = 0U;
+    }
     omc_edit_fini(&t.edit);
     free(t.sources);
     free(t.fields);

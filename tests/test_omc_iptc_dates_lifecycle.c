@@ -119,7 +119,7 @@ jpeg_readback(const omc_store *source, unsigned int group, const char *text)
 }
 
 static void
-run_case(unsigned int group, const char *date, const char *time, const char *text, int partial)
+run_case(unsigned int group, const char *date, const char *time, const char *text)
 {
     omc_store source;
     omc_store translated;
@@ -133,10 +133,6 @@ run_case(unsigned int group, const char *date, const char *time, const char *tex
     omc_translation_opts reverse_opts;
     omc_translation_res reverse_result;
     omc_u16 date_dataset;
-    omc_u8 *saved_arena;
-    omc_entry *saved_entries;
-    omc_size saved_size;
-    omc_size saved_count;
     date_dataset = (omc_u16)(group ? 62U : 55U);
     omc_store_init(&source); omc_store_init(&translated);
     omc_store_init(&decoded); omc_store_init(&reversed); omc_arena_init(&xml);
@@ -156,18 +152,9 @@ run_case(unsigned int group, const char *date, const char *time, const char *tex
     reverse_opts.all_sources = 1; reverse_opts.conflict = OMC_TRANSLATION_REPLACE;
     reverse_opts.mappings = group ? OMC_TRANSLATE_CREATE_IPTC : OMC_TRANSLATE_DATE_CREATED;
     native(&reversed, 5U, "sentinel");
-    saved_arena = reversed.arena.data; saved_entries = reversed.entries;
-    saved_size = reversed.arena.size; saved_count = reversed.entry_count;
     reverse_result = omc_translate_xmp(&decoded, &reversed, &reverse_opts, NULL);
-    if (partial) {
-        assert(reverse_result.status == OMC_TRANSLATION_INVALID_SOURCE);
-        assert(reversed.arena.data == saved_arena && reversed.entries == saved_entries);
-        assert(reversed.arena.size == saved_size && reversed.entry_count == saved_count);
-        assert(matches(&reversed, reversed.entries[0].value.u.ref, "sentinel"));
-    } else {
-        assert(reverse_result.status == OMC_TRANSLATION_OK);
-        assert_iim(&reversed, date_dataset, date, time);
-    }
+    assert(reverse_result.status == OMC_TRANSLATION_OK);
+    assert_iim(&reversed, date_dataset, date, time);
     omc_store_fini(&reversed); omc_store_fini(&decoded); omc_store_fini(&translated);
     omc_store_fini(&source); omc_arena_fini(&xml);
 }
@@ -176,12 +163,12 @@ int main(void)
 {
     unsigned int group;
     for (group = 0U; group < 2U; ++group) {
-        run_case(group, "20260000", NULL, "2026", 1);
-        run_case(group, "20261000", NULL, "2026-10", 1);
-        run_case(group, "20240229", NULL, "2024-02-29", 0);
-        run_case(group, "20261016", "123456", "2026-10-16T12:34:56", 0);
-        run_case(group, "20261016", "123456-0000", "2026-10-16T12:34:56-00:00", 0);
-        run_case(group, "20261016", "123456+0530", "2026-10-16T12:34:56+05:30", 0);
+        run_case(group, "20260000", NULL, "2026");
+        run_case(group, "20261000", NULL, "2026-10");
+        run_case(group, "20240229", NULL, "2024-02-29");
+        run_case(group, "20261016", "123456", "2026-10-16T12:34:56");
+        run_case(group, "20261016", "123456-0000", "2026-10-16T12:34:56-00:00");
+        run_case(group, "20261016", "123456+0530", "2026-10-16T12:34:56+05:30");
     }
     return 0;
 }

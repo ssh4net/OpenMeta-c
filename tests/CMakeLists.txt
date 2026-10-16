@@ -136,7 +136,7 @@ target_link_libraries(omc_test_iptc_to_xmp PRIVATE omc)
 omc_apply_warnings(omc_test_iptc_to_xmp)
 add_test(NAME omc_test_iptc_to_xmp COMMAND omc_test_iptc_to_xmp)
 
-foreach(omc_date_case IN ITEMS iptc_dates_to_xmp iptc_dates_lifecycle)
+foreach(omc_date_case IN ITEMS iptc_dates_to_xmp iptc_dates_lifecycle reverse_dates reverse_dates_transfer)
   add_executable(omc_test_${omc_date_case} test_omc_${omc_date_case}.c)
   target_link_libraries(omc_test_${omc_date_case} PRIVATE omc)
   omc_apply_warnings(omc_test_${omc_date_case})
@@ -396,8 +396,31 @@ int main() { return 0; }"
 static_assert(openmeta::kMetadataIptcDateToXmpContractVersion >= 1U);
 int main() { return 0; }"
       OMC_HAVE_CPP_IPTC_DATE_TO_XMP)
+    unset(OMC_HAVE_CPP_REVERSE_PARTIAL_DATES CACHE)
+    check_cxx_source_compiles("#include <openmeta/metadata_translation.h>
+static_assert(openmeta::kMetadataDateTranslationContractVersion >= 3U);
+int main() { return 0; }"
+      OMC_HAVE_CPP_REVERSE_PARTIAL_DATES)
   endfunction()
   omc_check_translation_contracts()
+  if(OMC_HAVE_CPP_REVERSE_PARTIAL_DATES)
+    add_executable(omc_test_reverse_dates_parity test_omc_reverse_dates_parity.cc)
+    set_target_properties(omc_test_reverse_dates_parity PROPERTIES
+      CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    target_link_libraries(omc_test_reverse_dates_parity PRIVATE omc OpenMeta::openmeta)
+    if(MSVC)
+      target_compile_options(omc_test_reverse_dates_parity PRIVATE /UNDEBUG)
+    else()
+      target_compile_options(omc_test_reverse_dates_parity PRIVATE -UNDEBUG)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      target_compile_options(omc_test_reverse_dates_parity PRIVATE -stdlib=libc++)
+      target_link_options(omc_test_reverse_dates_parity PRIVATE -stdlib=libc++)
+    endif()
+    add_test(NAME omc_test_reverse_dates_parity COMMAND omc_test_reverse_dates_parity)
+  else()
+    message(STATUS "Reverse partial-date parity requires the C++ 0.8.19 contract")
+  endif()
   if(OMC_HAVE_CPP_IPTC_DATE_TO_XMP)
     add_executable(omc_test_iptc_dates_to_xmp_parity test_omc_iptc_dates_to_xmp_parity.cc)
     set_target_properties(omc_test_iptc_dates_to_xmp_parity PROPERTIES

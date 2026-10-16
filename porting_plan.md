@@ -47,9 +47,48 @@ The conversational estimate of about 75% used the narrower boundary and is
 not a completion estimate for this clarified scope. Define feature cases for
 interpretation and non-fuzzy query before publishing revised percentages.
 
+## Upstream 0.8.19 Reverse Partial Dates
+
+The active target is C++ `0.8.19`, commit
+`e8240c3aed7cc858632e4a9cb5605d56b3922f10`, starting from C
+`b30aec6337639d3d4d5b6f993314d6875565eac2`. This bounded increment uses the
+existing C `omc_translate_xmp()` API and mapping masks.
+
+| Work | Acceptance gate |
+| --- | --- |
+| Pin and baseline | Detached Clang 20/libc++ reference; fresh C baseline 67/75 with eight historical failures. |
+| Reverse partial precision | Exact positive year and valid year/month become zero-filled IPTC dates; EXIF creation selectors reject partial precision transactionally. Technical ModifyDate is unchanged. |
+| Publication and carrier lifecycle | Failed generic transactions report zero mutation counts; existing staged commit bounds and distinct-store ownership remain. JPEG/TIFF replacement removes stale times, preserves caption/Make and records last-carrier omission. |
+| Integration | Direct rollback and resource checks, paired C/C++ status/count/canonical-IIM cases, twelve forward/reverse lifecycle cases, sanitizer and dependency-disabled suites, unchanged residual inventories. |
+
+The scoped implementation is validated in C `0.15.0.015`: sanitizer and
+dependency-disabled shared suites each pass 56/56; 88 paired reverse-date
+cases, twelve forward/reverse lifecycle cases and ten JPEG/TIFF carrier cases
+pass. Full Release is 70/78 with the same eight failures. Diagnostic inventories
+remain identical to the fresh baseline: 135 CTest records and 176 full-inventory
+reports (351 with field mismatches). See
+[the reverse-date receipt](reverse_dates_0819.md) for evidence.
+This does not claim complete C++ creation-date contract 3 parity. Remaining
+EXIF work includes clean-value Dirty promotion and absent-companion deletion
+intent. C still reconciles each mapping before examining later mappings, so
+mixed-error first-failure ordering can differ. Generic C diagnostic/limit
+vocabulary, validation of retained references, and distinct-output ownership
+remain unchanged.
+
+Next, close the remaining EXIF creation lifecycle, then resume UP4 shared
+destination-profile validation and basic capture/sensitivity/Flash/lens.
+Explicit last-IPTC-carrier removal needs a separate transfer contract; it is
+also absent from the pinned C++ 0.8.19 behavior. Reassess committed upstream
+changes before selecting each new immutable reference.
+
+During final validation the live C++ checkout still had HEAD `e8240c3`, with
+uncommitted version 0.8.20 changes adding `remove_existing_iptc` to prepared
+transfer. Review that explicit-removal contract after it commits; those changes
+were neither built nor accepted as part of this pinned batch.
+
 ## Upstream 0.8.18 Native IPTC Dates
 
-The active target is C++ `0.8.18`, commit
+The preceding accepted target is C++ `0.8.18`, commit
 `7712c21b3dfb66ed6a2592263e087920a3b70b44`, starting from C `fd7d0d5`.
 The reverse partial-date work was uncommitted at batch start and landed during
 validation as C++ `0.8.19`, `e8240c3aed7cc858632e4a9cb5605d56b3922f10`.
@@ -69,13 +108,8 @@ dependency-disabled shared suites each pass 54/54; 87 paired C/C++ cases and 12
 lifecycle cases pass. Full Release is 67/75 with the same eight failures and
 unchanged inventories (135 CTest diagnostics, 176 full-inventory parity reports;
 351 records when field-level mismatches are included). See
-[the date batch receipt](iptc_dates_0818.md). Next, pin 0.8.19 and converge
-creation-date contract 3: reverse IPTC year/month precision, transactional EXIF
-precision rejection, staged arena limits, and JPEG/TIFF stale-time replacement.
-Keep technical ModifyDate parsing and the explicit last-IPTC-carrier removal
-gap separate. Then resume UP4 destination-profile validation and basic
-capture/sensitivity/Flash/lens lifecycle. Reassess newly committed upstream work
-before selecting each pin.
+[the date batch receipt](iptc_dates_0818.md). The next increment is recorded in
+the 0.8.19 section above; this receipt retains its original pin and behavior.
 
 ## Upstream 0.8.17 IPTC Convergence Batch
 
@@ -965,10 +999,10 @@ semantics. C++ ownership and presentation APIs need not be reproduced.
 | W1 | Typed authoring | C++ `create_metadata_store()` preflights, copies, validates and publishes atomically. C has typed value makers, explicit array byte order, and candidate-based edit publication. | Implemented bounded typed helpers and output-preserving transactions; see `authoring.md`. Owning logical builders and FlatHost wrappers remain above C; reusable metadata construction and validation semantics remain C targets. |
 | W2 | Canonical TIFF/EXIF serialization | C++ `serialize_exif_tiff()` is target-neutral and honors supported wire hints. C's public serializer builds typed TIFF; internal transfer payloads apply target framing above it. | Present with historical exact-byte comparisons. UP4/UP6a must reconcile type-129 text, retained terminal NULs and structured/learning numeric endian conversion across canonical output and LE/BE destinations. |
 | W3 | EXIF/IPTC to portable or materialized XMP | Projection, custom namespaces and managed canonicalization; 0.13.0 adds twenty explicit native IPTC mappings and 0.14.0 adds both native creation-date pairs | The 0.8.18 date contract passes direct tests, 87 paired cases and 12 lifecycle cases. Native date precision, signed/absent offsets and deletion intent are covered. Exact fractions, aliases, sentinels, development/learning/profile and remaining capture/text projection remain separate UP4 families. |
-| W4 | Explicit XMP to native metadata | Original groups, flat locations, combined IPTC, all five GPS v2 APIs and four EXIF text/version fields | Next: 0.8.19 creation-date contract 3 and partial IPTC precision; current C still rejects partial reverse dates. GPS v2 promotion/absent deletion and representative carrier lifecycle were accepted in 0.12.0 against 0.8.14; retain that receipt. UP4 has nine further EXIF-text fields plus capture/development/learning/profile work. UP5 owns structured locations; old masks stay stable. |
+| W4 | Explicit XMP to native metadata | Original groups, flat locations, combined IPTC, all five GPS v2 APIs and four EXIF text/version fields | 0.15.0 adds reverse partial IPTC creation dates and transactional EXIF precision rejection against 0.8.19. Remaining EXIF creation promotion/absent deletion and first-error ordering are tracked separately. GPS v2 promotion/absent deletion and representative carrier lifecycle were accepted in 0.12.0 against 0.8.14; retain that receipt. UP4 has nine further EXIF-text fields plus capture/development/learning/profile work. UP5 owns structured locations; old masks stay stable. |
 | W5 | Native IPTC-IIM emission | Public `omc_serialize_iptc_iim()` and shared transfer engine; JPEG IRB and TIFF/DNG tag `33723` carriers | 0.13.0 adds canonical ordering, raw payload fidelity, strict bounded measure/write, transfer skip counts and per-carrier JPEG resource preservation against 0.8.17. See the scoped batch receipt; prepared IPTC patching and in-place JPEG planning remain separate. |
 | W6 | Target image facts and transfer safety | C has target image spec, CompatibleFile/RenderedImage and diagnostics; C++ has wider source-processing classification and a RAW-data descriptor | Partial. Port descriptor-based RAW curve/linearity applicability, exact-IFD MakerNote trust and existing/template DNGVersion policy. Source filtering must preserve unspecified destination fields during merge; it is not redaction. Unknown context remains conditional. |
-| W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h`, direct overlay and persistence tests | 0.12.0 accepted bounded native edit intent and GPS v2 lifecycle against 0.8.14. 0.13.0 adds canonical IPTC transfer and JPEG executed-output replay; 0.14.0 verifies materialized date XMP through JPEG readback. Extend this pipeline once per UP4 family; broader inventories and consumer-specific acceptance remain open. Preserve unselected native fields, opaque notes and media. |
+| W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h`, direct overlay and persistence tests | 0.12.0 accepted bounded native edit intent and GPS v2 lifecycle against 0.8.14. 0.13.0 adds canonical IPTC transfer and JPEG executed-output replay; 0.14.0 verifies materialized date XMP through JPEG readback. 0.15.0 verifies stale-time removal with nonempty IPTC replacement in JPEG/TIFF; last-carrier omission remains explicit. Extend this pipeline once per UP4 family; broader inventories and consumer-specific acceptance remain open. Preserve unselected native fields, opaque notes and media. |
 | W8 | XMP carrier merge and lifecycle | C has destination embedded/sidecar stores, precedence, writeback and persistence options | Present controls, Partial lifecycle parity. Test modes/defaults, strip/overwrite/failure behavior and source/destination conflicts. |
 | W9 | Payload/package artifacts | C has `OMTPLD01` v1, `OMTPKG01` v2, semantic views, replay, executed-output materialization and artifact inspection | Present bounded wire families. Carry or explicitly reject new native edit intent according to each consumer's schema. Qualify interoperation separately from C++ prepared-object layout and decoded snapshot v1. |
 | W10 | BMFF package item insertion | C has Exif/XMP/JUMBF/C2PA routes, ICC, synthesized `idat`, inserted 32-bit IDs and bounded method-2 references | Shared bounded materializer now replaces managed families and remaps unambiguous IDs. Append layout preserves existing media addresses; physical byte layout differs from C++. |

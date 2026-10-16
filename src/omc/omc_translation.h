@@ -316,7 +316,12 @@ OMC_API void omc_translation_opts_init(omc_translation_opts *opts);
 /* Explicit reverse translation. Source remains immutable. All selected groups
  * form one transaction; failure preserves out, including its borrowed views.
  * out must be initialized and distinct from source. target may be NULL unless
- * an eligible geometry property requires target image facts. */
+ * an eligible geometry property requires target image facts.
+ * Creation dates accept exact YYYY and YYYY-MM for IPTC; unknown components
+ * become zero. Selected EXIF creation projections reject valid partials with
+ * UNSUPPORTED_PRECISION. Disable CREATE_EXIF for partial xmp:CreateDate.
+ * ModifyDate retains full-date syntax. Failed transactions report zero
+ * groups_translated and entries_added/updated/removed. */
 OMC_API omc_translation_res omc_translate_xmp(
     const omc_store *source, omc_store *out, const omc_translation_opts *opts,
     const omc_transfer_target_image_spec *target);

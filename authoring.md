@@ -118,6 +118,20 @@ replace policies are also available. All selected groups share one transaction;
 an invalid date, ambiguous alias, resource limit, or geometry mismatch prevents
 publication of every group.
 
+Since 0.15.0, creation dates accept exact positive `YYYY` and valid `YYYY-MM`
+for IPTC. Unknown components become literal zeroes (`YYYY0000` or `YYYYMM00`);
+no time dataset is created. Malformed partial dates remain invalid. Selected
+EXIF creation mappings reject valid partial precision with
+`OMC_TRANSLATION_UNSUPPORTED_PRECISION`, preserving the previous output. Select
+`OMC_TRANSLATE_CREATE_IPTC` without `OMC_TRANSLATE_CREATE_EXIF` to translate a
+partial `xmp:CreateDate`. Technical `ModifyDate` retains its full-date syntax.
+All failed `omc_translate_xmp()` transactions report zero `groups_translated`
+and `entries_added`, `entries_updated`, `entries_removed`. Diagnostic and
+preserved/unchanged counts retain their existing meaning. Source and output
+must be distinct initialized stores; public layouts and masks are unchanged.
+This precision increment does not complete EXIF clean-value Dirty promotion
+or absent-companion deletion intent.
+
 The initial groups match the bounded C++ authoring surface:
 
 - Dates: creation/digitized, original, Photoshop creation, and modification;
@@ -621,5 +635,10 @@ the complete source store; the text/operation caps are not a total memory bound.
 
 Serialize the materialized properties with `include_existing_xmp=1`,
 `include_iptc=0`, `include_exif=0`. This operation does not create EXIF dates or
-change the existing portable projection. The existing C reverse-date API still
-requires a full calendar date; year/month-only XMP is rejected transactionally.
+change the existing portable projection. Since 0.15.0, the reverse-date API
+round-trips year/month-only XMP into native IPTC. EXIF creation output still
+requires a full date and time. Replacing a nonempty IPTC payload removes stale
+destination time datasets while retaining unrelated IPTC and EXIF values.
+Deleting the last active IPTC dataset currently omits the replacement payload
+and preserves an existing destination carrier; it does not request carrier
+removal. See [the reverse-date receipt](reverse_dates_0819.md).

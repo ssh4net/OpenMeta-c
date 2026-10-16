@@ -24,7 +24,7 @@ The C library may later serve as the C++ implementation core. Temporary
 implementation overlap is expected while behavior is ported and verified.
 
 The [porting plan](porting_plan.md) records the source-reviewed history from
-C++ `0.4.127`, the scope clarification of 2026-09-08, the current C++ `0.8.18`
+C++ `0.4.127`, the scope clarification of 2026-09-08, the current C++ `0.8.19`
 reference review, the parity matrix and acceptance gates. Earlier percentage
 estimates based on a narrower core boundary do not measure this scope. The
 [authoring contract](authoring.md) documents typed construction, detached
@@ -39,8 +39,8 @@ Version 0.12.0 extends transfer prepare options, bundles and executors with
 native EXIF output control and owned native edit intent. Rebuild their callers
 and use `omc_transfer_prepare_opts_init()`; native EXIF output defaults to on.
 
-The [current roadmap](porting_plan.md#upstream-0818-native-iptc-dates) pins C++
-0.8.18 at `7712c21`. C package 0.11.0 adds aggregate JUMBF semantic-work limits,
+The [current roadmap](porting_plan.md#upstream-0819-reverse-partial-dates) pins C++
+0.8.19 at `e8240c3`. C package 0.11.0 adds aggregate JUMBF semantic-work limits,
 rejects retained `dimg` relations losing an input, and corrects exact-cap
 streaming decompression. Payload output limit zero now means unlimited; the
 default remains 64 MiB. The [execution receipt](up0_up1_0814.md) records fresh
@@ -70,8 +70,16 @@ or absent offsets and dirty deletion intent in one bounded transaction. Existing
 reverse-date and portable-projection policies remain unchanged. See the
 [date batch receipt](iptc_dates_0818.md) for the pinned contract and validation.
 
-Next: C++ 0.8.19 reverse creation-date precision and stale-time lifecycle,
-then UP4 basic capture/sensitivity/Flash/lens and shared destination validation.
+Version 0.15.0 accepts exact year/month creation dates for reverse IPTC
+translation. Selected EXIF creation mappings reject partial precision atomically;
+technical ModifyDate parsing is unchanged. Failed transactions report zero
+mutation counts. JPEG/TIFF readback verifies that replacing nonempty IPTC
+removes stale time values. See [the reverse-date receipt](reverse_dates_0819.md).
+
+Next: remaining EXIF creation-date promotion and absent-companion deletion
+intent, then UP4 shared destination validation and basic capture/sensitivity/
+Flash/lens lifecycle. Explicit removal of the last IPTC carrier needs a separate
+transfer contract.
 Reader batches can advance independently. Broader
 capture/identity, patch binding, snapshots and non-fuzzy semantic stages remain
 tracked work. Preserve older read/decode and IPTC evidence under its recorded
