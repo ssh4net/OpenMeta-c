@@ -39,7 +39,7 @@ Version 0.12.0 extends transfer prepare options, bundles and executors with
 native EXIF output control and owned native edit intent. Rebuild their callers
 and use `omc_transfer_prepare_opts_init()`; native EXIF output defaults to on.
 
-The [current roadmap](porting_plan.md#upstream-0819-reverse-partial-dates) pins C++
+The [current roadmap](porting_plan.md#upstream-0819-exif-creation-lifecycle) pins C++
 0.8.19 at `e8240c3`. C package 0.11.0 adds aggregate JUMBF semantic-work limits,
 rejects retained `dimg` relations losing an input, and corrects exact-cap
 streaming decompression. Payload output limit zero now means unlimited; the
@@ -76,10 +76,14 @@ technical ModifyDate parsing is unchanged. Failed transactions report zero
 mutation counts. JPEG/TIFF readback verifies that replacing nonempty IPTC
 removes stale time values. See [the reverse-date receipt](reverse_dates_0819.md).
 
-Next: remaining EXIF creation-date promotion and absent-companion deletion
-intent, then UP4 shared destination validation and basic capture/sensitivity/
-Flash/lens lifecycle. Explicit removal of the last IPTC carrier needs a separate
-transfer contract.
+Version 0.16.0 adds EXIF creation-date lifecycle intent. Matching clean native
+values gain Dirty while retaining their bytes and provenance. Missing companions
+gain reusable deletion markers, and repeats avoid duplicate markers. TIFF
+selected edits preserve destination-only fields; JPEG replacement requires
+retained fields in the source. See [the lifecycle receipt](exif_dates_0819.md).
+
+Next: pin C++ 0.8.20 for explicit last-IPTC-carrier removal, then resume UP4
+shared destination validation and basic capture/sensitivity/Flash/lens lifecycle.
 Reader batches can advance independently. Broader
 capture/identity, patch binding, snapshots and non-fuzzy semantic stages remain
 tracked work. Preserve older read/decode and IPTC evidence under its recorded

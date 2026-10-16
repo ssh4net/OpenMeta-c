@@ -134,6 +134,99 @@ omc_translation_value_equal(const omc_translation *t, const omc_val *a,
     return a->kind == OMC_VAL_EMPTY;
 }
 
+static int
+omc_translation_exif_value_equal(const omc_translation *t, const omc_val *a,
+                                 const omc_val *b)
+{
+    omc_const_bytes av;
+    omc_const_bytes bv;
+    if ((a->kind != OMC_VAL_TEXT && a->kind != OMC_VAL_BYTES) ||
+        (b->kind != OMC_VAL_TEXT && b->kind != OMC_VAL_BYTES))
+        return 0;
+    av = omc_arena_view(&t->source->arena, a->u.ref);
+    bv = omc_arena_view(&t->edit.arena, b->u.ref);
+    while (av.size != 0U && av.data != NULL && av.data[av.size - 1U] == 0U)
+        av.size--;
+    while (bv.size != 0U && bv.data != NULL && bv.data[bv.size - 1U] == 0U)
+        bv.size--;
+    return av.size == bv.size &&
+           (av.size == 0U ||
+            (av.data != NULL && bv.data != NULL &&
+             memcmp(av.data, bv.data, av.size) == 0));
+}
+
+static int
+omc_translation_has_exif_delete_intent(const omc_translation *t,
+                                       const omc_translation_field *field)
+{
+    omc_size i;
+    const omc_entry *entry;
+    for (i = 0U; i < t->source->entry_count; ++i) {
+        entry = &t->source->entries[i];
+        if ((entry->flags & (OMC_ENTRY_FLAG_DIRTY | OMC_ENTRY_FLAG_DELETED)) ==
+                (OMC_ENTRY_FLAG_DIRTY | OMC_ENTRY_FLAG_DELETED) &&
+            omc_translation_key_matches(t, entry, field))
+            return 1;
+    }
+    return 0;
+}
+
+static omc_entry_id
+omc_translation_find_clean_exif_delete_intent(
+    const omc_translation *t, const omc_translation_field *field)
+{
+    omc_size i;
+    const omc_entry *entry;
+    for (i = 0U; i < t->source->entry_count; ++i) {
+        entry = &t->source->entries[i];
+        if ((entry->flags & OMC_ENTRY_FLAG_DELETED) != 0U &&
+            (entry->flags & OMC_ENTRY_FLAG_DIRTY) == 0U &&
+            omc_translation_key_matches(t, entry, field))
+            return (omc_entry_id)i;
+    }
+    return OMC_INVALID_ENTRY_ID;
+}
+
+static int
+omc_translation_add_exif_delete_intent(omc_translation *t,
+                                       omc_translation_field *field)
+{
+    omc_entry entry;
+    omc_byte_ref value_ref;
+    omc_const_bytes bytes;
+    omc_u32 order_delta;
+    omc_status status;
+    memset(&entry, 0, sizeof(entry));
+    if (!omc_translation_status_ok(
+            t, omc_arena_append(&t->edit.arena, field->ifd, strlen(field->ifd),
+                                &entry.key.u.exif_tag.ifd)))
+        return 0;
+    entry.key.kind = OMC_KEY_EXIF_TAG;
+    entry.key.u.exif_tag.tag = field->tag;
+    if (!omc_translation_status_ok(
+            t, omc_arena_append(&t->edit.arena, "", 0U, &value_ref)))
+        return 0;
+    omc_val_make_text(&entry.value, value_ref, OMC_TEXT_ASCII);
+    entry.origin = t->source->entries[field->source].origin;
+    bytes = omc_arena_view(&t->source->arena, entry.origin.wire_type_name);
+    if (entry.origin.wire_type_name.size != 0U &&
+        !omc_translation_status_ok(
+            t, omc_arena_append(&t->edit.arena, bytes.data, bytes.size,
+                                &entry.origin.wire_type_name)))
+        return 0;
+    order_delta = (omc_u32)(field - t->fields) + 1U;
+    if (entry.origin.order_in_block <= 0xFFFFFFFFU - order_delta)
+        entry.origin.order_in_block += order_delta;
+    else
+        entry.origin.order_in_block = 0xFFFFFFFFU;
+    entry.flags = OMC_ENTRY_FLAG_DIRTY | OMC_ENTRY_FLAG_DELETED;
+    status = omc_edit_add_entry(&t->edit, &entry);
+    if (!omc_translation_status_ok(t, status))
+        return 0;
+    t->res.entries_added++;
+    return 1;
+}
+
 static omc_translation_field *
 omc_translation_nth_field(omc_translation *t, omc_u32 key, omc_u32 ordinal)
 {
@@ -150,7 +243,7 @@ omc_translation_nth_field(omc_translation *t, omc_u32 key, omc_u32 ordinal)
 }
 
 static int
-omc_translation_reconcile(omc_translation *t)
+omc_translation_reconcile(omc_translation *t, int exif_date_lifecycle)
 {
     omc_u32 k;
     omc_u32 j;
@@ -161,6 +254,9 @@ omc_translation_reconcile(omc_translation *t)
     omc_entry_id id;
     int any;
     int exact;
+    int needs_operation;
+    int has_active;
+    int values_equal;
     int duplicate_key;
     omc_translation_field *f;
     omc_entry added;
@@ -168,6 +264,7 @@ omc_translation_reconcile(omc_translation *t)
     omc_status status;
     any = 0;
     exact = 1;
+    needs_operation = 0;
     count = t->native_order != NULL ? t->native_count : t->source->entry_count;
     for (k = 0U; k < t->field_count; ++k) {
         duplicate_key = 0;
@@ -184,12 +281,28 @@ omc_translation_reconcile(omc_translation *t)
                 continue;
             any = 1;
             f = omc_translation_nth_field(t, k, ordinal++);
-            if (f == NULL || !omc_translation_value_equal(
-                                 t, &t->source->entries[id].value, &f->value))
+            values_equal = 0;
+            if (f != NULL) {
+                values_equal = exif_date_lifecycle
+                                   ? omc_translation_exif_value_equal(
+                                         t, &t->source->entries[id].value, &f->value)
+                                   : omc_translation_value_equal(
+                                         t, &t->source->entries[id].value, &f->value);
+            }
+            if (!values_equal)
                 exact = 0;
+            else if (exif_date_lifecycle &&
+                     (t->source->entries[id].flags & OMC_ENTRY_FLAG_DIRTY) == 0U)
+                needs_operation = 1;
         }
-        if (omc_translation_nth_field(t, k, ordinal) != NULL)
+        if (omc_translation_nth_field(t, k, ordinal) != NULL) {
             exact = 0;
+        } else if (exif_date_lifecycle && ordinal == 0U) {
+            /* An absent EXIF timestamp member carries an explicit deletion
+             * intent unless a dirty intent already exists. */
+            if (!omc_translation_has_exif_delete_intent(t, &t->fields[k]))
+                needs_operation = 1;
+        }
     }
     if (any && t->opts.conflict == OMC_TRANSLATION_PRESERVE) {
         t->res.groups_preserved++;
@@ -209,7 +322,8 @@ omc_translation_reconcile(omc_translation *t)
             }
         }
     }
-    if (exact) {
+    if (exact && !needs_operation &&
+        !(exif_date_lifecycle && t->opts.conflict == OMC_TRANSLATION_PRESERVE)) {
         t->res.groups_unchanged++;
         return 1;
     }
@@ -222,20 +336,29 @@ omc_translation_reconcile(omc_translation *t)
             continue;
         ordinal = 0U;
         repeated_order = 0U;
+        has_active = 0;
         for (i = 0U; i < count; ++i) {
             id = t->native_order != NULL ? t->native_order[i].id : (omc_entry_id)i;
             if ((t->source->entries[id].flags & OMC_ENTRY_FLAG_DELETED) != 0U ||
                 !omc_translation_key_matches(t, &t->source->entries[id], &t->fields[k]))
                 continue;
+            has_active = 1;
             f = omc_translation_nth_field(t, k, ordinal++);
             if (f != NULL)
                 repeated_order = t->source->entries[id].origin.order_in_block;
             if (f == NULL) {
                 status = omc_edit_tombstone(&t->edit, id);
                 t->res.entries_removed++;
-            } else if (!omc_translation_value_equal(t, &t->source->entries[id].value,
-                                                    &f->value)) {
+            } else if (!(exif_date_lifecycle
+                             ? omc_translation_exif_value_equal(
+                                   t, &t->source->entries[id].value, &f->value)
+                             : omc_translation_value_equal(
+                                   t, &t->source->entries[id].value, &f->value))) {
                 status = omc_edit_set_value(&t->edit, id, &f->value);
+                t->res.entries_updated++;
+            } else if (exif_date_lifecycle &&
+                       (t->source->entries[id].flags & OMC_ENTRY_FLAG_DIRTY) == 0U) {
+                status = omc_edit_mark_dirty(&t->edit, id);
                 t->res.entries_updated++;
             } else
                 status = OMC_STATUS_OK;
@@ -272,6 +395,18 @@ omc_translation_reconcile(omc_translation *t)
             if (!omc_translation_status_ok(t, omc_edit_add_entry(&t->edit, &added)))
                 return 0;
             t->res.entries_added++;
+        }
+        if (exif_date_lifecycle && !t->fields[k].present && !has_active) {
+            if (!omc_translation_has_exif_delete_intent(t, &t->fields[k])) {
+                id = omc_translation_find_clean_exif_delete_intent(t, &t->fields[k]);
+                if (id != OMC_INVALID_ENTRY_ID) {
+                    status = omc_edit_tombstone(&t->edit, id);
+                    t->res.entries_updated++;
+                    if (!omc_translation_status_ok(t, status))
+                        return 0;
+                } else if (!omc_translation_add_exif_delete_intent(t, &t->fields[k]))
+                    return 0;
+            }
         }
     }
     if (t->edit.op_count > t->opts.max_operations ||
@@ -507,7 +642,7 @@ omc_translation_date(omc_translation *t, const char *ns, const char *name, int e
                 return 0;
         }
     }
-    return omc_translation_reconcile(t);
+    return omc_translation_reconcile(t, exif && allow_partial);
 }
 
 static omc_u64
@@ -744,7 +879,7 @@ omc_translation_capture(omc_translation *t, const char *path, const char *alias,
         }
         f->present = 1;
     }
-    return omc_translation_reconcile(t);
+    return omc_translation_reconcile(t, 0);
 invalid:
     t->res.status = OMC_TRANSLATION_INVALID_SOURCE;
     return 0;
@@ -824,7 +959,7 @@ omc_translation_text_group(omc_translation *t, const char *ns, const char *path,
                omc_translation_source_compare);
         t->repeated_iptc = 1;
     }
-    ok = omc_translation_reconcile(t);
+    ok = omc_translation_reconcile(t, 0);
     free(t->native_order);
     t->native_order = NULL;
     t->repeated_iptc = 0;
@@ -888,7 +1023,8 @@ omc_translation_charset(omc_translation *t)
     }
     t->field_count = 0U;
     f = omc_translation_field_add(t, NULL, 90U, 1U, t->utf8_source);
-    if (!omc_translation_field_text(t, f, utf8, 3U) || !omc_translation_reconcile(t))
+    if (!omc_translation_field_text(t, f, utf8, 3U) ||
+        !omc_translation_reconcile(t, 0))
         return 0;
     t->res.utf8_charset_added = 1;
     return 1;
@@ -1043,7 +1179,7 @@ omc_translation_geometry(omc_translation *t,
             f->present = !deleted[side];
         }
     }
-    return omc_translation_reconcile(t);
+    return omc_translation_reconcile(t, 0);
 invalid:
     t->res.status = OMC_TRANSLATION_INVALID_SOURCE;
 fail:

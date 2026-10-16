@@ -320,6 +320,9 @@ OMC_API void omc_translation_opts_init(omc_translation_opts *opts);
  * Creation dates accept exact YYYY and YYYY-MM for IPTC; unknown components
  * become zero. Selected EXIF creation projections reject valid partials with
  * UNSUPPORTED_PRECISION. Disable CREATE_EXIF for partial xmp:CreateDate.
+ * Accepted EXIF creation groups promote clean matching values to Dirty without
+ * changing their representation. Missing companions retain Dirty|Deleted
+ * intent; existing markers are reused. Preserve leaves active groups intact.
  * ModifyDate retains full-date syntax. Failed transactions report zero
  * groups_translated and entries_added/updated/removed. */
 OMC_API omc_translation_res omc_translate_xmp(

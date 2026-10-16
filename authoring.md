@@ -129,8 +129,22 @@ All failed `omc_translate_xmp()` transactions report zero `groups_translated`
 and `entries_added`, `entries_updated`, `entries_removed`. Diagnostic and
 preserved/unchanged counts retain their existing meaning. Source and output
 must be distinct initialized stores; public layouts and masks are unchanged.
-This precision increment does not complete EXIF clean-value Dirty promotion
-or absent-companion deletion intent.
+Since 0.16.0, accepted original/digitized EXIF creation groups promote matching
+clean native values to Dirty. Matching ignores trailing NUL padding; promotion
+preserves the complete value representation, key and origin. Missing companions
+retain Dirty|Deleted intent: reuse a dirty marker, promote the first clean
+deleted marker, or append an empty ASCII Text marker. Added markers inherit the
+XMP source origin and a saturated field-order increment. Active duplicates and
+stale companions are removed under Replace. Preserve leaves a group with active
+native members untouched. Promotions/removals consume operation budget; appended
+markers consume both operation and addition budgets. Failed calls preserve
+output and report zero mutation counts. This lifecycle increment applies only
+to `OMC_TRANSLATE_CREATE_EXIF` and `OMC_TRANSLATE_DATE_ORIGINAL`; technical
+ModifyDate and other mappings retain their prior rules.
+
+TIFF/DNG transfer consumes selected native intent against an existing target.
+JPEG replaces its complete EXIF packet; retain unselected fields in the source
+store when they must survive. See [the lifecycle receipt](exif_dates_0819.md).
 
 The initial groups match the bounded C++ authoring surface:
 
