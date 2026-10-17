@@ -169,6 +169,34 @@ DigitalCreationDate/DigitalCreationTime. Invalid dates are skipped. Missing
 or invalid time values produce date-only output. Existing XMP conflict policy
 continues to control generated-versus-existing values.
 
+## Explicit IPTC carrier removal (0.17.0)
+
+Native transfer `include_iptc` must be zero or one and defaults to one. It
+controls native carriers independently of `embedded.packet.include_iptc` and sidecar IPTC-to-XMP
+projection. Prepare, bundle and executor layouts change; initialize options
+and rebuild callers with matching headers and binaries.
+
+Prepare derives `remove_existing_iptc` for JPEG/TIFF/DNG only when native IPTC
+output is enabled, no active native dataset remains, and a native dataset is
+Dirty|Deleted. All active datasets count, including version, charset and damaged
+entries skipped by serialization. Omission, clean tombstones and XMP-only
+deletions preserve the destination carrier. A stale opaque Photoshop resource
+cannot resurrect a deleted native group.
+
+Execution rechecks the policy against the borrowed source; changing its native
+lifecycle requires preparation again. Disabling native IPTC output does not
+filter tag 33723 already supplied through EXIF output. Explicit removal takes
+precedence over that copied tag.
+
+Execution removes every managed leading JPEG Photoshop resource `0x0404`,
+preserving unrelated resources, duplicate IDs, names, padding and segment
+placement. TIFF-family execution removes IFD0 tag 33723, with removal taking
+precedence over a copied EXIF tag. Existing/template DNG uses the same rule.
+The existing staged-output transaction protects both caller arenas on failure.
+Payload-only handoffs cannot represent destination removal and reject it;
+executed-output packages persist the resulting bytes with existing wire versions.
+See [the pinned removal receipt](iptc_removal_0820.md) for validation and limits.
+
 ## Explicit IPTC location writeback (0.9.0)
 
 Call `omc_location_translation_opts_init()` and then

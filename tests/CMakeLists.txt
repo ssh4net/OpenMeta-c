@@ -143,6 +143,13 @@ foreach(omc_date_case IN ITEMS iptc_dates_to_xmp iptc_dates_lifecycle reverse_da
   add_test(NAME omc_test_${omc_date_case} COMMAND omc_test_${omc_date_case})
 endforeach()
 
+add_executable(omc_test_iptc_removal test_omc_iptc_removal.c)
+set_target_properties(omc_test_iptc_removal PROPERTIES
+  C_STANDARD 90 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_link_libraries(omc_test_iptc_removal PRIVATE omc)
+omc_apply_warnings(omc_test_iptc_removal)
+add_test(NAME omc_test_iptc_removal COMMAND omc_test_iptc_removal)
+
 add_executable(omc_test_pay test_omc_pay.c)
 target_link_libraries(omc_test_pay PRIVATE omc)
 add_test(NAME omc_test_pay COMMAND omc_test_pay)
@@ -401,8 +408,30 @@ int main() { return 0; }"
 static_assert(openmeta::kMetadataDateTranslationContractVersion >= 3U);
 int main() { return 0; }"
       OMC_HAVE_CPP_REVERSE_PARTIAL_DATES)
+    unset(OMC_HAVE_CPP_IPTC_REMOVAL CACHE)
+    check_cxx_source_compiles("#include <openmeta/metadata_transfer.h>
+int main() { openmeta::PreparedTransferBundle bundle; return bundle.remove_existing_iptc; }"
+      OMC_HAVE_CPP_IPTC_REMOVAL)
   endfunction()
   omc_check_translation_contracts()
+  if(OMC_HAVE_CPP_IPTC_REMOVAL)
+    add_executable(omc_test_iptc_removal_parity test_omc_iptc_removal_parity.cc)
+    set_target_properties(omc_test_iptc_removal_parity PROPERTIES
+      CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    target_link_libraries(omc_test_iptc_removal_parity PRIVATE omc OpenMeta::openmeta)
+    if(MSVC)
+      target_compile_options(omc_test_iptc_removal_parity PRIVATE /UNDEBUG)
+    else()
+      target_compile_options(omc_test_iptc_removal_parity PRIVATE -UNDEBUG)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      target_compile_options(omc_test_iptc_removal_parity PRIVATE -stdlib=libc++)
+      target_link_options(omc_test_iptc_removal_parity PRIVATE -stdlib=libc++)
+    endif()
+    add_test(NAME omc_test_iptc_removal_parity COMMAND omc_test_iptc_removal_parity)
+  else()
+    message(STATUS "IPTC carrier-removal parity requires the C++ 0.8.20 field")
+  endif()
   if(OMC_HAVE_CPP_REVERSE_PARTIAL_DATES)
     add_executable(omc_test_exif_dates_parity test_omc_exif_dates_parity.cc)
     set_target_properties(omc_test_exif_dates_parity PROPERTIES

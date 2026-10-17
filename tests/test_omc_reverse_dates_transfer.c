@@ -177,8 +177,8 @@ run_case(omc_scan_fmt format, unsigned int mode)
     assert(result.status == OMC_TRANSLATION_OK);
     execute(carrier.data, carrier.size, format, &translated, 0, &replaced);
     if (!retain_caption) {
-        /* An empty payload is omission; last-dataset carrier removal is separate. */
-        readback(&replaced, "20240102", "20240102", "030405+0900", 0);
+        /* Dirty native pair deletions now explicitly remove the last carrier. */
+        readback(&replaced, NULL, NULL, NULL, 0);
     } else {
         readback(&replaced, removal ? NULL : dates[mode][2],
                   removal ? NULL : dates[mode][3], NULL, 1);

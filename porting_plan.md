@@ -47,9 +47,43 @@ The conversational estimate of about 75% used the narrower boundary and is
 not a completion estimate for this clarified scope. Define feature cases for
 interpretation and non-fuzzy query before publishing revised percentages.
 
+## Upstream 0.8.20 IPTC Carrier Removal
+
+The active reference is C++ `0.8.20`, commit
+`0f492554fd57ee65381e6092debd88efc88c1285`, built from a clean detached source
+with Clang 20 and libc++. This bounded increment starts from C
+`7039d8f2a60b42ef6b0db0e81db433aff08f9489` (0.16.0.016).
+
+| Work | Acceptance gate |
+| --- | --- |
+| Baseline | Fresh C build against the immutable reference: 73/81, same eight failures; 135 CTest diagnostics and 351 detailed full-inventory records. |
+| Prepared intent | Native `include_iptc` defaults on; derive removal from enabled native output, zero active native datasets and dirty native deletion. Carry intent through compile and validate the borrowed source at execution. |
+| Carrier edit | Remove managed leading JPEG Photoshop resources or TIFF-family IFD0 tag 33723. Preserve unrelated resources and native metadata/media. Removal wins over copied EXIF tag 33723. |
+| Boundaries | Reject unsupported payload/fresh handoffs before storage/output publication; preserve staged rollback and existing C2PA limits. Persist executed bytes through existing package wire versions. |
+| Qualification | Direct sanitizer and dependency-disabled shared suites, paired derivation/carrier cases, malformed/alias/rollback/precedence cases, unchanged broad residual inventories. |
+
+C package 0.17.0 extends prepare, bundle and executor layouts. Rebuild callers
+against matching headers/binaries and initialize options. Existing EXIF/GPS
+intent and XMP projection switches keep their separate contracts. See
+[the removal receipt](iptc_removal_0820.md) for the final validation record.
+
+The scoped batch is accepted as C `0.17.0.017`: sanitizer and dependency-disabled
+shared suites each pass 59/59; 54 paired derivation combinations and 24 carrier
+comparisons pass. Release is 75/83 with the same eight failures, unchanged
+135/176/351 diagnostic inventories and identical normalized full-inventory
+output. The matching-header counterfactual retains IPTC in C 0.16.0 and removes
+it in this implementation. No Windows, embedded or full C++ suite acceptance
+is claimed by these WSL checks.
+
+Next, resume UP4 shared opt-in destination-profile validation, followed by basic
+capture/sensitivity/Flash/lens lifecycle. Recheck committed upstream changes
+before selecting another immutable pin. Full C2PA signing/snapshot binding,
+fresh ICC, arbitrary RDF and prepared IPTC patching remain separate work.
+The eight broad reader/decode inventory failures remain open in RD9/RD10.
+
 ## Upstream 0.8.19 EXIF Creation Lifecycle
 
-The active reference remains C++ `0.8.19`, commit
+The preceding accepted reference is C++ `0.8.19`, commit
 `e8240c3aed7cc858632e4a9cb5605d56b3922f10`. This batch starts from C
 `f398199ae509b7b539410692fd56e67ad6c57de8` and closes the original/digitized
 EXIF lifecycle gaps recorded by the reverse partial-date review.
@@ -986,10 +1020,10 @@ dependencies included in a distribution.
 
 ## Parity Matrix
 
-The matrix combines C 0.11.0 with the 0.8.14 execution baseline and revised
-UP0-UP7/RD7-RD10 plan. Earlier measured rows retain their recorded reference
-pins; only the focused resource/container slice has new acceptance in this
-batch. Presence alone does not establish complete reference parity:
+The matrix combines the recorded C 0.11.0 through 0.17.0 increments with the
+UP0-UP7/RD7-RD10 plan. Each measured row retains its own reference pin and
+scoped acceptance cases; the current transfer slice uses C++ 0.8.20.
+Presence alone does not establish complete reference parity:
 
 - **Present**: implementation and direct tests exist for a bounded C contract.
   Broader reference parity needs the listed acceptance cases.
@@ -1035,9 +1069,9 @@ semantics. C++ ownership and presentation APIs need not be reproduced.
 | W2 | Canonical TIFF/EXIF serialization | C++ `serialize_exif_tiff()` is target-neutral and honors supported wire hints. C's public serializer builds typed TIFF; internal transfer payloads apply target framing above it. | Present with historical exact-byte comparisons. UP4/UP6a must reconcile type-129 text, retained terminal NULs and structured/learning numeric endian conversion across canonical output and LE/BE destinations. |
 | W3 | EXIF/IPTC to portable or materialized XMP | Projection, custom namespaces and managed canonicalization; 0.13.0 adds twenty explicit native IPTC mappings and 0.14.0 adds both native creation-date pairs | The 0.8.18 date contract passes direct tests, 87 paired cases and 12 lifecycle cases. Native date precision, signed/absent offsets and deletion intent are covered. Exact fractions, aliases, sentinels, development/learning/profile and remaining capture/text projection remain separate UP4 families. |
 | W4 | Explicit XMP to native metadata | Original groups, flat locations, combined IPTC, all five GPS v2 APIs and four EXIF text/version fields | 0.15.0 adds reverse partial IPTC creation dates; 0.16.0 adds EXIF original/digitized promotion and absent-companion deletion intent against 0.8.19. Mixed-error first-failure ordering and technical ModifyDate lifecycle remain separate. GPS v2 promotion/absent deletion and representative carrier lifecycle were accepted in 0.12.0 against 0.8.14; retain that receipt. UP4 has nine further EXIF-text fields plus capture/development/learning/profile work. UP5 owns structured locations; old masks stay stable. |
-| W5 | Native IPTC-IIM emission | Public `omc_serialize_iptc_iim()` and shared transfer engine; JPEG IRB and TIFF/DNG tag `33723` carriers | 0.13.0 adds canonical ordering, raw payload fidelity, strict bounded measure/write, transfer skip counts and per-carrier JPEG resource preservation against 0.8.17. See the scoped batch receipt; prepared IPTC patching and in-place JPEG planning remain separate. |
+| W5 | Native IPTC-IIM emission | Public `omc_serialize_iptc_iim()` and shared transfer engine; JPEG IRB and TIFF/DNG tag `33723` carriers | 0.13.0 adds canonical ordering, raw payload fidelity, strict bounded measure/write, transfer skip counts and per-carrier JPEG resource preservation against 0.8.17. 0.17.0 adds explicit last-carrier removal against 0.8.20, retaining unrelated Photoshop resources and TIFF metadata/media. See the scoped receipts; prepared IPTC patching and in-place JPEG planning remain separate. |
 | W6 | Target image facts and transfer safety | C has target image spec, CompatibleFile/RenderedImage and diagnostics; C++ has wider source-processing classification and a RAW-data descriptor | Partial. Port descriptor-based RAW curve/linearity applicability, exact-IFD MakerNote trust and existing/template DNGVersion policy. Source filtering must preserve unspecified destination fields during merge; it is not redaction. Unknown context remains conditional. |
-| W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h`, direct overlay and persistence tests | 0.12.0 accepted bounded native edit intent and GPS v2 lifecycle against 0.8.14. 0.13.0 adds canonical IPTC transfer and JPEG executed-output replay; 0.14.0 verifies materialized date XMP through JPEG readback. 0.15.0 verifies nonempty IPTC stale-time replacement. 0.16.0 verifies EXIF creation lifecycle across JPEG and both byte orders of TIFF/BigTIFF. TIFF selected edits preserve destination-only fields; JPEG retained fields must be supplied in source. Last-IPTC-carrier removal, broader inventories and consumer-specific acceptance remain open. |
+| W7 | Prepare, compile, execute, persist | `omc_transfer.h`, `omc_transfer_persist.h`, direct overlay and persistence tests | 0.12.0 accepted bounded native edit intent and GPS v2 lifecycle against 0.8.14. 0.13.0 adds canonical IPTC transfer and JPEG executed-output replay; 0.14.0 verifies materialized date XMP through JPEG readback. 0.15.0 verifies nonempty IPTC stale-time replacement. 0.16.0 verifies EXIF creation lifecycle across JPEG and both byte orders of TIFF/BigTIFF. TIFF selected edits preserve destination-only fields; JPEG retained fields must be supplied in source. 0.17.0 adds explicit last-IPTC-carrier removal, source-policy consistency checks and executed-output package replay against 0.8.20. Broader inventories and consumer-specific acceptance remain open. |
 | W8 | XMP carrier merge and lifecycle | C has destination embedded/sidecar stores, precedence, writeback and persistence options | Present controls, Partial lifecycle parity. Test modes/defaults, strip/overwrite/failure behavior and source/destination conflicts. |
 | W9 | Payload/package artifacts | C has `OMTPLD01` v1, `OMTPKG01` v2, semantic views, replay, executed-output materialization and artifact inspection | Present bounded wire families. Carry or explicitly reject new native edit intent according to each consumer's schema. Qualify interoperation separately from C++ prepared-object layout and decoded snapshot v1. |
 | W10 | BMFF package item insertion | C has Exif/XMP/JUMBF/C2PA routes, ICC, synthesized `idat`, inserted 32-bit IDs and bounded method-2 references | Shared bounded materializer now replaces managed families and remaps unambiguous IDs. Append layout preserves existing media addresses; physical byte layout differs from C++. |

@@ -182,6 +182,8 @@ typedef struct omc_transfer_prepare_opts {
     omc_xmp_sidecar_req sidecar;
     /* Native EXIF output, default 1; independent of XMP EXIF projection. */
     int include_exif;
+    /* Native IPTC output/removal, default 1; independent of XMP IPTC output. */
+    int include_iptc;
 } omc_transfer_prepare_opts;
 
 typedef struct omc_transfer_bundle {
@@ -208,6 +210,10 @@ typedef struct omc_transfer_bundle {
     omc_xmp_sidecar_req sidecar;
     int include_exif;
     omc_native_edit_intent native_edits;
+    /* Native IPTC output/removal policy; copied by compile. Rebuild required. */
+    int include_iptc;
+    /* Derived from source lifecycle; execute verifies it against the source. */
+    int remove_existing_iptc;
 } omc_transfer_bundle;
 
 typedef struct omc_transfer_route {
@@ -235,6 +241,10 @@ typedef struct omc_transfer_exec {
     omc_xmp_sidecar_req sidecar;
     int include_exif;
     omc_native_edit_intent native_edits;
+    /* Native IPTC output/removal policy. Rebuild required. */
+    int include_iptc;
+    /* Must match the borrowed source lifecycle at execute time. */
+    int remove_existing_iptc;
 } omc_transfer_exec;
 
 typedef struct omc_transfer_res {
@@ -304,7 +314,10 @@ omc_transfer_compile(const omc_transfer_bundle* bundle,
 /* Both output arenas must be initialized and distinct. Failure (including a
  * non-OK transfer result) preserves both outputs and their borrowed views.
  * Success replaces both outputs; file_bytes may alias the old edited_out.
- * Compiled native edit lists are owned inline; referenced stores are borrowed. */
+ * Compiled native edit lists and carrier-removal intent are owned inline;
+ * referenced stores are borrowed. C removal intent is checked against the
+ * borrowed source lifecycle at execution. Rebuild callers after the struct
+ * changes. */
 OMC_API omc_status
 omc_transfer_execute(const omc_u8* file_bytes, omc_size file_size,
                      const omc_store* store, omc_arena* edited_out,

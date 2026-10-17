@@ -183,18 +183,24 @@ static void test_no_native_replacement(void)
     omc_store source;
     omc_transfer_res res;
     omc_entry opaque;
+    omc_size i;
     omc_arena_init(&file); omc_arena_init(&irb); omc_arena_init(&original_segment);
     omc_arena_init(&out); omc_arena_init(&sidecar); source_init(&source, 1);
-    opaque = source.entries[1]; omc_key_make_photoshop_irb(&opaque.key, 0x0404U);
-    opaque.flags = 0U;
-    assert(omc_store_add_entry(&source, &opaque, NULL) == OMC_STATUS_OK);
-    source.entries[1].flags |= OMC_ENTRY_FLAG_DELETED;
+    source.entries[1].flags = OMC_ENTRY_FLAG_DELETED;
     resource(&irb, 0x0404U, 3U, 0x73U); segment(&original_segment, &irb);
     append(&file, "\377\330", 2U); append(&file, original_segment.data, original_segment.size);
     append(&file, "\377\331", 2U);
     assert(execute(file.data, file.size, &source, &out, &sidecar, &res) == OMC_TRANSFER_OK);
-    /* No replacement payload is not a request to redact destination IPTC. */
+    /* A clean tombstone has no destination-removal authority. */
     (void)find_bytes(&out, &original_segment);
+    opaque = source.entries[1]; omc_key_make_photoshop_irb(&opaque.key, 0x0404U);
+    opaque.flags = 0U;
+    assert(omc_store_add_entry(&source, &opaque, NULL) == OMC_STATUS_OK);
+    source.entries[1].flags |= OMC_ENTRY_FLAG_DIRTY;
+    assert(execute(file.data, file.size, &source, &out, &sidecar, &res) == OMC_TRANSFER_OK);
+    /* Explicit native deletion wins over a stale opaque Photoshop resource. */
+    for (i = 0U; i + 14U <= out.size; ++i)
+        assert(memcmp(out.data + i, "Photoshop 3.0\0", 14U) != 0);
     omc_store_fini(&source); omc_arena_fini(&file); omc_arena_fini(&irb);
     omc_arena_fini(&original_segment); omc_arena_fini(&out); omc_arena_fini(&sidecar);
 }
